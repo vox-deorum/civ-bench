@@ -1,0 +1,240 @@
+{
+  "name": "staff-standard-2026",
+  "description": "Staff line-up on the standard 8-seat map: ratings + a trained, a pre-trained, and a cross-validated estimator feeding performance and prediction analyses. `catalogs` is omitted to use the sibling paths.json/models.json/experiments.json.",
+  "seed": 42,
+
+  "filters": {
+    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5 },
+    "llm_only": { "only_llm": true, "min_games": 5 },
+    "late_game": { "turn_range": [200, null] }
+  },
+
+  "data": {
+    "extract": {
+      "enabled": true,
+      "runs_dir": "runs/",
+      "outputs": ["turns", "panel", "timestamps", "tokens"],
+      "max_dbs": null,
+      "prune_missing": false,
+      "force_rebuild": false
+    },
+    "tables": {
+      "turns": "runs/turn_data.csv",
+      "panel": "runs/panel_data.csv",
+      "timestamps": "runs/game_timestamps.csv",
+      "tokens": "runs/model_token_usage.csv"
+    },
+    "filter": "staff_recent"
+  },
+
+  "estimators": [
+    {
+      "id": "score",
+      "model": "score",
+      "fit": "train",
+      "predict": "in_sample",
+      "enabled": true,
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/score/predictions.csv",
+      "train": {
+        "train_subset": "all",
+        "resample": "none",
+        "save_model": "reports/estimators/score/"
+      }
+    },
+    {
+      "id": "attention",
+      "model": "attention_mlp",
+      "fit": "train",
+      "predict": "in_sample",
+      "enabled": true,
+      "features": {
+        "include": null,
+        "exclude": ["civ_*"]
+      },
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/attention/predictions.csv",
+      "tune": {
+        "enabled": true,
+        "engine": "optuna",
+        "search": "hyperparameters",
+        "n_trials": 200,
+        "objective": "brier_score",
+        "n_splits": 5,
+        "resample": "none",
+        "n_jobs": 1,
+        "storage": "reports/estimators/attention/tuning.db",
+        "save_params": "reports/estimators/attention/best_params.json",
+        "load_params": null
+      },
+      "train": {
+        "train_subset": "all",
+        "resample": "none",
+        "save_model": "reports/estimators/attention/"
+      }
+    },
+    {
+      "id": "attention_ref",
+      "model": "attention_mlp",
+      "fit": "pretrained",
+      "enabled": true,
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/attention_ref/predictions.csv",
+      "pretrained": {
+        "model_dir": "reports/reference/attention_2026q1/"
+      }
+    },
+    {
+      "id": "xgboost_cv",
+      "model": "xgboost",
+      "fit": "train",
+      "predict": "cross_val",
+      "enabled": true,
+      "save_predictions": "reports/estimators/xgboost_cv/oof_predictions.csv",
+      "train": {
+        "train_subset": "all",
+        "resample": "none",
+        "n_splits": 5,
+        "save_importance": true
+      }
+    }
+  ],
+
+  "analyses": [
+    {
+      "id": "bt_main",
+      "module": "ratings.bradley_terry",
+      "enabled": true,
+      "params": { "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false }
+    },
+    {
+      "id": "pl_main",
+      "module": "ratings.plackett_luce",
+      "enabled": true,
+      "params": { "ref": "Vanilla", "min_games": 5 }
+    },
+    {
+      "id": "strategy_elo",
+      "module": "ratings.strategy_elo",
+      "enabled": true,
+      "params": {
+        "strategy_cols": ["domination_ratio", "culture_ratio", "diplomatic_ratio", "science_ratio"],
+        "min_games": 5
+      }
+    },
+    {
+      "id": "matchups",
+      "module": "ratings.matchups",
+      "enabled": true,
+      "params": { "mode": "mean", "validate_ols": true }
+    },
+    {
+      "id": "bt_bootstrap",
+      "module": "ratings.bootstrap_bt",
+      "enabled": true,
+      "params": { "n_bootstrap": 1000, "weighted": true }
+    },
+    {
+      "id": "pred_metrics",
+      "module": "prediction.evaluate",
+      "enabled": true,
+      "uses": { "estimators": ["score", "attention", "attention_ref", "xgboost_cv"] },
+      "params": { "metrics": ["roc_auc", "brier_score", "log_loss", "balanced_accuracy"] }
+    },
+    {
+      "id": "pred_calibration",
+      "module": "prediction.calibration",
+      "enabled": true,
+      "uses": { "estimators": ["xgboost_cv"] },
+      "params": { "n_bins": 10 }
+    },
+    {
+      "id": "pred_loss_progress",
+      "module": "prediction.loss_by_progress",
+      "enabled": true,
+      "uses": { "estimators": ["score", "xgboost_cv"] },
+      "filter": "late_game",
+      "params": { "n_bins": 20 }
+    },
+    {
+      "id": "pred_vs_elo",
+      "module": "prediction.elo_comparison",
+      "enabled": true,
+      "uses": { "estimators": ["attention"] },
+      "needs": ["bt_main"],
+      "params": {}
+    },
+    {
+      "id": "perf_score_ratio",
+      "module": "performance.score_ratio",
+      "enabled": true,
+      "params": { "target": "score_ratio", "predictors": ["player_type", "civilization"] }
+    },
+    {
+      "id": "perf_strength",
+      "module": "performance.strength_panel",
+      "enabled": true,
+      "params": { "metric": "adjusted_strength", "by": "player_type" }
+    },
+    {
+      "id": "perf_turn_predicted",
+      "module": "performance.turn_predicted",
+      "enabled": true,
+      "uses": { "estimators": ["attention"] },
+      "params": { "aggregate": "mean", "by": "player_type" }
+    },
+    {
+      "id": "perf_perm_importance",
+      "module": "performance.permutation_importance",
+      "enabled": true,
+      "uses": { "estimators": ["xgboost_cv"] },
+      "params": { "n_repeats": 20, "groups": "feature_families" }
+    },
+    {
+      "id": "behavior_flavor_clusters",
+      "module": "behavior.flavor_change_clusters",
+      "enabled": true,
+      "params": { "n_clusters": 8 }
+    },
+    {
+      "id": "behavior_pivot",
+      "module": "behavior.pivot_rationale",
+      "enabled": true,
+      "params": { "min_pivots": 1 }
+    },
+    {
+      "id": "behavior_victory_commitment",
+      "module": "behavior.victory_commitment",
+      "enabled": true,
+      "params": { "window": 10 }
+    },
+    {
+      "id": "explore_panel",
+      "module": "exploratory.panel",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "explore_strategy_profiles",
+      "module": "exploratory.strategy_profiles",
+      "enabled": true,
+      "params": { "by": "player_type" }
+    },
+    {
+      "id": "explore_token_costs",
+      "module": "exploratory.model_token_costs",
+      "enabled": true,
+      "uses": { "tables": ["tokens"] },
+      "params": { "currency": "usd" }
+    }
+  ],
+
+  "report": {
+    "template": "default",
+    "out_dir": "reports/",
+    "formats": ["md", "html"],
+    "sections": null,
+    "title": null,
+    "include_disabled": false
+  }
+}
