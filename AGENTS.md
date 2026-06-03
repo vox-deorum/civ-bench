@@ -51,6 +51,9 @@ civ-bench/
 │   ├── estimators/               # prediction-model producers: tune / train / load / infer
 │   │   ├── registry.py           # name → predictor class (port of models/utils/model_registry.py)
 │   │   └── models/               # score / baseline / xgboost / mlp / grouped / interaction / attention
+│   ├── adjust/                   # derived-table stages: estimator P(win) → strength panel
+│   │   ├── registry.py           # name → adjust class (currently: strength)
+│   │   └── strength.py           # adjusted_strength derivation (port of turn_predicted's prepare_strength_data)
 │   ├── analyses/                 # ── pluggable analysis modules ──
 │   │   ├── base.py               # Analysis interface + registry (name → class)
 │   │   ├── ratings/              # Bradley-Terry / Plackett-Luce / Elo / matchups
@@ -65,15 +68,16 @@ civ-bench/
 
 ## The pipeline model
 
-`civ-bench` is a **directed acyclic graph of stages**, not a fixed script. There are four stage
+`civ-bench` is a **directed acyclic graph of stages**, not a fixed script. There are five stage
 kinds, and they run in dependency order:
 
 ```
-extract ──▶ estimators ──▶ analyses ──▶ report
-   │            │              │            │
-canonical   trained or     ratings /    templated
-  CSVs       pre-trained    performance /  markdown
-            predictors      behavior       + html
+extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
+   │            │             │           │            │
+canonical   trained or     strength    ratings /    templated
+  CSVs       pre-trained     panel      performance /  markdown
+            predictors    (adjusted_   behavior       + html
+                           strength)
 ```
 
 - **`extract`** turns raw game DBs in `runs/` into canonical CSVs (`turn_data`, `panel_data`,
@@ -82,9 +86,15 @@ canonical   trained or     ratings /    templated
 - **`estimators`** are prediction-model producers. Each is either **trained** on the current data
   (optionally tuned first) or loaded **pre-trained** from a saved model directory, then run to emit
   `predicted_win_probability`. They must run **before** any analysis that consumes their output.
-- **`analyses`** are the pluggable modules. `ratings.*` need only `panel_data`; `performance.*`
-  that use win-probabilities **depend on an estimator**; `behavior.*`/`exploratory.*` are
-  descriptive over the canonical CSVs.
+- **`adjust`** (optional) turns an estimator's per-turn win-probabilities into a per-player-game
+  **strength panel** (`adjusted_strength`): late-game weighted average → relative-to-leader →
+  winner enforcement → OLS civilization adjustment. It registers that panel as a named `strength`
+  table, and it is what makes the rating models depend (transitively) on an estimator.
+- **`analyses`** are the pluggable modules. **`ratings.*` consume the `strength` table** (they rate
+  `adjusted_strength`, not raw `panel_data`, so they depend on an `adjust` stage); `prediction.*` and
+  the predicted-strength `performance.*` **depend on an estimator**; `behavior.*`/`exploratory.*` are
+  mostly descriptive over the canonical CSVs, though a few (e.g. `victory_commitment`,
+  `strategy_profiles`) also read the `strength` table.
 - **`report`** walks the produced artifacts and renders them.
 
 There is **no graceful degradation**: every dependency is installed up front via `scripts/install`,
@@ -124,6 +134,11 @@ place in the document.
 - **Estimators are producers, not analyses.** Training, tuning, saving, and loading predictors live
   under `civ_bench/estimators/`. An estimator either trains on the current run or loads pre-trained
   weights; either way it exposes the same predictions artifact to downstream analyses.
+- **`adjust` stages are derived-table producers, not analyses.** They live under `civ_bench/adjust/`,
+  consume an estimator's predictions, and emit a named table (e.g. `strength`) that downstream stages
+  reference via `uses.tables`. The derivation logic (the strength panel) belongs here once, not
+  duplicated inside each `ratings.*` module — which is exactly the bug being fixed from the old repo,
+  where `prepare_strength_data` was copied between `turn_predicted.ipynb` and `iterative_bt.py`.
 - **Determinism.** Same config + same `runs/` data ⇒ byte-stable tables. Thread `seed` from config;
   never call un-seeded RNGs.
 - **All dependencies are mandatory — no soft-fail.** `torch` / `xgboost` / `optuna` / R packages are

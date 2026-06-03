@@ -15,23 +15,27 @@ For the run-spec schema, read [configs/benchmark.md](configs/benchmark.md).
 
 ## End-to-end flow
 
-The package is `civ_bench/`. The pipeline is a configurable DAG of four stage kinds, all driven by
+The package is `civ_bench/`. The pipeline is a configurable DAG of five stage kinds, all driven by
 `configs/benchmark.json`:
 
 ```
-raw game DBs ──▶ extract ──▶ canonical CSVs ──▶ estimators ──▶ analyses ──▶ report
-                  │             │                  │              │            │
-              runs/         configs/           train OR       registry +   templated
-            (gitignored)   paths.json        pre-trained      configs/    markdown/html
-                                              predictors      benchmark    → reports/
+raw game DBs ──▶ extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
+                  │             │             │           │            │
+              canonical     train OR      strength    registry +   templated
+                CSVs       pre-trained      panel      configs/    markdown/html
+                           predictors    (adjusted-   benchmark    → reports/
+                                          strength)
 ```
 
 - **extract** — game SQLite DBs → `turn_data` / `panel_data` / `game_timestamps` /
   `model_token_usage` CSVs.
 - **estimators** — victory-probability predictors, either trained (optionally tuned) on the current
   data or loaded **pre-trained**, then run to emit `predicted_win_probability`.
-- **analyses** — pluggable modules: `ratings.*`, `prediction.*`, `performance.*`, `behavior.*`,
-  `exploratory.*`.
+- **adjust** — turns an estimator's per-turn win-probabilities into the per-player-game **strength
+  panel** (`adjusted_strength`), registered as a named `strength` table. This is the bridge the
+  rating models sit on; it makes `ratings.*` depend (transitively) on an estimator.
+- **analyses** — pluggable modules: `ratings.*` (rate the `strength` table), `prediction.*`,
+  `performance.*`, `behavior.*`, `exploratory.*`.
 - **report** — assembles the produced artifacts into markdown/html.
 
 See [AGENTS.md](AGENTS.md#the-pipeline-model) for the stage model and [configs/benchmark.md](configs/benchmark.md)
@@ -49,8 +53,9 @@ Port the **logic**, drop the **flatness and the data**. Rough correspondence:
 | `shared/config/*.json`                   | `configs/*.json`                             | Same schema; now the primary control surface, not a side file. |
 | `shared/plot_styles.py`, `plot_utilities.py`, `regression_utilities.py` | `civ_bench/plotting/` | Keep style/color logic; trim notebook-only helpers. |
 | `models/` (compare/evaluate/tune + registry) | `civ_bench/estimators/`                  | Predictor registry pattern is already good — fold tune/train/load/infer behind the estimator config block. |
+| `performance/turn_predicted.ipynb` → `prepare_strength_data` (also copied in `ratings/iterative_bt.py`) | `civ_bench/adjust/strength.py` | The strength-panel derivation: estimator `predicted_win_probability` → `adjusted_strength`. It is its own **`adjust` stage**, not an analysis, because every `ratings.*` consumes its `strength` table. |
 | `predict/` (loader + calibration/comparison notebooks) | `civ_bench/analyses/prediction/` | Convert the visualize-* notebooks into generated report sections. |
-| `ratings/` (BT, PL, Elo, matchups; R+py) | `civ_bench/analyses/ratings/`                | Keep R interop where it exists; wrap each as an Analysis. |
+| `ratings/` (BT, PL, strategy-Elo, matchups; R+py) | `civ_bench/analyses/ratings/`           | Keep R interop where it exists; wrap each as an Analysis. Each rates the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. |
 | `performance/`, `exploratory/`, `behaviors/` notebooks | `civ_bench/analyses/{performance,behavior}/` + report templates | Convert notebook narratives into generated report sections. |
 | checked-in CSVs, `*/output/`, `ratings/output/`, `behaviors/nuke/` | **not ported** | Raw data goes in `runs/` (gitignored); results regenerate into `reports/`. |
 | `template.md` + `sync-template.sh` + template branch | **obsolete** | The whole repo is now reusable by design; no template branch needed. |
@@ -68,9 +73,10 @@ per-module params.)
 - **extract** — `extract`
 - **estimators** (`civ_bench/estimators/`, selected by `model` id): `naive`, `score`, `baseline`,
   `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`
-- **ratings** — `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.elo`,
+- **adjust** (`civ_bench/adjust/`, derived tables): `strength`
+- **ratings** — `ratings.bradley_terry`, `ratings.plackett_luce`,
   `ratings.strategy_elo`, `ratings.matchups`, `ratings.bootstrap_bt`, `ratings.iterative_bt`,
-  `ratings.vanilla_slot_effect`, `ratings.ablation_bt`
+  `ratings.vanilla_slot_effect`
 - **prediction** (estimator-facing analyses) — `prediction.evaluate`, `prediction.compare`,
   `prediction.calibration`, `prediction.loss_by_progress`, `prediction.winner_trajectories`,
   `prediction.elo_comparison`, `prediction.context_slicing`
@@ -95,5 +101,8 @@ Greenfield. The repo is an empty checkout; this document plus [AGENTS.md](AGENTS
    topo-sort, run stages).
 3. Port `civ_bench/extract/` and `civ_bench/data/`.
 4. Port one estimator end-to-end (`score` is the cleanest) through `civ_bench/estimators/`.
-5. Port one analysis end-to-end (`ratings.bradley_terry`) through to a generated report — this
-   proves the full pipeline before migrating the rest.
+5. Port the `adjust` stage (`strength`, from `turn_predicted`'s `prepare_strength_data`) so the
+   estimator's predictions become the `adjusted_strength` panel.
+6. Port one analysis end-to-end (`ratings.bradley_terry`, consuming the `strength` table) through to
+   a generated report — this proves the full extract → estimator → adjust → analysis → report
+   pipeline before migrating the rest.

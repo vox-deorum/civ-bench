@@ -100,23 +100,43 @@
     }
   ],
 
+  "adjust": [
+    {
+      "id": "strength",
+      "module": "strength",
+      "enabled": true,
+      "uses": { "estimators": ["attention"] },
+      "save": "reports/adjust/player_strength_panel.csv",
+      "params": {
+        "turn_progress_min": 0.2,
+        "weight": "turn_progress",
+        "relative_to": "game_leader",
+        "enforce_winner": true,
+        "civ_adjust": "ols_logit"
+      }
+    }
+  ],
+
   "analyses": [
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false }
     },
     {
       "id": "pl_main",
       "module": "ratings.plackett_luce",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "ref": "Vanilla", "min_games": 5 }
     },
     {
       "id": "strategy_elo",
       "module": "ratings.strategy_elo",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": {
         "strategy_cols": ["domination_ratio", "culture_ratio", "diplomatic_ratio", "science_ratio"],
         "min_games": 5
@@ -126,12 +146,14 @@
       "id": "matchups",
       "module": "ratings.matchups",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "mode": "mean", "validate_ols": true }
     },
     {
       "id": "bt_bootstrap",
       "module": "ratings.bootstrap_bt",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "n_bootstrap": 1000, "weighted": true }
     },
     {
@@ -174,6 +196,7 @@
       "id": "perf_strength",
       "module": "performance.strength_panel",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "metric": "adjusted_strength", "by": "player_type" }
     },
     {
@@ -206,6 +229,7 @@
       "id": "behavior_victory_commitment",
       "module": "behavior.victory_commitment",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "window": 10 }
     },
     {
@@ -218,6 +242,7 @@
       "id": "explore_strategy_profiles",
       "module": "exploratory.strategy_profiles",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "by": "player_type" }
     },
     {

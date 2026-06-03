@@ -16,20 +16,27 @@ same change.
 
 ## 1. The pipeline as a DAG
 
-A run is a **directed acyclic graph of stages** in four kinds, executed in dependency order:
+A run is a **directed acyclic graph of stages** in five kinds, executed in dependency order:
 
 ```
-extract ──▶ estimators ──▶ analyses ──▶ report
+extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
 ```
+
+`adjust` is the bridge between raw predictions and the rating models: it turns an estimator's
+per-turn win-probabilities into a per-player-game **strength panel** (`adjusted_strength`) and
+registers it as a named table that `ratings.*` (and some `performance.*`) analyses consume (§5). It
+is optional — a run with no estimators or ratings simply omits it.
 
 Each stage has a stable **`id`**. Edges come from three places, all resolved into one topological
 sort before anything runs:
 
-1. **Kind ordering (implicit).** `extract` → `estimators` → `analyses` → `report`, always.
+1. **Kind ordering (implicit).** `extract` → `estimators` → `adjust` → `analyses` → `report`, always.
 2. **`needs` (explicit).** A stage may list other stage `id`s it must run after. Use this to force
    ordering the harness can't infer (e.g. one analysis consuming another's CSV).
-3. **`uses` (referential).** When a stage references an estimator `id` (or a named table) in its
-   `uses` block, an edge is created automatically — you don't also have to write `needs`.
+3. **`uses` (referential).** When a stage references an estimator `id` or a named table in its
+   `uses` block, an edge is created automatically — you don't also have to write `needs`. A
+   `uses.tables` name may be a canonical table from `data.tables` **or** a table produced by an
+   `adjust` stage (§5); referencing it creates an edge to that stage.
 
 A cycle, an unknown `id`, or a reference to a disabled stage is a validation error. Disabled stages
 (`"enabled": false`) are dropped from the graph, and anything that *needed* one is a validation
@@ -60,14 +67,16 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
 
   "data":       { /* §3  */ },           // required: extraction + canonical tables + global filter
   "estimators": [ /* §4  */ ],           // optional: prediction-model producers
-  "analyses":   [ /* §5  */ ],           // required: the modules to run
-  "report":     { /* §6  */ }            // required: rendering
+  "adjust":     [ /* §5  */ ],           // optional: derived-table stages (e.g. the strength panel)
+  "analyses":   [ /* §6  */ ],           // required: the modules to run
+  "report":     { /* §7  */ }            // required: rendering
 }
 ```
 
 Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`,
-`catalogs`, `filters`, and `estimators` are optional (omit `estimators` for a ratings/behavior-only
-run).
+`catalogs`, `filters`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a
+ratings-free / behavior-only run; conversely, any `ratings.*` analysis needs an `adjust` stage to
+supply the `strength` table it rates.
 
 **`catalogs` defaults to sibling files.** If omitted, the harness loads `paths.json`, `models.json`,
 and `experiments.json` from the **same directory as this `benchmark.json`**. Set a key only to point
@@ -106,7 +115,7 @@ further, never widen).
 
 - **`filter` is optional** — omit it for "all rows". It accepts either an inline filter object or the
   **name of a preset** from top-level `filters` (§3.1). Every stage inherits this global filter and
-  may narrow it (§5.1), never widen it.
+  may narrow it (§6.1), never widen it.
 - **`extract.enabled: false`** is the "I already have CSVs" switch — the `extract` stage is dropped
   from the DAG and loaders read `tables.*` directly. Combine with `--skip extract` on the CLI for
   the same effect ad hoc.
@@ -151,7 +160,7 @@ The full filter shape (every field optional; omitted ⇒ no constraint):
   win per field). E.g. `"filter": ["llm_only", { "turn_range": [200, null] }]`.
 
 A stage's `filter` is then **intersected** with the resolved global `data.filter` — a stage can only
-narrow, never widen (§5.1). Referencing an undefined preset name is a validation error.
+narrow, never widen (§6.1). Referencing an undefined preset name is a validation error.
 
 ---
 
@@ -175,7 +184,7 @@ It always emits the same artifact, regardless of how it was obtained:
 > importance table.
 
 **Computing metrics is not the estimator's job.** Scoring a `predictions.csv` (ROC-AUC, Brier, …) is
-the separate `prediction.evaluate` / `prediction.compare` analysis step (§5.2). See §4.7 for why
+the separate `prediction.evaluate` / `prediction.compare` analysis step (§6.2). See §4.7 for why
 that split matters.
 
 ### 4.1 Entry shape
@@ -247,7 +256,7 @@ entirely by pointing at a previously saved best-params file (a *pre-trained hype
 ```
 
 - Tuning optimizes a **single scalar** `objective` (an objective must be scalar). Reporting *many*
-  metrics is a different concern — that's `prediction.evaluate` (§5.2), which takes a `metrics` list.
+  metrics is a different concern — that's `prediction.evaluate` (§6.2), which takes a `metrics` list.
 - `load_params` set ⇒ tuning is skipped; the saved `best_params.json` is loaded as the
   hyperparameters. This is the cheap path for "reuse the tuning we already did" — a *pre-trained
   hyperparameter set*.
@@ -311,7 +320,7 @@ conflated two separable things:
   on the `predict` axis (`in_sample` | `cross_val`).
 - **Scoring predictions** — computing ROC-AUC / Brier / log-loss / balanced-accuracy from a
   `predictions.csv`. That reads an artifact and reports numbers; it owns no model. It is, and always
-  was, an **analysis**: `prediction.evaluate` / `prediction.compare` (§5.2).
+  was, an **analysis**: `prediction.evaluate` / `prediction.compare` (§6.2).
 
 So **"evaluate an estimator" = point a `prediction.evaluate` analysis at it.** To evaluate honestly,
 give the estimator `predict: cross_val` so the analysis scores held-out predictions; to inspect a
@@ -321,12 +330,62 @@ by burying scoring inside each producer.
 
 ---
 
-## 5. `analyses` — the pluggable modules
+## 5. `adjust` — derived tables (the strength panel)
+
+`adjust` is an **optional list of derived-table stages** that run after `estimators` and before
+`analyses`. Each entry takes an estimator's win-probabilities and emits a per-player-game table that
+downstream analyses reference by name via `uses.tables`. Today there is one module, `strength`, but
+the kind is a list so a run can derive several tables (or the same one from different estimators).
+
+The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_data`; it is run over
+**`adjusted_strength`**, a skill estimate distilled from an estimator's per-turn `predicted_win_probability`.
+That distillation (late-game weighted average → relative-to-leader → winner enforcement → OLS
+civilization adjustment) is real work with its own knobs, shared by every rating, so it is its own
+stage rather than buried inside each `ratings.*` module.
+
+### 5.1 Entry shape
+
+```jsonc
+{
+  "id": "strength",                      // required: unique; ALSO the produced table name
+                                         //   (downstream stages do uses.tables: ["strength"])
+  "module": "strength",                  // required: adjust-registry name (currently only "strength")
+  "enabled": true,
+  "uses": { "estimators": ["attention"] },  // required: the estimator whose P(win) defines strength
+                                            //   (creates the estimator → adjust edge)
+  "save": "reports/adjust/player_strength_panel.csv",  // optional, sensible default
+  "needs": [],                           // optional explicit deps (usually inferred from `uses`)
+
+  "params": {                            // module-specific; unlisted keys → coded defaults
+    "turn_progress_min": 0.2,            // ignore the opening; average over late-game turns only
+    "weight": "turn_progress",           // weight each turn's P(win) by progress when averaging
+    "relative_to": "game_leader",        // normalize each seat to the strongest seat in its game
+    "enforce_winner": true,              // force the actual winner to relative_strength = 1.0
+    "civ_adjust": "ols_logit"            // subtract civilization effects (OLS on the logit) →
+                                         //   adjusted_strength; "none" leaves it = relative_strength
+  }
+}
+```
+
+- The stage `id` doubles as the **table name** it registers — exactly as an estimator `id` names its
+  `predictions.csv`. A consumer writes `uses.tables: ["strength"]` (not the stage's literal output
+  path), and the harness adds the edge.
+- `uses.estimators` is **required and single-source** in practice: strength is defined relative to one
+  predictor's win-probabilities. Point it at a `cross_val` estimator for out-of-fold-honest strength,
+  or an `in_sample`/`pretrained` one to mirror a deployed model.
+- The emitted table is per-player-game with at least `game_id, player_id, player_type, civilization,
+  adjusted_strength` — the exact columns `ratings.*` require (§6.2).
+- `civ_adjust: "none"` skips the OLS step (then `adjusted_strength == relative_strength`); any other
+  value selects an adjustment scheme (currently `ols_logit`).
+
+---
+
+## 6. `analyses` — the pluggable modules
 
 A list of analysis stages. Every entry shares a common envelope; the `params` block is
-module-specific (catalog in §5.2). Order in the list is irrelevant — the DAG decides execution.
+module-specific (catalog in §6.2). Order in the list is irrelevant — the DAG decides execution.
 
-### 5.1 Common envelope
+### 6.1 Common envelope
 
 ```jsonc
 {
@@ -336,62 +395,69 @@ module-specific (catalog in §5.2). Order in the list is irrelevant — the DAG 
   "needs": [],                           // optional explicit deps
   "uses": {                              // optional artifact references (create auto-edges)
     "estimators": ["attention", "score"],   // estimator ids → their predictions.csv
-    "tables": ["panel"]                      // canonical table names from data.tables
+    "tables": ["panel", "strength"]          // canonical (data.tables) OR an adjust stage's table (§5)
   },
   "filter": "late_game",                 // optional: preset name, inline object, or list (§3.1);
                                          //   NARROWS the global filter for this stage
-  "params": { /* module-specific, see §5.2 */ }
+  "params": { /* module-specific, see §6.2 */ }
 }
 ```
 
 - `uses.estimators` is how `performance.*` / `prediction.*` modules get win-probabilities, and it is
   what makes them depend on (run after) those estimators.
+- `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). The
+  `ratings.*` family consumes the derived `strength` table this way; referencing it adds the edge to
+  the `adjust` stage (and transitively to its estimator).
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is
   intersected with the resolved global filter; a stage can only narrow, never widen.
 
-### 5.2 Module params catalog
+### 6.2 Module params catalog
 
 Every registry name `civ-bench` will ship, with its key params. Unlisted params fall back to coded
 defaults; unknown params are validation errors.
 
-#### `ratings.*` — consume `panel` (no estimator)
+#### `ratings.*` — consume the `strength` table from an `adjust` stage (§5)
+
+Every `ratings.*` analysis rates `adjusted_strength`, so each one references an `adjust` stage's table
+via `uses.tables: ["strength"]` (shown once below; the same `uses` applies to all). They do **not**
+read `panel_data` directly, and they depend transitively on the estimator that fed the `adjust` stage.
 
 ```jsonc
 // ratings.bradley_terry — BT MLE with pairwise score weights (R: BradleyTerry2)
 { "module": "ratings.bradley_terry",
+  "uses": { "tables": ["strength"] },
   "params": { "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false } }
 
 // ratings.plackett_luce — PL MLE over per-game rankings (R: PlackettLuce)
 { "module": "ratings.plackett_luce",
+  "uses": { "tables": ["strength"] },
   "params": { "ref": "Vanilla", "min_games": 5 } }
-
-// ratings.elo — sequential/online Elo over game outcomes
-{ "module": "ratings.elo",
-  "params": { "k": 32, "initial": 1500, "order_by": "timestamp" } }
 
 // ratings.strategy_elo — composite {PlayerType}-{Strategy} identities, single BT fit
 { "module": "ratings.strategy_elo",
+  "uses": { "tables": ["strength"] },
   "params": { "strategy_cols": ["domination_ratio","culture_ratio","diplomatic_ratio","science_ratio"],
               "min_games": 5 } }
 
 // ratings.matchups — empirical head-to-head matrices + OLS validation
 { "module": "ratings.matchups",
+  "uses": { "tables": ["strength"] },
   "params": { "mode": "mean", "validate_ols": true } }
 
 // ratings.bootstrap_bt — bootstrap CIs around BT ratings
 { "module": "ratings.bootstrap_bt",
+  "uses": { "tables": ["strength"] },
   "params": { "n_bootstrap": 1000, "weighted": true } }
 
-// ratings.iterative_bt — iterative/leave-one-experiment-out BT for stability
+// ratings.iterative_bt — incrementally add each player type's games (chronologically) and track
+//   Elo convergence; isolates each game's marginal contribution. (Also writes the ablation_bt_* CSV.)
 { "module": "ratings.iterative_bt",
+  "uses": { "tables": ["strength"] },
   "params": { "weighted": true } }
 
 // ratings.vanilla_slot_effect — tests whether seat position confounds Vanilla rating
-{ "module": "ratings.vanilla_slot_effect", "params": {} }
-
-// ratings.ablation_bt — feature/condition ablations of the BT fit
-{ "module": "ratings.ablation_bt",
-  "params": { "ablate": ["weighted", "score_margin"] } }
+{ "module": "ratings.vanilla_slot_effect",
+  "uses": { "tables": ["strength"] }, "params": {} }
 ```
 
 #### `prediction.*` — consume one or more estimators (`uses.estimators` required)
@@ -427,18 +493,20 @@ defaults; unknown params are validation errors.
   "uses": { "estimators": ["attention"] }, "params": { "by": ["experiment","player_type"] } }
 ```
 
-#### `performance.*` — strength + score, some need an estimator
+#### `performance.*` — strength + score, some need the `strength` table
 
 ```jsonc
 // performance.score_ratio — per-player score-ratio regressions (consumes panel)
 { "module": "performance.score_ratio",
   "params": { "target": "score_ratio", "predictors": ["player_type","civilization"] } }
 
-// performance.strength_panel — adjusted-strength panels by player type (consumes panel)
+// performance.strength_panel — summarizes the adjust stage's strength table by player type.
+//   It CONSUMES the `strength` table (does not derive it — that's the adjust stage, §5).
 { "module": "performance.strength_panel",
+  "uses": { "tables": ["strength"] },
   "params": { "metric": "adjusted_strength", "by": "player_type" } }
 
-// performance.turn_predicted — strength derived from an estimator's win-probabilities
+// performance.turn_predicted — P(win) / strength trajectory over the game from an estimator
 { "module": "performance.turn_predicted",
   "uses": { "estimators": ["attention"] },
   "params": { "aggregate": "mean", "by": "player_type" } }
@@ -455,7 +523,8 @@ defaults; unknown params are validation errors.
 { "module": "behavior.flavor_change_clusters",     "params": { "n_clusters": 8 } }
 { "module": "behavior.flavor_change_decomposition","params": { "components": 5 } }
 { "module": "behavior.pivot_rationale",            "params": { "min_pivots": 1 } }
-{ "module": "behavior.victory_commitment",         "params": { "window": 10 } }
+// victory_commitment correlates commitment with adjusted_strength → needs the strength table
+{ "module": "behavior.victory_commitment", "uses": { "tables": ["strength"] }, "params": { "window": 10 } }
 { "module": "behavior.nuke_flavor_rationale",      "params": {} }
 ```
 
@@ -464,7 +533,8 @@ defaults; unknown params are validation errors.
 ```jsonc
 { "module": "exploratory.panel",            "params": {} }
 { "module": "exploratory.turn",             "params": {} }
-{ "module": "exploratory.strategy_profiles","params": { "by": "player_type" } }
+// strategy_profiles joins strategy mix against adjusted_strength → needs the strength table
+{ "module": "exploratory.strategy_profiles","uses": { "tables": ["strength"] }, "params": { "by": "player_type" } }
 // model_token_costs uses tokens table + pricing from models.json
 { "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
   "params": { "currency": "usd" } }
@@ -472,7 +542,7 @@ defaults; unknown params are validation errors.
 
 ---
 
-## 6. `report` — rendering
+## 7. `report` — rendering
 
 ```jsonc
 "report": {
@@ -492,21 +562,27 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
 
 ---
 
-## 7. Validation rules (enforced on load)
+## 8. Validation rules (enforced on load)
 
-1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs` is optional
-   (defaults to sibling files; each catalog must still resolve to a readable file).
+1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`,
+   and `adjust` are optional (`catalogs` defaults to sibling files; each catalog must still resolve to
+   a readable file).
 2. **No unknown keys** at any level — typos fail loud.
-3. **Unique ids** across `estimators` + `analyses`; `needs`/`uses` must reference existing,
+3. **Unique ids** across `estimators` + `adjust` + `analyses`; `needs`/`uses` must reference existing,
    enabled ids.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`);
    `predict: cross_val` and `tune` are valid only with `fit: train`.
-6. **Registry membership**: every `module` resolves in the analysis registry; every estimator
-   `model` resolves in `catalogs.models` `prediction_models`.
-7. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; a stage
+6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust`
+   `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves
+   in `catalogs.models` `prediction_models`.
+7. **Adjust wiring**: each `adjust` stage must declare exactly one estimator in `uses.estimators`. A
+   `uses.tables` name must resolve to either a `data.tables` key or an enabled `adjust` stage `id`;
+   any `ratings.*` analysis must reference a `strength` table (no `adjust` stage ⇒ a `ratings.*`
+   analysis is a validation error, since there is nothing to rate).
+8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; a stage
    `filter` may not select experiments/players/turns excluded by the resolved global `data.filter`;
    a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable).
-8. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled
+9. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled
    package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install`
    first so every dependency is present.
