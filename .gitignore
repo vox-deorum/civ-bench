@@ -1,0 +1,30 @@
+# ── civ-bench ignores ─────────────────────────────────────────────────────
+
+# Raw game-run input data + canonical CSVs, and generated reports/figures/
+# trained estimators (see AGENTS.md "Repo layout"). Nothing experiment-specific
+# beyond configs/ examples lives in git.
+runs/
+reports/
+reports-*/
+
+# Concrete benchmark run-specs are LOCAL and gitignored — they point at real
+# data roots (e.g. J:/) or machine-specific paths. Only the *.template.json
+# examples (and the catalogs + benchmark.md schema) are tracked. Copy a template
+# to a local configs/benchmark*.json to actually run.
+configs/benchmark*.json
+!configs/benchmark*.template.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Optuna study DBs / local scratch
+*.db
