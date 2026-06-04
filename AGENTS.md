@@ -1,7 +1,7 @@
 # AGENTS.md — conventions for working in `civ-bench`
 
 This file is the **rulebook**. It tells any agent (human or model) *how* to build and change
-`civ-bench`. For *what* we're building and the current roadmap, see [plan.md](plan.md). For the
+`civ-bench`. For *what* we're building and the current roadmap, see [plans/plan.md](plans/plan.md). For the
 full schema of the run spec, see [configs/benchmark.md](configs/benchmark.md).
 
 `civ-bench` is a modular, JSON-configurable Python **benchmark harness** for LLM strategists in
@@ -33,7 +33,7 @@ This is the authoritative tree. Build it out incrementally; not all of it exists
 ```text
 civ-bench/
 ├── AGENTS.md                     # this file — conventions
-├── plan.md                       # roadmap, migration map, status
+├── plans/                        # roadmap + staged build plan
 ├── README.md
 ├── pyproject.toml                # installable: `pip install -e .`, exposes `civ-bench` CLI
 ├── configs/                      # ── the JSON control surface ──

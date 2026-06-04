@@ -9,7 +9,8 @@
 
 - `civ_bench/extract/` — port `../vox-deorum-analysis/extract/` (`__main__.py`, `extract_turns.py`,
   `extract_panel.py`, `extract_model_tokens.py`, `utilities.py`). Keep the DB-discovery + extractor
-  logic; **strip hardcoded paths** — drive roots from `configs/paths.json`.
+  logic; **strip hardcoded paths** — drive roots from `data.extract.runs_dir` / `data.tables.*`, consulting
+  the paths catalog only when an enabled configuration actually provides or requires it.
 
 ### New: import controlled seeds/seating + orthodox player_type (benchmark.md §3.3)
 
@@ -18,12 +19,13 @@ per-player identity. Extraction pulls them and writes them **lean** — per-game
 identity in `panel_data`, nothing new on the huge `turn_data` except the composed `player_type`:
 
 - **`extract_seeding_fields(metadata)`** (in `utilities.py`): read `configuredMapRandSeed` /
-  `configuredSyncRandSeed` and **assert they are equal — a mismatch ABORTS extraction** (game_seed ≡ map_seed
-  is an invariant). Set a single `seed` = the controlled value, else **`-1`** (uncontrolled). Read
-  `seatingRotation`, else **`-1`**. Read `seatingMap` and invert it to a per-player `config_slot`
-  (`player_id` when uncontrolled). `seating_seed_index` is **not extracted** — the actual `seed` value
-  subsumes the array index. The two `-1` sentinels replace what would otherwise be `seeds_controlled` /
-  `seating_controlled` boolean columns; `controlled` is derived downstream as
+  `configuredSyncRandSeed`. Vox Deorum supports distinct sync/map seeds, but civ-bench's controlled-design
+  benchmark intentionally requires matched starts, so configured controlled rows must have equal sync/map
+  values; a mismatch **ABORTS extraction** with a clear policy error. Set a single `seed` = the controlled
+  value, else **`-1`** (uncontrolled). Read `seatingRotation`, else **`-1`**. Read `seatingMap` and invert it
+  to a per-player `config_slot` (`player_id` when uncontrolled). `seating_seed_index` is **not extracted** —
+  the actual `seed` value subsumes the array index. The two `-1` sentinels replace what would otherwise be
+  `seeds_controlled` / `seating_controlled` boolean columns; `controlled` is derived downstream as
   `seed != -1 and seating_rotation != -1`.
 - **Orthodox `player_type`** — compose at extract via `civ_bench/catalog/compose_player_type` from the
   per-player `model-{id}` + `strategist-{id}` metadata (benchmark.md §3.3). This **replaces** the old
@@ -35,7 +37,7 @@ identity in `panel_data`, nothing new on the huge `turn_data` except the compose
 
 - **`game_data.csv`** (rename of `game_timestamps.csv`, config key `games`) — one row per game:
   `game_id, timestamp, experiment, seed, seating_rotation`. `seed`/`seating_rotation` use the `-1`
-  uncontrolled sentinel.
+  uncontrolled sentinel. It does **not** carry per-player fields.
 - **`panel_data.csv`** — gains player-level extras: `player_type` (orthodox), `model`, `strategist`,
   `config_slot`. `civilization` stays (seat-bound).
 - **`turn_data.csv`** — **keeps `player_type`** (composed once per (game, player) and broadcast) but stores
@@ -66,7 +68,8 @@ seat map).
 
 - Row/column sanity vs. the old `turn_data.csv`/`panel_data.csv` — turn_data unchanged except for the
   retained `player_type`; `seed`/seating live only in `game_data`; no `seat` column.
-- A fabricated game with `configuredSyncRandSeed != configuredMapRandSeed` **aborts** with a clear error.
+- A fabricated controlled game with `configuredSyncRandSeed != configuredMapRandSeed` **aborts** with a clear
+  civ-bench policy error; uncontrolled games and absent configured seeds still use `-1` sentinels.
 - `player_type` follows `model-{id}`/`strategist-{id}` through a seat rotation; a leading-`-` label appends,
   a non-`-` label overrides, `(condition, slot)` beats `condition`; a legacy game with no metadata falls back
   to the static map.

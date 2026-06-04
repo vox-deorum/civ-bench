@@ -19,8 +19,9 @@
 
 ## The adjustment step — civ (uncontrolled) vs matched start-cell (controlled)
 
-After `logit_strength`, the panel is split by `controlled = (seed != -1 and seating_rotation != -1)` (joining
-`seed` from the `games` table by `game_id`):
+After `logit_strength`, the panel is split by `controlled = (seed != -1 and seating_rotation != -1)`. Join
+game-level `seed`/`seating_rotation` from the `games` table by `game_id`; keep per-player `config_slot`
+from `panel_data` by `(game_id, player_id)`:
 
 - **Uncontrolled rows** keep today's behavior: OLS-logit **civ** adjustment (`civ_adjust`, uses
   `civ_bench/stats/`). `civ_adjust:"none"` ⇒ `adjusted_strength == relative_strength`. The per-civ effects it
@@ -39,7 +40,8 @@ After `logit_strength`, the panel is split by `controlled = (seed != -1 and seat
     seat-bound civ, so this **replaces** civ adjustment for controlled rows.
   - Optional final `post_cell_normalize` (`none|relative_to_leader`).
 - **Coverage diagnostic (WARN, never abort):** cells with no Vanilla baseline (still predicted via the
-  seed/seat margin — flagged), per-model cell coverage (from `config_slot`/`seating_rotation`), and
+  seed/seat margin — flagged), per-model cell coverage (using `config_slot` from `panel_data` and
+  `seating_rotation` from `game_data`), and
   connectedness-to-`Vanilla` (union-find; extrapolated models warned). Keep all games, proceed.
 - **Always-written adjustment trails (no config — like every other audit artifact).** The stage writes the
   intermediate per-group values it subtracts, next to the panel (the directory of `save`, default

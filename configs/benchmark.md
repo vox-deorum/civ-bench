@@ -59,7 +59,7 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
 
   "output":     { /* §2.1 */ },          // optional: run output root + variant suffix (→ reports/, reports-cross/)
 
-  "catalogs": {                          // optional: override the sibling config files
+  "catalogs": {                          // optional: override lazily loaded sibling config files
     "paths":       "configs/paths.json",
     "models":      "configs/models.json",
     "experiments": "configs/experiments.json"
@@ -81,10 +81,12 @@ Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `
 `estimators` (and `adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an
 `adjust` stage to supply the `strength` table it rates.
 
-**`catalogs` defaults to sibling files.** If omitted, the harness loads `paths.json`, `models.json`,
-and `experiments.json` from the **same directory as this `benchmark.json`**. Set a key only to point
-at a file elsewhere; unset keys still fall back to the sibling. (A missing required catalog — e.g.
-no `models.json` next to the config and no override — is a load error.)
+**`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and
+`experiments.json` from the **same directory as this `benchmark.json`** only when it needs that catalog.
+Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog
+is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and
+orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog
+do not require that sibling file to exist.
 
 ### 2.1 `output` — the run output root (and the `-cross` variant)
 
@@ -149,7 +151,8 @@ further, never widen).
   the same effect ad hoc.
 - The `extract` stage is **skipped automatically** when every `outputs` CSV already exists and is
   newer than the DBs, unless `force_rebuild: true`.
-- Experiment ids and player-type names resolve through `catalogs.experiments` + `catalogs.models`.
+- When the selected stages need experiment ids or player-type names, they resolve through
+  `catalogs.experiments` + `catalogs.models`.
   **`player_type` is composed at extract from the per-player game metadata** (`model-{id}` + `strategist-{id}`)
   via the catalog's template + aliases + unified label map (§3.3); the old seat→model mapping is only an
   optional fallback — never spell out seat→model mappings here.
@@ -463,8 +466,8 @@ stage rather than buried inside each `ratings.*` module.
   predictor's win-probabilities. Point it at a `cross_val` estimator for out-of-fold-honest strength,
   or an `in_sample`/`pretrained` one to mirror a deployed model.
 - The emitted table is per-player-game with at least `game_id, player_id, player_type, civilization,
-  adjusted_strength` — the exact columns `ratings.*` require (§6.2) — plus `seed`/`config_slot` pass-through
-  for the controlled-design diagnostics.
+  adjusted_strength` — the exact columns `ratings.*` require (§6.2) — plus `seed`/`seating_rotation`
+  joined from `games` and `config_slot` carried from `panel_data` for the controlled-design diagnostics.
 - `civ_adjust: "none"` skips the OLS step (then `adjusted_strength == relative_strength`); any other
   value selects an adjustment scheme (currently `ols_logit`).
 - **Controlled-design adjustment (`block`).** When a game carries controlled seeds **and** seating
@@ -707,8 +710,8 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`,
-   and `adjust` are optional (`catalogs` defaults to sibling files; each catalog must still resolve to
-   a readable file).
+   and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must
+   resolve to a readable file only if an enabled stage needs it.
 2. **No unknown keys** at any level — typos fail loud.
 3. **Unique ids** across `estimators` + `adjust` + `analyses`; `needs`/`uses` must reference existing,
    enabled ids.
@@ -742,9 +745,11 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
     `engine ∈ {r_lmer, statsmodels}`. A `block` other than `none` affects only rows from the controlled
     subset (`seed != -1 and seating_rotation != -1`); uncontrolled rows always use `civ_adjust`. Cells with no
     Vanilla baseline, models disconnected from `Vanilla`, and incomplete cycles are **warned, never fatal**.
-14. **Extract invariants** (§3, §3.3): per game, a controlled `configuredSyncRandSeed` must equal
-    `configuredMapRandSeed` — a mismatch **aborts extraction**. The `games` table stores one `seed` (the
-    controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel
-    (controlled seeds are `≥ 1` — `0` is Civ's "pick random" and rejected for controlled runs — and rotations
-    are `≥ 0`). A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full
-    **override**.
+14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's
+    controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured
+    `configuredSyncRandSeed` must equal `configuredMapRandSeed` — a mismatch **aborts extraction** with a
+    policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and
+    `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1` — `0` is
+    Civ's "pick random" and rejected for controlled runs — and rotations are `≥ 0`). Per-player
+    `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A
+    `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.

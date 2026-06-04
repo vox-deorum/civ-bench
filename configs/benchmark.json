@@ -1,6 +1,6 @@
 {
   "name": "staff-standard-2026",
-  "description": "Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.json for the opt-in extras. `catalogs` omitted to use the sibling paths.json/models.json/experiments.json.",
+  "description": "Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.json for the opt-in extras. `catalogs` omitted; catalog-using stages resolve sibling defaults only when needed.",
   "seed": 42,
 
   "filters": {

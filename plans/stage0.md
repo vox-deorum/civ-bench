@@ -28,14 +28,16 @@ a config can be loaded, validated, and its DAG printed — without running any a
   coeff/odds-ratio heatmaps). Used by `performance.score_ratio`, `ratings.matchups`, `adjust/strength`.
 - `civ_bench/plotting/` — port `shared/plot_styles.py` + `plot_utilities.py` (trim notebook-only helpers).
 - `configs/models.json`, `configs/experiments.json`, `configs/paths.json` — port from
-  `../vox-deorum-analysis/shared/config/` (same schema; now the primary control surface). **Add the catalog
+  `../vox-deorum-analysis/shared/config/` and extend the schema where the harness needs richer metadata;
+  these are now the primary control surface. **Add the catalog
   fields backing benchmark.md §3.3:** `player_type_template`, model/strategist alias maps, the vanilla/null
   labels, and the unified `player_type_labels` map (per-`condition` and per-`(condition, slot)`). The legacy
   per-seat `CONDITION_PLAYER_MAPPING` is kept only as the optional fallback.
 
 ## Config wiring
 
-- `catalogs` defaults to the sibling `configs/*.json`. The loader fails if a required catalog is absent.
+- `catalogs` defaults to sibling `configs/*.json` paths, but catalogs are loaded lazily. The loader fails
+  only when a selected stage actually needs a catalog and neither an override nor the sibling file exists.
 - **R discovery is cross-platform:** find `Rscript` via `PATH` and the `CIV_BENCH_RSCRIPT` env override —
   **drop** the old `_find_rscript()` hardcoded `C:`/`D:\Program Files\R` scan (D5).
 - Add the **output-root** field (see benchmark.md): all stage save-paths (`estimators` `save_*`,
