@@ -67,6 +67,13 @@ CSVs is moot. The cross split is therefore an ordinary `fit:"train"` + `train_su
 
 ## Cross-cutting
 
+- **Controlled-design (seeds + seating).** One feature threaded across stages: **stage1** imports the
+  controlled `seed`/`seating_rotation` (into `game_data`; `-1` ⇒ uncontrolled, sync==map asserted) and composes
+  the **orthodox `player_type`** from per-player `model-{id}`/`strategist-{id}` metadata (not a seat map —
+  [../configs/benchmark.md](../configs/benchmark.md) §3.3); **stage3**'s `strength` swaps the civ adjustment
+  for a matched **start-cell** Vanilla-baseline correction on controlled games; **stage4**'s `ratings`
+  bootstrap re-runs strength per replicate and `vanilla_slot_effect` validates it. All gated by the strength
+  `block` param — `none` ⇒ legacy behavior.
 - **Determinism.** Thread top-level `seed` into every stage with randomness; same config + same
   `runs/` ⇒ byte-stable outputs. Never call un-seeded RNGs.
 - **No graceful degradation.** Every dependency is installed up front (`scripts/install`); a missing

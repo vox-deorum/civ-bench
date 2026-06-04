@@ -17,13 +17,21 @@ a config can be loaded, validated, and its DAG printed — without running any a
   root** (default `reports`, configurable suffix → `reports-cross`) and thread it to all stages.
 - `civ_bench/pipeline/` — build the stage DAG from kind-ordering + `needs` + `uses`, topo-sort, run.
 - `civ_bench/catalog/` — port `shared/model_catalog.py` + `shared/experiments.py` (alias normalization,
-  seat expansion, vanilla/null groups).
+  vanilla/null groups). **Add the orthodox `player_type` composition** (benchmark.md §3.3):
+  `compose_player_type(model, strategist, condition, config_slot)` builds the identity from the per-player
+  game metadata (`model-{id}` + `strategist-{id}`) via a `player_type_template` + alias maps, then applies the
+  unified `player_type_labels` map (leading-`-` ⇒ suffix, else full override; `(condition, slot)` beats
+  `condition`). The old static `(condition, seat)` mapping is demoted to an **optional fallback** (legacy
+  games with no metadata).
 - `civ_bench/data/` — port `shared/data_loading.py` (`load_turn_data`/`load_panel_data` + filters).
 - `civ_bench/stats/` — port `shared/regression_utilities.py` (OLS/logistic, clustered/weighted fits,
   coeff/odds-ratio heatmaps). Used by `performance.score_ratio`, `ratings.matchups`, `adjust/strength`.
 - `civ_bench/plotting/` — port `shared/plot_styles.py` + `plot_utilities.py` (trim notebook-only helpers).
 - `configs/models.json`, `configs/experiments.json`, `configs/paths.json` — port from
-  `../vox-deorum-analysis/shared/config/` (same schema; now the primary control surface).
+  `../vox-deorum-analysis/shared/config/` (same schema; now the primary control surface). **Add the catalog
+  fields backing benchmark.md §3.3:** `player_type_template`, model/strategist alias maps, the vanilla/null
+  labels, and the unified `player_type_labels` map (per-`condition` and per-`(condition, slot)`). The legacy
+  per-seat `CONDITION_PLAYER_MAPPING` is kept only as the optional fallback.
 
 ## Config wiring
 

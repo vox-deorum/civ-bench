@@ -40,8 +40,8 @@ civ-bench/
 │   ├── benchmark.json            # DEFAULT run spec = the lean CORE (~10 modules; see configs/benchmark.md)
 │   ├── benchmark.full.json       # kitchen-sink: core + every optional module with "enabled": false
 │   ├── benchmark.md              # the benchmark.json convention / schema reference
-│   ├── models.json               # strategist + prediction model registry (id/aliases/color/pricing)
-│   ├── experiments.json          # experiment → seat/player-type mapping; vanilla/null groups
+│   ├── models.json               # strategist + prediction model registry (id/aliases/color/pricing; player_type_template)
+│   ├── experiments.json          # experiment registry; unified player_type_labels (leading-"-"=suffix, else override); vanilla/null groups; legacy seat map = optional fallback
 │   └── paths.json                # repo-relative data + output roots
 │   #  groupings (rating-identity dimensions, e.g. "strategy") + filters live INLINE in benchmark.json
 ├── civ_bench/
@@ -57,7 +57,8 @@ civ-bench/
 │   │   └── models/               # score / baseline / xgboost / mlp / grouped / interaction / attention
 │   ├── adjust/                   # derived-table stages: estimator P(win) → strength panel
 │   │   ├── registry.py           # name → adjust class (currently: strength)
-│   │   └── strength.py           # adjusted_strength derivation (port of turn_predicted's prepare_strength_data)
+│   │   ├── strength.py           # adjusted_strength derivation (port of turn_predicted's prepare_strength_data); controlled games use the matched start-cell Vanilla-baseline correction
+│   │   └── strength_lmm.R        # lme4 shrinkage fit for the per-(seed,seat) Vanilla baseline (controlled-design)
 │   ├── analyses/                 # ── pluggable analysis modules ──
 │   │   ├── base.py               # Analysis interface + registry (name → class)
 │   │   ├── ratings/              # Bradley-Terry / Plackett-Luce / matchups (group_by + bootstrap params)
@@ -90,15 +91,17 @@ canonical   trained or     strength    ratings /    templated
 ```
 
 - **`extract`** turns raw game DBs in `runs/` into canonical CSVs (`turn_data`, `panel_data`,
-  `game_timestamps`, `model_token_usage`). It is skipped when its outputs already exist unless
-  forced.
+  `game_data`, `model_token_usage`). It also imports controlled seeds/seating into `game_data`
+  (`seed`/`seating_rotation`, `-1` ⇒ uncontrolled) and composes the **orthodox `player_type`** from per-player
+  metadata (benchmark.md §3.3). It is skipped when its outputs already exist unless forced.
 - **`estimators`** are prediction-model producers. Each is either **trained** on the current data
   (optionally tuned first) or loaded **pre-trained** from a saved model directory, then run to emit
   `predicted_win_probability`. They must run **before** any analysis that consumes their output.
 - **`adjust`** (optional) turns an estimator's per-turn win-probabilities into a per-player-game
   **strength panel** (`adjusted_strength`): late-game weighted average → relative-to-leader →
-  winner enforcement → OLS civilization adjustment. It registers that panel as a named `strength`
-  table, and it is what makes the rating models depend (transitively) on an estimator.
+  winner enforcement → civilization adjustment (uncontrolled games) **or** a matched **start-cell**
+  Vanilla-baseline correction (controlled games — fixed seeds + seating). It registers that panel as a named
+  `strength` table, and it is what makes the rating models depend (transitively) on an estimator.
 - **`analyses`** are the pluggable modules. **`ratings.*` consume the `strength` table** (they rate
   `adjusted_strength`, not raw `panel_data`, so they depend on an `adjust` stage; their `group_by` /
   `bootstrap` params fold in what were once separate strategy-Elo and bootstrap modules);
@@ -189,8 +192,9 @@ R packages, failing loudly if any is absent. The full set:
 - **Python core:** `pandas`, `numpy`, `scipy`, `statsmodels`, `matplotlib`, `seaborn`, `plotly`,
   `scikit-learn`, `tabulate`.
 - **Python heavy (still required):** `torch`, `xgboost`, `optuna`, `imbalanced-learn`.
-- **R (for ratings):** `BradleyTerry2`, `PlackettLuce` (needs `Rscript` discoverable on `PATH`, or
-  via the `CIV_BENCH_RSCRIPT` env override — **not** a hardcoded Windows path like the old repo's
+- **R (for ratings + the controlled-design strength baseline):** `BradleyTerry2`, `PlackettLuce`, and
+  `lme4` (+`Matrix`) for the `adjust/strength` start-cell shrinkage fit (needs `Rscript` discoverable on
+  `PATH`, or via the `CIV_BENCH_RSCRIPT` env override — **not** a hardcoded Windows path like the old repo's
   `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS).
 
 `pyproject.toml` declares the Python set as plain install requirements (one environment, no

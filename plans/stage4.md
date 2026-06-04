@@ -13,7 +13,10 @@ unit behind the `Analysis` interface + registry; JSON selects it by name; it ret
   `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`. Port from
   `../vox-deorum-analysis/ratings/` (keep R interop; `Rscript` via `PATH`/`CIV_BENCH_RSCRIPT`).
   **strategy-Elo and bootstrap are params, not modules:** `group_by` (default `["player_type"]`;
-  `["player_type","strategy"]` = per-strategy) and `bootstrap` (shared resample-and-refit).
+  `["player_type","strategy"]` = per-strategy) and `bootstrap` (shared resample-and-refit). **When the
+  `strength` table uses a controlled-design `block` adjustment (stage3), the `bootstrap` resample must re-run
+  the `adjust/strength` fit inside each replicate** (resample games upstream of the strength fit, not a fixed
+  panel) so the start-cell baseline's uncertainty is reflected in the CIs.
 - **prediction** (scoring, `analyses/prediction/`): `prediction.evaluate` (multi-metric table),
   `prediction.compare`. Port from `predict/` loader + comparison logic.
 - **calibration** (`analyses/calibration/`): `calibration.reliability`, `calibration.loss_by_progress`.
@@ -23,6 +26,9 @@ unit behind the `Analysis` interface + registry; JSON selects it by name; it ret
 - Optional modules (ablation_bt, vanilla_slot_effect, winner_trajectories, elo_comparison,
   context_slicing, permutation_importance, panel, turn, strategy_profiles) are **registry-reserved,
   `enabled:false`**, shipped only in `benchmark.full.json`. `behavior.*` is deferred (not built).
+  **`ratings.vanilla_slot_effect` doubles as the controlled-design validation**: with stage3's start-cell
+  adjustment on, the seat/start-position effect should be significant on the raw panel and ~null on the
+  adjusted panel.
 
 ## Config wiring (`analyses[]`)
 

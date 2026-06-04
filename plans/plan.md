@@ -30,13 +30,19 @@ raw game DBs ──▶ extract ──▶ estimators ──▶ adjust ──▶ a
                                           strength)
 ```
 
-- **extract** — game SQLite DBs → `turn_data` / `panel_data` / `game_timestamps` /
-  `model_token_usage` CSVs.
+- **extract** — game SQLite DBs → `turn_data` / `panel_data` / `game_data` (per-game; was
+  `game_timestamps`, now also carries the controlled `seed` + `seating_rotation`, `-1` ⇒ uncontrolled) /
+  `model_token_usage` CSVs. `player_type` is composed here from the per-player `model-{id}`/`strategist-{id}`
+  metadata (the **orthodox player_type**, [configs/benchmark.md](../configs/benchmark.md) §3.3), not a static
+  seat map.
 - **estimators** — victory-probability predictors, either trained (optionally tuned) on the current
   data or loaded **pre-trained**, then run to emit `predicted_win_probability`.
 - **adjust** — turns an estimator's per-turn win-probabilities into the per-player-game **strength
   panel** (`adjusted_strength`), registered as a named `strength` table. This is the bridge the
-  rating models sit on; it makes `ratings.*` depend (transitively) on an estimator.
+  rating models sit on; it makes `ratings.*` depend (transitively) on an estimator. For **controlled**
+  games (fixed seeds + seating) it swaps the civ adjustment for a **matched start-cell** correction —
+  subtracting each `(seed, seat)` cell's Vanilla baseline — which removes the start-position confound and
+  tightens the downstream Elo CIs (see [stage3.md](stage3.md)).
 - **analyses** — pluggable modules: `ratings.*` (rate the `strength` table), `prediction.*`,
   `calibration.*`, `performance.*`, `exploratory.*`. (`behavior.*` is deferred.)
 - **report** — assembles the produced artifacts into markdown/html.
@@ -50,14 +56,14 @@ Port the **logic**, drop the **flatness and the data**. Rough correspondence:
 
 | Old (`vox-deorum-analysis`)              | New (`civ_bench/…`)                          | Notes |
 |---|---|---|
-| `extract/` (`python -m extract`)         | `civ_bench/extract/`                         | Keep the DB-discovery + turn/panel/token extractors; drive roots from `configs/paths.json`. |
-| `shared/data_loading.py`                 | `civ_bench/data/`                            | `load_turn_data` / `load_panel_data` + filters. |
-| `shared/model_catalog.py`, `experiments.py` | `civ_bench/catalog/`                      | Config-backed catalogs; preserve alias normalization + seat expansion. |
+| `extract/` (`python -m extract`)         | `civ_bench/extract/`                         | Keep the DB-discovery + turn/panel/token extractors; drive roots from `configs/paths.json`. **New:** pull controlled seeds/seating + per-player `model`/`strategist` from `GameMetadata` → `game_data` (renamed from `game_timestamps`, with `seed`/`seating_rotation`, `-1` sentinels; assert sync==map) + `config_slot`; compose the orthodox `player_type`. |
+| `shared/data_loading.py`                 | `civ_bench/data/`                            | `load_turn_data` / `load_panel_data` + filters. **`player_type` now comes from extract** (join by `(game_id, player_id)`); the static `(condition, player_id)` merge is fallback-only. |
+| `shared/model_catalog.py`, `experiments.py` | `civ_bench/catalog/`                      | Config-backed catalogs; preserve alias normalization. **Add** the orthodox `player_type` composition (`compose_player_type`: template + aliases + unified `player_type_labels`; seat map demoted to optional fallback — benchmark.md §3.3). |
 | `shared/config/*.json`                   | `configs/*.json`                             | Same schema; now the primary control surface, not a side file. |
 | `shared/plot_styles.py`, `plot_utilities.py` | `civ_bench/plotting/` | Keep style/color logic; trim notebook-only helpers. |
 | `shared/regression_utilities.py` | `civ_bench/stats/` | The **statistics** layer (OLS/logistic regression wrappers, clustered/weighted fits, coefficient/odds-ratio heatmaps). Imported by `performance.score_ratio`, `ratings.matchups` (`validate_ols`), and `adjust/strength.py`'s civ-adjustment — it is real analysis code, **not** a plotting helper, so it does not belong under `plotting/`. |
 | `models/` (compare/evaluate/tune + registry) | `civ_bench/estimators/`                  | Predictor registry pattern is already good — fold tune/train/load/infer behind the estimator config block. |
-| `performance/turn_predicted.ipynb` → `prepare_strength_data` (also copied in `ratings/iterative_bt.py`) | `civ_bench/adjust/strength.py` | The strength-panel derivation: estimator `predicted_win_probability` → `adjusted_strength`. It is its own **`adjust` stage**, not an analysis, because every `ratings.*` consumes its `strength` table. |
+| `performance/turn_predicted.ipynb` → `prepare_strength_data` (also copied in `ratings/iterative_bt.py`) | `civ_bench/adjust/strength.py` (+ `strength_lmm.R`) | The strength-panel derivation: estimator `predicted_win_probability` → `adjusted_strength`. It is its own **`adjust` stage**, not an analysis, because every `ratings.*` consumes its `strength` table. **New:** for controlled games, a matched **start-cell** correction (subtract the shrinkage-estimated per-`(seed, seat)` Vanilla baseline via lme4/`statsmodels`) replaces the civ adjustment ([stage3.md](stage3.md)). |
 | `predict/` (loader + calibration/comparison notebooks) | `civ_bench/analyses/prediction/` + `…/calibration/` | Scoring views (`evaluate`/`compare`) become `prediction.*`; the reliability + loss-by-progress views become the `calibration.*` family (§ module inventory). |
 | `ratings/` (BT, PL, strategy-Elo, matchups, bootstrap; R+py) | `civ_bench/analyses/ratings/`       | Keep R interop where it exists; wrap each as an Analysis rating the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. **strategy-Elo and bootstrap are NOT separate modules**: strategy-Elo is `group_by: ["player_type","strategy"]` (it already just swaps BT's identity column and reuses `calculate_ratings()`); bootstrap is a shared resample-and-refit `bootstrap` param. **R discovery must be cross-platform**: when porting `bradley_terry.py`/`plackett_luce.py`, find `Rscript` via `PATH` and an override env var (`CIV_BENCH_RSCRIPT`) — drop the old `_find_rscript()` hardcoded `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS. |
 | `performance/`, `exploratory/` notebooks | `civ_bench/analyses/{performance,exploratory}/` + report templates | Convert notebook narratives into generated report sections. **Orphans resolved:** `exploratory/group_permutation_importance.ipynb` is a duplicate of `performance/group_permutation_importance.ipynb` → keep only `performance.permutation_importance`; if the exploratory narrative genuinely differs it is a descriptive re-cut and is dropped, not re-added as a module. `exploratory/panel_exploratory_vanilla.ipynb` (vanilla-only cut, `condition_include=["observe-vanilla-standard"]`) has **no new module**: it is `exploratory.panel` run under a vanilla `filter` — config, not code. |
@@ -83,7 +89,8 @@ per-module params.) Modules are split into a **core** set (implemented, in the d
   `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`
 - **adjust** (`civ_bench/adjust/`, derived tables): `strength`
 - **ratings** — *core:* `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`.
-  *optional:* `ratings.ablation_bt`, `ratings.vanilla_slot_effect`.
+  *optional:* `ratings.ablation_bt`, `ratings.vanilla_slot_effect` (also the validation that stage3's
+  start-cell adjustment nulled the seat/start-position effect).
   BT/PL take a `group_by` param (default `["player_type"]`; `["player_type","strategy"]` =
   per-strategy Elo) and a `bootstrap` param (CIs) — so the former `strategy_elo`/`bootstrap_bt`
   modules are folded in, not separate.

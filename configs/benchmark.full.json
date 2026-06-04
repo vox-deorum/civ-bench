@@ -21,7 +21,7 @@
     "extract": {
       "enabled": true,
       "runs_dir": "runs/",
-      "outputs": ["turns", "panel", "timestamps", "tokens"],
+      "outputs": ["turns", "panel", "games", "tokens"],
       "max_dbs": null,
       "prune_missing": false,
       "force_rebuild": false
@@ -29,7 +29,7 @@
     "tables": {
       "turns": "runs/turn_data.csv",
       "panel": "runs/panel_data.csv",
-      "timestamps": "runs/game_timestamps.csv",
+      "games": "runs/game_data.csv",
       "tokens": "runs/model_token_usage.csv"
     },
     "filter": "staff_recent"
@@ -120,7 +120,11 @@
         "weight": "turn_progress",
         "relative_to": "game_leader",
         "enforce_winner": true,
-        "civ_adjust": "ols_logit"
+        "civ_adjust": "ols_logit",
+        "block": "auto",
+        "baseline_source": "same_condition_first",
+        "post_cell_normalize": "none",
+        "engine": "r_lmer"
       }
     }
   ],

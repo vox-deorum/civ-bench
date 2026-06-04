@@ -124,16 +124,16 @@ further, never widen).
   "extract": {
     "enabled": true,                     // false → reuse existing CSVs, never touch runs/ DBs
     "runs_dir": "runs/",                 // root searched for *.sqlite game DBs
-    "outputs": ["turns", "panel", "timestamps", "tokens"],  // which canonical CSVs to (re)build
+    "outputs": ["turns", "panel", "games", "tokens"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract
     "force_rebuild": false               // true → rebuild even if outputs exist & are newer
   },
 
   "tables": {                            // canonical CSV locations (extract writes / loaders read)
-    "turns":      "runs/turn_data.csv",          // per-player per-turn panel (prediction features)
-    "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategies/strength
-    "timestamps": "runs/game_timestamps.csv",
+    "turns":      "runs/turn_data.csv",          // per-player per-turn panel (prediction features) — carries player_type, NOT seed
+    "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategies/strength (+ player_type/model/strategist/config_slot)
+    "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
     "tokens":     "runs/model_token_usage.csv"
   },
 
@@ -149,8 +149,10 @@ further, never widen).
   the same effect ad hoc.
 - The `extract` stage is **skipped automatically** when every `outputs` CSV already exists and is
   newer than the DBs, unless `force_rebuild: true`.
-- Experiment ids, player-type names, and the vanilla/null groupings all resolve through
-  `catalogs.experiments` + `catalogs.models`; never spell out seat→model mappings here.
+- Experiment ids and player-type names resolve through `catalogs.experiments` + `catalogs.models`.
+  **`player_type` is composed at extract from the per-player game metadata** (`model-{id}` + `strategist-{id}`)
+  via the catalog's template + aliases + unified label map (§3.3); the old seat→model mapping is only an
+  optional fallback — never spell out seat→model mappings here.
 
 ### 3.1 `filters` — named, reusable filter presets
 
@@ -218,6 +220,31 @@ not a new module. `groupings` is **optional**; omit it for plain per-`player_typ
 > "edges": [0, 0.33, 0.66, 1.0], "labels": ["early","mid","late"] }`) would enable per-game-stage
 > ratings, but that additionally requires the `adjust`/`strength` stage to emit *per-stage* strength,
 > which is its own follow-up. Treat anything beyond `argmax` as designed-but-unbuilt.
+
+### 3.3 Player identity — the orthodox `player_type`
+
+`player_type` (the identity every rating is fit over) is **composed at extract time from the per-player game
+metadata**, not from a hand-maintained seat map. Each seat records `model-{player_id}` (e.g. `Sonnet-4.5`, or
+`VPAI` for vanilla) and `strategist-{player_id}` (e.g. `simple-strategist-briefed`) in the game's
+`GameMetadata`; because the identity travels with the player, it stays correct even when controlled seating
+rotates a model through different seats. The catalog (`catalogs.models` / `catalogs.experiments`) supplies
+three knobs:
+
+- **`player_type_template`** — the format string, e.g. `"{model}-{variant}{suffix}"`. `model` is
+  alias-normalized and `strategist`→`variant` is mapped via the catalog; `model == "VPAI"` resolves to the
+  vanilla baseline label by strategist (`null-strategist`→`Null`, default→`Vanilla`).
+- **`player_type_labels`** — a single unified map keyed by condition and, optionally, `(condition, slot)`
+  (slot wins; `slot` is the player's `config_slot`, the pre-rotation configured seat). The looked-up value is
+  polymorphic: **if it starts with `"-"` it is a SUFFIX** appended to the composed type (e.g. distinguishing
+  two tweaks of the same model+strategist, `…-Briefed-A` vs `…-Briefed-B`); **otherwise it is a full
+  player_type OVERRIDE** that replaces the composed value. This one map therefore serves both the tweak-suffix
+  and the legacy explicit-label needs. Suffixes are skipped for VPAI/Vanilla so the baseline pools across
+  conditions; full overrides still apply.
+- **optional fallback** — when a game predates the metadata keys, the old static `(condition, slot)` →
+  player_type map is consulted; otherwise `"Player {id}"`.
+
+The same composition feeds both `panel_data` and `model_token_usage.csv` (single source of truth), replacing
+the old load-time `(condition, player_id)` merge.
 
 ---
 
@@ -396,8 +423,8 @@ the kind is a list so a run can derive several tables (or the same one from diff
 
 The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_data`; it is run over
 **`adjusted_strength`**, a skill estimate distilled from an estimator's per-turn `predicted_win_probability`.
-That distillation (late-game weighted average → relative-to-leader → winner enforcement → OLS
-civilization adjustment) is real work with its own knobs, shared by every rating, so it is its own
+That distillation (late-game weighted average → relative-to-leader → winner enforcement → civilization
+*or* matched start-cell adjustment) is real work with its own knobs, shared by every rating, so it is its own
 stage rather than buried inside each `ratings.*` module.
 
 ### 5.1 Entry shape
@@ -418,8 +445,13 @@ stage rather than buried inside each `ratings.*` module.
     "weight": "turn_progress",           // weight each turn's P(win) by progress when averaging
     "relative_to": "game_leader",        // normalize each seat to the strongest seat in its game
     "enforce_winner": true,              // force the actual winner to relative_strength = 1.0
-    "civ_adjust": "ols_logit"            // subtract civilization effects (OLS on the logit) →
-                                         //   adjusted_strength; "none" leaves it = relative_strength
+    "civ_adjust": "ols_logit",           // UNCONTROLLED games: subtract civ effects (OLS on the logit);
+                                         //   "none" leaves adjusted = relative_strength
+    "block": "auto",                     // CONTROLLED games: matched start-cell adjustment (replaces civ_adjust):
+                                         //   "none" | "seed" | "start_cell" | "auto" (= start_cell when controlled)
+    "baseline_source": "same_condition_first",  // per-cell Vanilla baseline pool: "same_condition_first" | "pooled"
+    "post_cell_normalize": "none",       // optional final re-normalization after the cell effect: "none" | "relative_to_leader"
+    "engine": "r_lmer"                   // shrinkage engine for the cell baseline: "r_lmer" (lme4) | "statsmodels"
   }
 }
 ```
@@ -431,9 +463,21 @@ stage rather than buried inside each `ratings.*` module.
   predictor's win-probabilities. Point it at a `cross_val` estimator for out-of-fold-honest strength,
   or an `in_sample`/`pretrained` one to mirror a deployed model.
 - The emitted table is per-player-game with at least `game_id, player_id, player_type, civilization,
-  adjusted_strength` — the exact columns `ratings.*` require (§6.2).
+  adjusted_strength` — the exact columns `ratings.*` require (§6.2) — plus `seed`/`config_slot` pass-through
+  for the controlled-design diagnostics.
 - `civ_adjust: "none"` skips the OLS step (then `adjusted_strength == relative_strength`); any other
   value selects an adjustment scheme (currently `ols_logit`).
+- **Controlled-design adjustment (`block`).** When a game carries controlled seeds **and** seating
+  (`seed != -1` and `seating_rotation != -1` in the `games` table), `block` replaces `civ_adjust` on those rows
+  with a **matched start-cell** correction: it subtracts the per-`(seed, player_id)` **Vanilla/VPAI baseline**,
+  estimated with shrinkage (a variance-components model over `seed` / `player_id` / their interaction) so
+  one-game cells borrow strength. Because the start-cell fixes the seat-bound civilization, this subsumes the
+  civ adjustment. Uncontrolled rows fall back to `civ_adjust`; `block: "none"` ⇒ pure legacy behavior
+  (byte-identical). `baseline_source` chooses whether the per-cell baseline pools VPAI rotations within the
+  same condition first (cleanest match) or across all conditions; `engine` selects the shrinkage backend
+  (`r_lmer` via lme4 — reusing the cross-platform `Rscript` locator — or `statsmodels` MixedLM). Incomplete
+  cycles, cells with no Vanilla baseline, and player types disconnected from `Vanilla` are **warned, never
+  fatal** (keep all games, proceed).
 
 ---
 
@@ -489,7 +533,9 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 - **`bootstrap`** (default omitted → point estimate only) — when set, a shared resample-and-refit
   helper draws games with replacement (`stratified` by experiment by default), re-runs the same fit
   `n` times, and emits percentile CIs + rank stability alongside the point estimate. Bootstrap CIs
-  are **not a separate module**; the resampling is seeded from the top-level `seed`.
+  are **not a separate module**; the resampling is seeded from the top-level `seed`. When the `strength` table
+  uses a controlled-design `block` adjustment, the resample **re-runs the `adjust/strength` fit inside each
+  replicate** (not a fixed panel) so the start-cell baseline's uncertainty is reflected in the CIs.
 
 ```jsonc
 // ratings.bradley_terry — BT MLE with pairwise score weights (R: BradleyTerry2)
@@ -518,7 +564,9 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 { "module": "ratings.ablation_bt", "enabled": false,
   "uses": { "tables": ["strength"] }, "params": { "weighted": true } }
 
-// ratings.vanilla_slot_effect — tests whether seat position confounds Vanilla rating
+// ratings.vanilla_slot_effect — seat/start-position confound check. With the strength stage's start-cell
+//   adjustment ON it doubles as the VALIDATION that the cell effect nulled the slot effect: significant on the
+//   raw panel, ~null on the adjusted panel.
 { "module": "ratings.vanilla_slot_effect", "enabled": false,
   "uses": { "tables": ["strength"] }, "params": {} }
 ```
@@ -676,3 +724,14 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
 12. **Output root** (§2.1): `output`, when present, accepts only `root` (string) and `suffix`
     (string); both optional, defaulting to `"reports"` and `""`. Every stage save-path resolves under
     `<root><suffix>/`; two runs that differ only in `suffix` must not write to the same directory.
+13. **Strength controlled-design params** (§5.1): `block ∈ {none, seed, start_cell, auto}`,
+    `baseline_source ∈ {same_condition_first, pooled}`, `post_cell_normalize ∈ {none, relative_to_leader}`,
+    `engine ∈ {r_lmer, statsmodels}`. A `block` other than `none` affects only rows from the controlled
+    subset (`seed != -1 and seating_rotation != -1`); uncontrolled rows always use `civ_adjust`. Cells with no
+    Vanilla baseline, models disconnected from `Vanilla`, and incomplete cycles are **warned, never fatal**.
+14. **Extract invariants** (§3, §3.3): per game, a controlled `configuredSyncRandSeed` must equal
+    `configuredMapRandSeed` — a mismatch **aborts extraction**. The `games` table stores one `seed` (the
+    controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel
+    (controlled seeds are `≥ 1` — `0` is Civ's "pick random" and rejected for controlled runs — and rotations
+    are `≥ 0`). A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full
+    **override**.
