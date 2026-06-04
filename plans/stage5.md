@@ -14,7 +14,7 @@
 
 ## Done
 
-`civ-bench run --config configs/benchmark.pretrained.json` produces `reports/staff-standard-2026/` (md + html) end-to-end from the copied estimators — **no training invoked**. This is the milestone: the whole pipeline works on pre-trained estimators.
+`civ-bench run --config configs/benchmark.dev.json` (a local load-only config copied from `benchmark.pretrained.template.json`) produces the report under the resolved output root — e.g. `reports-dev/staff-standard-2026-dev/` for `benchmark.dev.json` (or `reports/staff-standard-2026/` for the no-suffix template) — (md + html) end-to-end from the copied estimators — **no training invoked**. This is the milestone: the whole pipeline works on pre-trained estimators.
 
 ## Verification
 

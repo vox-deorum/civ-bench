@@ -9,7 +9,7 @@
 
 - `pyproject.toml` — `pip install -e .`, exposes the `civ-bench` CLI entrypoint; declares the full dependency set (see AGENTS.md §Dependencies) as plain requirements (no extras).
 - `civ_bench/__init__.py`, `civ_bench/cli.py` — `civ-bench extract|run|report` + `--only`/`--skip`/`--config`.
-- `civ_bench/config/` — load + validate `benchmark.json` per [../configs/benchmark.md](../configs/benchmark.md) §8 (unknown keys / missing required = hard error); expose typed config objects; **resolve the output root** (default `reports`, configurable suffix → `reports-cross`) and thread it to all stages.
+- `civ_bench/config/` — load + validate the run-spec (`configs/benchmark*.json`) per [../configs/benchmark.md](../configs/benchmark.md) §8 (unknown keys / missing required = hard error); expose typed config objects; **resolve the output root** (default `reports`, configurable suffix → `reports-cross`) and thread it to all stages.
 - `civ_bench/pipeline/` — build the stage DAG from kind-ordering + `needs` + `uses`, topo-sort, run.
 - `civ_bench/catalog/` — port `shared/model_catalog.py` + `shared/experiments.py` (alias normalization, vanilla/null groups). **Add the orthodox `player_type` composition** (benchmark.md §3.3): `compose_player_type(model, strategist, condition, config_slot)` builds the identity from the per-player game metadata (`model-{id}` + `strategist-{id}`) via a `player_type_template` + alias maps, then applies the unified `player_type_labels` map (leading-`-` ⇒ suffix, else full override; `(condition, slot)` beats `condition`). The old static `(condition, seat)` mapping is demoted to an **optional fallback** (legacy games with no metadata).
 - `civ_bench/data/` — port `shared/data_loading.py` (`load_turn_data`/`load_panel_data` + filters).
@@ -25,7 +25,7 @@
 
 ## Done
 
-`civ-bench run --config configs/benchmark.pretrained.json --skip <all>` (or a dry-run flag) loads and validates the config and prints the resolved DAG + the resolved output root, with no stage executed.
+`civ-bench run --config configs/benchmark.dev.json --skip <all>` (or a dry-run flag) — run from a local config copied from `configs/benchmark.pretrained.template.json` — loads and validates the config and prints the resolved DAG + the resolved output root, with no stage executed.
 
 ## Verification
 

@@ -1,6 +1,6 @@
 {
   "name": "staff-standard-2026",
-  "description": "LOAD-ONLY driver: same run as benchmark.json but every estimator is fit:pretrained, loaded from a copied model_dir under reports/estimators/<id>/model/ (no training, no torch/xgboost/optuna training paths exercised). Stages 1-5 of plans/ run against this; extract is disabled and the canonical CSVs are dropped into runs/ directly. Honest cross-val/OOF and the non-LLM cross variant come from the fit:train pipeline (benchmark.json / stage6).",
+  "description": "TEMPLATE for the LOAD-ONLY driver (tracked example — copy to a local, gitignored configs/benchmark*.json to run; configs/benchmark.dev.json is the worked dev instance). Same run as benchmark.template.json but every estimator is fit:pretrained, loaded from a copied model_dir under reports/estimators/<id>/model/ (no training, no torch/xgboost/optuna training paths exercised). Stages 1-5 of plans/ run against a local copy of this; extract is disabled here and the canonical CSVs are dropped into runs/ directly. Honest cross-val/OOF and the non-LLM cross variant come from the fit:train pipeline (benchmark.template.json / stage6).",
   "seed": 42,
 
   "output": {

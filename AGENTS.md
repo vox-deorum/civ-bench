@@ -23,13 +23,17 @@ civ-bench/
 ├── README.md
 ├── pyproject.toml                # installable: `pip install -e .`, exposes `civ-bench` CLI
 ├── configs/                      # ── the JSON control surface ──
-│   ├── benchmark.json            # DEFAULT run spec = the lean CORE (~10 modules; see configs/benchmark.md)
-│   ├── benchmark.full.json       # kitchen-sink: core + every optional module with "enabled": false
-│   ├── benchmark.md              # the benchmark.json convention / schema reference
+│   ├── benchmark.template.json            # TEMPLATE: DEFAULT run spec = the lean CORE (~10 modules; see configs/benchmark.md)
+│   ├── benchmark.full.template.json       # TEMPLATE: kitchen-sink — core + every optional module with "enabled": false
+│   ├── benchmark.pretrained.template.json # TEMPLATE: load-only driver (fit:pretrained, no training)
+│   ├── benchmark.md              # the benchmark.json convention / schema reference (applies to every benchmark*.json)
 │   ├── models.json               # strategist + prediction model registry (id/aliases/color/pricing; player_type_template)
 │   ├── experiments.json          # experiment registry; unified player_type_labels (leading-"-"=suffix, else override); vanilla/null groups; legacy seat map = optional fallback
 │   └── paths.json                # repo-relative data + output roots
-│   #  groupings (rating-identity dimensions, e.g. "strategy") + filters live INLINE in benchmark.json
+│   #  ── tracked: the *.template.json examples + the catalogs above + benchmark.md (schema) ──
+│   #  ── gitignored: the ACTUAL run-specs (any other configs/benchmark*.json, e.g. benchmark.dev.json) — they
+│   #     point at machine-specific data roots; copy a template to make one. See "Templates vs. local configs" below.
+│   #  groupings (rating-identity dimensions, e.g. "strategy") + filters live INLINE in each benchmark*.json
 ├── civ_bench/
 │   ├── __init__.py
 │   ├── cli.py                    # `civ-bench extract|run|report ...`
@@ -62,6 +66,15 @@ civ-bench/
 └── reports/                      # generated reports, figures, trained estimators (gitignored)
 ```
 
+### Templates vs. local configs
+
+The repo tracks **example** run-specs as `configs/*.template.json` (the lean core, the kitchen-sink, and the load-only driver). They are documentation, not runnable configs — they reference experiments/paths that are illustrative. The **actual** config you run is a *local, gitignored* copy:
+
+- Copy a template to `configs/benchmark<whatever>.json` (e.g. `configs/benchmark.dev.json`) and edit `data.extract.runs_dir` / `data.tables.*` / `pretrained.model_dir` for your machine.
+- `.gitignore` tracks `configs/benchmark*.template.json` (and the catalogs + `benchmark.md`) but ignores every other `configs/benchmark*.json`, so real run-specs with machine-specific paths never land in git.
+- `configs/benchmark.dev.json` is the worked dev instance: extract raw DBs from `J:/`, load pre-trained estimators, run the full core analysis + report into `reports-dev/`.
+- `benchmark.md` is the schema for **all** of them; "benchmark.json" throughout the docs names the run-spec *format*, not a tracked file.
+
 ## The pipeline model
 
 `civ-bench` is a **directed acyclic graph of stages**, not a fixed script. There are five stage kinds, and they run in dependency order:
@@ -83,7 +96,7 @@ canonical   trained or     strength    ratings /    templated
 
 There is **no graceful degradation**: every dependency is installed up front via `scripts/install`, and a stage that needs a missing package aborts the run loudly rather than being silently skipped.
 
-Ordering is expressed in `configs/benchmark.json` via implicit kind-ordering plus explicit `needs` edges and `uses` references. The full grammar — including how to train an estimator up front versus point at a pre-trained one — is specified in [configs/benchmark.md](configs/benchmark.md). **When you add or change a module, update that schema in the same change.**
+Ordering is expressed in the run-spec (`configs/benchmark*.json`) via implicit kind-ordering plus explicit `needs` edges and `uses` references. The full grammar — including how to train an estimator up front versus point at a pre-trained one — is specified in [configs/benchmark.md](configs/benchmark.md). **When you add or change a module, update that schema in the same change.**
 
 ## The analysis plugin contract
 
@@ -92,7 +105,7 @@ Every analysis implements one small interface and registers under a string name 
 ```python
 # civ_bench/analyses/base.py  (sketch)
 class Analysis:
-    name: str                      # registry key used in configs/benchmark.json
+    name: str                      # registry key used in the run-spec (configs/benchmark*.json)
     def run(self, ctx, params: dict) -> AnalysisResult: ...
         # ctx: loaded data + catalogs + paths + resolved estimator artifacts
         # params: this analysis's JSON config block
@@ -115,12 +128,13 @@ The report stage walks the produced `AnalysisResult`s and renders them — no an
 ## Commands (target CLI)
 
 ```bash
-pip install -e .                                   # install package + civ-bench entrypoint
-civ-bench extract --config configs/benchmark.json  # raw game DBs → canonical CSVs
-civ-bench run     --config configs/benchmark.json  # run the full DAG (extract→estimators→analyses→report)
-civ-bench report  --config configs/benchmark.json  # re-render report from existing analysis artifacts
-civ-bench run --config configs/benchmark.json --only ratings.bradley_terry   # one stage + its deps
-civ-bench run --config configs/benchmark.json --skip extract                 # reuse existing CSVs
+pip install -e .                                       # install package + civ-bench entrypoint
+# Run against a LOCAL config (copy a *.template.json first); benchmark.dev.json is the worked dev instance.
+civ-bench extract --config configs/benchmark.dev.json  # raw game DBs → canonical CSVs
+civ-bench run     --config configs/benchmark.dev.json  # run the full DAG (extract→estimators→analyses→report)
+civ-bench report  --config configs/benchmark.dev.json  # re-render report from existing analysis artifacts
+civ-bench run --config configs/benchmark.dev.json --only ratings.bradley_terry   # one stage + its deps
+civ-bench run --config configs/benchmark.dev.json --skip extract                 # reuse existing CSVs
 ```
 
 Until the CLI exists, mirror the old entrypoints (`python -m civ_bench.extract`, etc.) but always parameterize by config path.

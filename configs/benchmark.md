@@ -1,10 +1,12 @@
 # `benchmark.json` — the run-spec convention
 
-`configs/benchmark.json` is the **top-level run spec**: it declares the input data, which estimators to train or load, which analyses to run, and how to render the report. It is the only file you edit to define a new benchmark run. This document is its authoritative schema.
+A **benchmark run-spec** (conventionally `benchmark.json`) is the **top-level config**: it declares the input data, which estimators to train or load, which analyses to run, and how to render the report. It is the only file you edit to define a new benchmark run. This document is its authoritative schema.
+
+> **Templates vs. local configs.** The repo tracks *example* run-specs as `configs/*.template.json` (`benchmark.template.json`, `benchmark.full.template.json`, `benchmark.pretrained.template.json`). To actually run, copy one to a **local, gitignored** `configs/benchmark*.json` (e.g. `configs/benchmark.dev.json`) and point it at your data roots. This schema applies to all of them; "benchmark.json" below names the run-spec *format*, not a tracked file. See [AGENTS.md](../AGENTS.md) §"Templates vs. local configs".
 
 `benchmark.json` is validated on load — **unknown keys and missing required fields are hard errors** (invariant 1: config over code). When you add or rename a module, update this file in the same change.
 
-> JSON has no comments. This reference uses `jsonc` fences with `//` notes for explanation; the real `configs/benchmark.json` must be plain JSON. See [benchmark.json](benchmark.json) for a comment-free worked example.
+> JSON has no comments. This reference uses `jsonc` fences with `//` notes for explanation; a real `configs/benchmark*.json` must be plain JSON. See [benchmark.template.json](benchmark.template.json) for a comment-free worked example.
 
 ---
 
@@ -59,7 +61,7 @@ A cycle, an unknown `id`, or a reference to a disabled stage is a validation err
 
 Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an `adjust` stage to supply the `strength` table it rates.
 
-**`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this `benchmark.json`** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
+**`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this run-spec file** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
 
 ### 2.1 `output` — the run output root (and the `-cross` variant)
 
@@ -411,7 +413,7 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
   "params": { "mode": "mean", "validate_ols": true } }
 ```
 
-**Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
+**Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 
 ```jsonc
 // ratings.ablation_bt — incrementally add each player type's games (chronologically) and track
@@ -441,7 +443,7 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
   "uses": { "estimators": ["score","grouped_mlp","attention"] }, "params": {} }
 ```
 
-**Optional `prediction.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
+**Optional `prediction.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 
 ```jsonc
 // prediction.winner_trajectories — P(win) trajectories for eventual winners
@@ -493,7 +495,7 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
   "params": { "aggregate": "mean", "by": "player_type" } }
 ```
 
-**Optional `performance.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
+**Optional `performance.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 
 ```jsonc
 // performance.permutation_importance — grouped permutation importance over feature families
@@ -510,7 +512,7 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
   "params": { "currency": "usd" } }
 ```
 
-**Optional `exploratory.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
+**Optional `exploratory.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 
 ```jsonc
 { "module": "exploratory.panel", "enabled": false, "params": {} }

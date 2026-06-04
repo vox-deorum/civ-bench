@@ -26,13 +26,13 @@ From `D:\Cache\…\colm-2026\analysis\models\output\`:
 
 ## Config wiring
 
-Author `configs/benchmark.pretrained.json`: estimators `score`/`attention`/`xgboost` with `fit:"pretrained"`, `predict:"in_sample"`, `pretrained.model_dir` pointing at the copied dirs; `extract.enabled:false`.
+Author the load-only config — the tracked example is `configs/benchmark.pretrained.template.json`; run a local copy (e.g. `configs/benchmark.dev.json`): estimators `score`/`attention`/`xgboost` with `fit:"pretrained"`, `predict:"in_sample"`, `pretrained.model_dir` pointing at the copied dirs; `extract.enabled:false` (the template) or `true` with `runs_dir:"J:/"` (the dev config).
 
 `fit:"pretrained"` is **`model_dir`-only** — we load saved weights and re-infer, never read a raw prediction CSV as an estimator artifact (so column-name reconciliation of old prediction files is a non-issue). Honest cross-val/OOF predictions and the non-LLM **cross** split are deferred to stage 6's `fit:"train"` pipeline (`train_subset:"non_llm"` → `reports-cross/`); we don't keep a saved cross model.
 
 ## Done
 
-`civ-bench run --config configs/benchmark.pretrained.json --only <estimator>` emits a validated `predictions.csv` (input rows + `predicted_win_probability`) for each core estimator — no training run.
+`civ-bench run --config configs/benchmark.dev.json --only <estimator>` emits a validated `predictions.csv` (input rows + `predicted_win_probability`) for each core estimator — no training run.
 
 ## Verification
 

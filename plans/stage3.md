@@ -27,7 +27,7 @@ After `logit_strength`, the panel is split by `controlled = (seed != -1 and seat
 
 ## Config wiring (`adjust[]`)
 
-The stage `id` doubles as the table name. `uses.estimators` is required and single-source (point at `attention` per `benchmark.pretrained.json`). Saves to `<root>/adjust/player_strength_panel.csv`. New params: `block`, `baseline_source`, `post_cell_normalize`, `engine` (defaults `auto`/`same_condition_first`/`none`/ `r_lmer`). With `block:"none"` (or no controlled rows) the stage is byte-identical to the civ-only pipeline.
+The stage `id` doubles as the table name. `uses.estimators` is required and single-source (point at `attention` per `benchmark.pretrained.template.json` / `benchmark.dev.json`). Saves to `<root>/adjust/player_strength_panel.csv`. New params: `block`, `baseline_source`, `post_cell_normalize`, `engine` (defaults `auto`/`same_condition_first`/`none`/ `r_lmer`). With `block:"none"` (or no controlled rows) the stage is byte-identical to the civ-only pipeline.
 
 ## Done
 

@@ -21,7 +21,7 @@ stage0 scaffold ─▶ stage1 extract ─▶ stage2 estimators (LOAD) ─▶ sta
         ─▶ stage4 analyses ─▶ stage5 report ─▶ stage6 train/tune
 ```
 
-Stages 1–5 run against **`configs/benchmark.pretrained.json`** (estimators `fit:"pretrained"`, loaded from copied model dirs — zero training). Stage 6 implements `fit:"train"`/`tune` and brings up the train-based **`configs/benchmark.json`** plus the cross variant.
+Stages 1–5 run against a **local config copied from `configs/benchmark.pretrained.template.json`** (estimators `fit:"pretrained"`, loaded from copied model dirs — zero training); `configs/benchmark.dev.json` is the worked, gitignored dev instance. Stage 6 implements `fit:"train"`/`tune` and brings up the train-based **`configs/benchmark.template.json`** plus the cross variant. (The `*.template.json` files are tracked examples; the config you actually run is a local, gitignored copy — see [../AGENTS.md](../AGENTS.md) §"Templates vs. local configs".)
 
 ## The load-only bootstrap
 

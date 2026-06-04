@@ -8,7 +8,7 @@ This document is the *roadmap*. For the rules every change must follow, read [AG
 
 ## End-to-end flow
 
-The package is `civ_bench/`. The pipeline is a configurable DAG of five stage kinds, all driven by `configs/benchmark.json`:
+The package is `civ_bench/`. The pipeline is a configurable DAG of five stage kinds, all driven by a benchmark run-spec (`configs/benchmark*.json`; tracked examples are the `*.template.json` files, runtime configs are local + gitignored — see [AGENTS.md](../AGENTS.md) §"Templates vs. local configs"):
 
 ```
 raw game DBs ──▶ extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
@@ -53,7 +53,7 @@ When porting a module, do **not** paste it verbatim. Strip the hardcoded paths, 
 
 ## Module inventory
 
-Every module the harness will include, grouped by stage kind. The registry name in the left column is what `configs/benchmark.json` selects. (See [configs/benchmark.md](../configs/benchmark.md) for the per-module params.) Modules are split into a **core** set (implemented, in the default `benchmark.json`) and an **optional** set (registry-reserved, `"enabled": false`, shipped only in `benchmark.full.json`). See *Core vs. optional* below.
+Every module the harness will include, grouped by stage kind. The registry name in the left column is what the run-spec (`configs/benchmark*.json`) selects. (See [configs/benchmark.md](../configs/benchmark.md) for the per-module params.) Modules are split into a **core** set (implemented, in the default `benchmark.template.json`) and an **optional** set (registry-reserved, `"enabled": false`, shipped only in `benchmark.full.template.json`). See *Core vs. optional* below.
 
 - **extract** — `extract`
 - **estimators** (`civ_bench/estimators/`, selected by `model` id): `naive`, `score`, `baseline`, `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`
@@ -69,18 +69,18 @@ Every module the harness will include, grouped by stage kind. The registry name 
 
 ### Core vs. optional
 
-The shipped default `configs/benchmark.json` is the **lean core** (~10 modules): it answers the two benchmark questions — *which strategist is stronger* (ratings) and *how good is the win predictor* (prediction + calibration) — plus the strength panel that feeds ratings and a cost-efficiency axis. The kitchen-sink `configs/benchmark.full.json` adds every optional module with `"enabled": false`, so opting in is a one-flag config edit, never a code change (invariant 1). New rating *slices* (per-strategy, and later per-stage) arrive as `groupings` catalog entries + a `group_by` value, also config-only. **Deferred (not built now):** the optional modules above, the `behavior.*` family, and `groupings` dimensions beyond `strategy` (notably a per-game-stage `kind: "bucket"`, which also needs the `adjust`/`strength` stage to emit per-stage strength).
+The shipped default `configs/benchmark.template.json` is the **lean core** (~10 modules): it answers the two benchmark questions — *which strategist is stronger* (ratings) and *how good is the win predictor* (prediction + calibration) — plus the strength panel that feeds ratings and a cost-efficiency axis. The kitchen-sink `configs/benchmark.full.template.json` adds every optional module with `"enabled": false`, so opting in is a one-flag config edit, never a code change (invariant 1). New rating *slices* (per-strategy, and later per-stage) arrive as `groupings` catalog entries + a `group_by` value, also config-only. **Deferred (not built now):** the optional modules above, the `behavior.*` family, and `groupings` dimensions beyond `strategy` (notably a per-game-stage `kind: "bucket"`, which also needs the `adjust`/`strength` stage to emit per-stage strength).
 
 ## Status
 
-Greenfield. The repo is an empty checkout; this document plus [AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), and the staged [plans/](stages.md) are the build plan.
+Greenfield. No `civ_bench/` package or `pyproject.toml` exists yet; the repo so far is the build plan — this document plus [AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), the example `configs/*.template.json`, the `scripts/install*`, and the staged [plans/](stages.md).
 
 **Build order — load-only first.** We bring up the pipeline using **pre-trained estimators loaded from copied model dirs** (zero training), then implement training/tuning last. The authoritative ordering lives in [stages.md](stages.md); in brief:
 
 0. **Scaffold** — `configs/` (port `models.json`/`experiments.json`/`paths.json`), `civ_bench/config/` (load + validate, resolve the output root §2.1), `civ_bench/pipeline/` (DAG), and the shared `data`/`catalog`/`stats`/`plotting` infra. ([stage0.md](stage0.md))
 1. **extract** → canonical CSVs. ([stage1.md](stage1.md))
-2. **estimators (load only)** — `fit:"pretrained"` loads a copied `model_dir` and infers; no training yet (`configs/benchmark.pretrained.json`). ([stage2.md](stage2.md))
+2. **estimators (load only)** — `fit:"pretrained"` loads a copied `model_dir` and infers; no training yet (a local config copied from `configs/benchmark.pretrained.template.json`, e.g. `configs/benchmark.dev.json`). ([stage2.md](stage2.md))
 3. **adjust** — the `strength` panel. ([stage3.md](stage3.md))
 4. **analyses** — the core modules. ([stage4.md](stage4.md))
 5. **report** — full pipeline end-to-end with no training. ([stage5.md](stage5.md))
-6. **train / tune** — implement `fit:"train"`+`tune`; bring up the train-based `benchmark.json` and the **cross variant** (estimator trained on non-LLM seats → `reports-cross/`, configurable suffix §2.1). ([stage6.md](stage6.md))
+6. **train / tune** — implement `fit:"train"`+`tune`; bring up the train-based `benchmark.template.json` and the **cross variant** (estimator trained on non-LLM seats → `reports-cross/`, configurable suffix §2.1). ([stage6.md](stage6.md))

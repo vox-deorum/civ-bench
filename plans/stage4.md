@@ -12,7 +12,7 @@
 - **calibration** (`analyses/calibration/`): `calibration.reliability`, `calibration.loss_by_progress`.
 - **performance** (`analyses/performance/`): `performance.score_ratio` (uses `stats/`), `performance.strength_panel` (consumes `strength`), `performance.turn_predicted` (uses an estimator).
 - **exploratory** (`analyses/exploratory/`): `exploratory.model_token_costs` (tokens table + pricing).
-- Optional modules (ablation_bt, vanilla_slot_effect, winner_trajectories, elo_comparison, context_slicing, permutation_importance, panel, turn, strategy_profiles) are **registry-reserved, `enabled:false`**, shipped only in `benchmark.full.json`. `behavior.*` is deferred (not built). **`ratings.vanilla_slot_effect` doubles as the controlled-design validation**: with stage3's start-cell adjustment on, the seat/start-position effect should be significant on the raw panel and ~null on the adjusted panel.
+- Optional modules (ablation_bt, vanilla_slot_effect, winner_trajectories, elo_comparison, context_slicing, permutation_importance, panel, turn, strategy_profiles) are **registry-reserved, `enabled:false`**, shipped only in `benchmark.full.template.json`. `behavior.*` is deferred (not built). **`ratings.vanilla_slot_effect` doubles as the controlled-design validation**: with stage3's start-cell adjustment on, the seat/start-position effect should be significant on the raw panel and ~null on the adjusted panel.
 
 ## Config wiring (`analyses[]`)
 

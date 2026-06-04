@@ -27,7 +27,7 @@ Honor `enabled`, `runs_dir`, `outputs` (`["turns","panel","games","tokens"]`), `
 
 ## Bootstrap shortcut (so stages 2–5 are testable before raw DBs are wired)
 
-Set `extract.enabled:false` in `benchmark.pretrained.json` and drop the OneDrive analysis-root CSVs (`turn_data.csv`, `panel_data.csv`, `game_data.csv`, `model_token_usage.csv`) into `runs/`.
+Set `extract.enabled:false` in your local load-only config (copied from `benchmark.pretrained.template.json`) and drop the OneDrive analysis-root CSVs (`turn_data.csv`, `panel_data.csv`, `game_data.csv`, `model_token_usage.csv`) into `runs/`. (The worked dev config `benchmark.dev.json` instead sets `extract.enabled:true` with `runs_dir: "J:/"` to exercise extract from raw DBs.)
 
 ## Done
 
