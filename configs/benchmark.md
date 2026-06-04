@@ -57,6 +57,8 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
   "description": "Staff line-up, standard 8-seat map",  // optional, free text
   "seed": 42,                            // required: global RNG seed (determinism)
 
+  "output":     { /* §2.1 */ },          // optional: run output root + variant suffix (→ reports/, reports-cross/)
+
   "catalogs": {                          // optional: override the sibling config files
     "paths":       "configs/paths.json",
     "models":      "configs/models.json",
@@ -75,14 +77,39 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
 ```
 
 Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`,
-`catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and
-`adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an `adjust` stage to
-supply the `strength` table it rates.
+`output`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit
+`estimators` (and `adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an
+`adjust` stage to supply the `strength` table it rates.
 
 **`catalogs` defaults to sibling files.** If omitted, the harness loads `paths.json`, `models.json`,
 and `experiments.json` from the **same directory as this `benchmark.json`**. Set a key only to point
 at a file elsewhere; unset keys still fall back to the sibling. (A missing required catalog — e.g.
 no `models.json` next to the config and no override — is a load error.)
+
+### 2.1 `output` — the run output root (and the `-cross` variant)
+
+Every stage that writes (`estimators` `save_predictions`/`save_model`, `adjust` `save`, `report`
+`out_dir`) writes **under a single run output root**, resolved once and threaded into all stages. By
+default that root is `reports/`. `output` lets a run redirect everything to a sibling root by
+appending a configurable **suffix** — the mechanism behind the **`-cross` (llm/non-llm) variant**,
+where an estimator trained on non-LLM seats predicts everyone and its whole report lands in
+`reports-cross/` instead of clobbering the normal run.
+
+```jsonc
+"output": {
+  "root":   "reports",   // base output directory for ALL stages (default "reports")
+  "suffix": ""           // appended to root → "" ⇒ reports/ ;  "-cross" ⇒ reports-cross/
+}
+```
+
+- A stage save-path written as `reports/estimators/<id>/…` is interpreted **relative to the resolved
+  root** (`<root><suffix>/estimators/<id>/…`). Authoring paths under `reports/` keeps the default run
+  unchanged; setting `suffix: "-cross"` moves the *same* config's outputs to `reports-cross/`.
+- The **cross variant is otherwise an ordinary `fit: train` run** with `train.train_subset: "non_llm"`
+  (§4.4) — there is no separate "cross" estimator kind and no special prediction-loading path. Pair
+  the non-LLM training subset with `output.suffix: "-cross"` (typically as its own config, e.g.
+  `benchmark.cross.json`, or a CLI suffix override) so the two variants coexist on disk.
+- `output` is optional; omit it for the default `reports/` root and no suffix.
 
 ---
 
@@ -601,7 +628,7 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
 ```jsonc
 "report": {
   "template": "default",                 // template name under civ_bench/reports/
-  "out_dir": "reports/",                 // output root; run writes reports/<name>/
+  "out_dir": "reports/",                 // resolved under the run output root (§2.1); run writes <root><suffix>/<name>/
   "formats": ["md", "html"],             // any of: md, html, pdf
   "sections": null,                      // null = every produced AnalysisResult, in DAG order;
                                          //   or an explicit ordered list of stage ids to include
@@ -646,3 +673,6 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
 11. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled
     package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install`
     first so every dependency is present.
+12. **Output root** (§2.1): `output`, when present, accepts only `root` (string) and `suffix`
+    (string); both optional, defaulting to `"reports"` and `""`. Every stage save-path resolves under
+    `<root><suffix>/`; two runs that differ only in `suffix` must not write to the same directory.

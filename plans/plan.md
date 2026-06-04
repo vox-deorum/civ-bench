@@ -10,8 +10,11 @@ a config, and it produces a report — extraction, analysis, and rendering all d
 > package where **everything experiment-specific is config, not code**, and reports are generated
 > automatically rather than hand-assembled in notebooks.
 
-This document is the *roadmap*. For the rules every change must follow, read [AGENTS.md](AGENTS.md).
-For the run-spec schema, read [configs/benchmark.md](configs/benchmark.md).
+This document is the *roadmap*. For the rules every change must follow, read [AGENTS.md](../AGENTS.md).
+For the run-spec schema, read [configs/benchmark.md](../configs/benchmark.md). For the **ordered,
+stage-by-stage build plan** (which this roadmap is refined into), read [stages.md](stages.md)
+and `stage0.md … stage6.md`. The `plans/` files are **live documentation** — keep them in
+parity with the code as you implement (update the relevant stage file in the same change).
 
 ## End-to-end flow
 
@@ -38,7 +41,7 @@ raw game DBs ──▶ extract ──▶ estimators ──▶ adjust ──▶ a
   `calibration.*`, `performance.*`, `exploratory.*`. (`behavior.*` is deferred.)
 - **report** — assembles the produced artifacts into markdown/html.
 
-See [AGENTS.md](AGENTS.md#the-pipeline-model) for the stage model and [configs/benchmark.md](configs/benchmark.md)
+See [AGENTS.md](../AGENTS.md#the-pipeline-model) for the stage model and [configs/benchmark.md](../configs/benchmark.md)
 for how dependencies and pre-trained estimators are expressed.
 
 ## Migration map: what comes from `vox-deorum-analysis`
@@ -61,7 +64,7 @@ Port the **logic**, drop the **flatness and the data**. Rough correspondence:
 | `behaviors/` notebooks | **deferred** | The behavioral family scores no strategist; not ported now. Revisit as an opt-in extension later. The derived CSVs `flavor_change_decomposition.ipynb` writes (`atom_dictionary.csv`, `multi_flavor_events.csv`) are **read by nothing else** (grep-confirmed), so deferring the whole family drops no input any retained stage depends on. |
 | checked-in CSVs, `*/output/`, `ratings/output/`, `behaviors/nuke/` | **not ported** | Raw data goes in `runs/` (gitignored); results regenerate into `reports/`. |
 | `template.md` + `sync-template.sh` + template branch | **obsolete** | The whole repo is now reusable by design; no template branch needed. |
-| `models/tune_colab.ipynb` (Colab tuning) | **obsolete** | Tuning is the estimator `tune` block ([configs/benchmark.md](configs/benchmark.md) §4.3); no separate Colab notebook. |
+| `models/tune_colab.ipynb` (Colab tuning) | **obsolete** | Tuning is the estimator `tune` block ([configs/benchmark.md](../configs/benchmark.md) §4.3); no separate Colab notebook. |
 
 When porting a module, do **not** paste it verbatim. Strip the hardcoded paths, the
 `print(...)`-as-output style, and any single-dataset assumptions; route those through config and
@@ -70,7 +73,7 @@ return values instead.
 ## Module inventory
 
 Every module the harness will include, grouped by stage kind. The registry name in the left column
-is what `configs/benchmark.json` selects. (See [configs/benchmark.md](configs/benchmark.md) for the
+is what `configs/benchmark.json` selects. (See [configs/benchmark.md](../configs/benchmark.md) for the
 per-module params.) Modules are split into a **core** set (implemented, in the default
 `benchmark.json`) and an **optional** set (registry-reserved, `"enabled": false`, shipped only in
 `benchmark.full.json`). See *Core vs. optional* below.
@@ -113,19 +116,22 @@ the `adjust`/`strength` stage to emit per-stage strength).
 
 ## Status
 
-Greenfield. The repo is an empty checkout; this document plus [AGENTS.md](AGENTS.md) and
-[configs/benchmark.md](configs/benchmark.md) are the build plan.
+Greenfield. The repo is an empty checkout; this document plus [AGENTS.md](../AGENTS.md),
+[configs/benchmark.md](../configs/benchmark.md), and the staged [plans/](stages.md) are the build plan.
 
-**Where to start:**
+**Build order — load-only first.** We bring up the pipeline using **pre-trained estimators loaded
+from copied model dirs** (zero training), then implement training/tuning last. The authoritative
+ordering lives in [stages.md](stages.md); in brief:
 
-1. Stand up `configs/` (port `models.json`, `experiments.json`, `paths.json`; write the first
-   `benchmark.json`).
-2. Build `civ_bench/config/` (load + validate) and `civ_bench/pipeline/` (resolve `needs`,
-   topo-sort, run stages).
-3. Port `civ_bench/extract/` and `civ_bench/data/`.
-4. Port one estimator end-to-end (`score` is the cleanest) through `civ_bench/estimators/`.
-5. Port the `adjust` stage (`strength`, from `turn_predicted`'s `prepare_strength_data`) so the
-   estimator's predictions become the `adjusted_strength` panel.
-6. Port one analysis end-to-end (`ratings.bradley_terry`, consuming the `strength` table) through to
-   a generated report — this proves the full extract → estimator → adjust → analysis → report
-   pipeline before migrating the rest.
+0. **Scaffold** — `configs/` (port `models.json`/`experiments.json`/`paths.json`), `civ_bench/config/`
+   (load + validate, resolve the output root §2.1), `civ_bench/pipeline/` (DAG), and the shared
+   `data`/`catalog`/`stats`/`plotting` infra. ([stage0.md](stage0.md))
+1. **extract** → canonical CSVs. ([stage1.md](stage1.md))
+2. **estimators (load only)** — `fit:"pretrained"` loads a copied `model_dir` and infers; no training
+   yet (`configs/benchmark.pretrained.json`). ([stage2.md](stage2.md))
+3. **adjust** — the `strength` panel. ([stage3.md](stage3.md))
+4. **analyses** — the core modules. ([stage4.md](stage4.md))
+5. **report** — full pipeline end-to-end with no training. ([stage5.md](stage5.md))
+6. **train / tune** — implement `fit:"train"`+`tune`; bring up the train-based `benchmark.json` and
+   the **cross variant** (estimator trained on non-LLM seats → `reports-cross/`, configurable suffix
+   §2.1). ([stage6.md](stage6.md))
