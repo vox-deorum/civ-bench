@@ -478,6 +478,17 @@ stage rather than buried inside each `ratings.*` module.
   (`r_lmer` via lme4 — reusing the cross-platform `Rscript` locator — or `statsmodels` MixedLM). Incomplete
   cycles, cells with no Vanilla baseline, and player types disconnected from `Vanilla` are **warned, never
   fatal** (keep all games, proceed).
+- **Intermediate adjustment diagnostics — always written (no config).** Like every other audit trail, the
+  stage *always* emits the per-group values it subtracts, next to the strength panel (in the directory of
+  `save`, default `reports/adjust/`), so the correction can be inspected without opting in:
+  - `civ_effects.csv` — per-`civilization` OLS-logit effect table (`civilization, civ_effect, n_rows`) from
+    the uncontrolled (`civ_adjust`) path.
+  - `cell_baseline.csv` — per-`(seed, player_id)` table from the controlled (`block`) path: `seed, player_id,
+    civilization, cell_baseline, n_vanilla, n_games, n_models, has_vanilla_baseline, vanilla_connected`, plus
+    the fitted variance components (σ²_seed / σ²_seat / σ²_cell / σ²_resid).
+
+  A mixed dataset writes both; each is simply empty/absent when its path didn't run.
+  `performance.strength_panel` always surfaces whichever exist (§6.2) — no flag.
 
 ---
 
@@ -628,6 +639,8 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
 
 // performance.strength_panel — summarizes the adjust stage's strength table by player type.
 //   It CONSUMES the `strength` table (does not derive it — that's the adjust stage, §5).
+//   It also surfaces the adjust stage's always-written adjustment diagnostics — the per-civ effect table
+//   and/or the per-(seed,seat) cell baseline (§5.1) — whenever they exist. No flag.
 { "module": "performance.strength_panel",
   "uses": { "tables": ["strength"] },
   "params": { "metric": "adjusted_strength", "by": "player_type" } }

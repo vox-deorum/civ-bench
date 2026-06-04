@@ -23,7 +23,8 @@ After `logit_strength`, the panel is split by `controlled = (seed != -1 and seat
 `seed` from the `games` table by `game_id`):
 
 - **Uncontrolled rows** keep today's behavior: OLS-logit **civ** adjustment (`civ_adjust`, uses
-  `civ_bench/stats/`). `civ_adjust:"none"` ⇒ `adjusted_strength == relative_strength`.
+  `civ_bench/stats/`). `civ_adjust:"none"` ⇒ `adjusted_strength == relative_strength`. The per-civ effects it
+  subtracts are always written to `<adjust dir>/civ_effects.csv` (below).
 - **Controlled rows** take the **matched start-cell** path (benchmark.md §5.1), selected by `block`
   (`none|seed|start_cell|auto`; `auto` ⇒ `start_cell` when controlled rows exist):
   - Derive `start_cell = (seed, player_id)`.
@@ -40,6 +41,13 @@ After `logit_strength`, the panel is split by `controlled = (seed != -1 and seat
 - **Coverage diagnostic (WARN, never abort):** cells with no Vanilla baseline (still predicted via the
   seed/seat margin — flagged), per-model cell coverage (from `config_slot`/`seating_rotation`), and
   connectedness-to-`Vanilla` (union-find; extrapolated models warned). Keep all games, proceed.
+- **Always-written adjustment trails (no config — like every other audit artifact).** The stage writes the
+  intermediate per-group values it subtracts, next to the panel (the directory of `save`, default
+  `reports/adjust/`): `civ_effects.csv` (per-`civilization`: `civilization, civ_effect, n_rows`, from the
+  uncontrolled path) and `cell_baseline.csv` (per-`(seed, player_id)`: `seed, player_id, civilization,
+  cell_baseline, n_vanilla, n_games, n_models, has_vanilla_baseline, vanilla_connected` + the fitted variance
+  components, from the controlled path). Each is generated whenever its path ran (a mixed dataset writes both);
+  `performance.strength_panel` surfaces them in the report.
 
 `civ_bench/stats/` gains a `MixedLMResult` wrapper + a `fit_cell_baseline(...)` dispatcher alongside the OLS
 `RegressionResult`.
@@ -55,7 +63,9 @@ The stage `id` doubles as the table name. `uses.estimators` is required and sing
 
 `<root>/adjust/player_strength_panel.csv` exists with at least
 `game_id, player_id, player_type, civilization, adjusted_strength` (plus `seed`/`config_slot` pass-through),
-and is registered so a downstream `uses.tables:["strength"]` resolves and adds the edge.
+and is registered so a downstream `uses.tables:["strength"]` resolves and adds the edge. The intermediate
+trails `<root>/adjust/civ_effects.csv` and `<root>/adjust/cell_baseline.csv` are written automatically
+(whichever path ran).
 
 ## Verification
 
@@ -65,3 +75,5 @@ and is registered so a downstream `uses.tables:["strength"]` resolves and adds t
   recovers the baseline, `adjusted_strength` recovers the uplift, and `ratings.vanilla_slot_effect` goes from
   significant (raw) to ~null (adjusted).
 - Sparse/no-baseline/disconnected cells warn (never abort); `r_lmer` vs `statsmodels` baselines agree (~1e-2).
+- The `civ_effects.csv` / `cell_baseline.csv` trails are emitted automatically and reconcile with the panel:
+  subtracting the trail value (civ effect or cell baseline) from `logit_strength` reproduces `adjusted_strength`.
