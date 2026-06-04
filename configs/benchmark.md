@@ -486,9 +486,9 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 **Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
 
 ```jsonc
-// ratings.iterative_bt — incrementally add each player type's games (chronologically) and track
-//   Elo convergence; isolates each game's marginal contribution. (Also writes the ablation_bt_* CSV.)
-{ "module": "ratings.iterative_bt", "enabled": false,
+// ratings.ablation_bt — incrementally add each player type's games (chronologically) and track
+//   Elo convergence; isolates each game's marginal contribution. Writes the ablation_bt_* artifacts.
+{ "module": "ratings.ablation_bt", "enabled": false,
   "uses": { "tables": ["strength"] }, "params": { "weighted": true } }
 
 // ratings.vanilla_slot_effect — tests whether seat position confounds Vanilla rating

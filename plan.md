@@ -51,15 +51,17 @@ Port the **logic**, drop the **flatness and the data**. Rough correspondence:
 | `shared/data_loading.py`                 | `civ_bench/data/`                            | `load_turn_data` / `load_panel_data` + filters. |
 | `shared/model_catalog.py`, `experiments.py` | `civ_bench/catalog/`                      | Config-backed catalogs; preserve alias normalization + seat expansion. |
 | `shared/config/*.json`                   | `configs/*.json`                             | Same schema; now the primary control surface, not a side file. |
-| `shared/plot_styles.py`, `plot_utilities.py`, `regression_utilities.py` | `civ_bench/plotting/` | Keep style/color logic; trim notebook-only helpers. |
+| `shared/plot_styles.py`, `plot_utilities.py` | `civ_bench/plotting/` | Keep style/color logic; trim notebook-only helpers. |
+| `shared/regression_utilities.py` | `civ_bench/stats/` | The **statistics** layer (OLS/logistic regression wrappers, clustered/weighted fits, coefficient/odds-ratio heatmaps). Imported by `performance.score_ratio`, `ratings.matchups` (`validate_ols`), and `adjust/strength.py`'s civ-adjustment — it is real analysis code, **not** a plotting helper, so it does not belong under `plotting/`. |
 | `models/` (compare/evaluate/tune + registry) | `civ_bench/estimators/`                  | Predictor registry pattern is already good — fold tune/train/load/infer behind the estimator config block. |
 | `performance/turn_predicted.ipynb` → `prepare_strength_data` (also copied in `ratings/iterative_bt.py`) | `civ_bench/adjust/strength.py` | The strength-panel derivation: estimator `predicted_win_probability` → `adjusted_strength`. It is its own **`adjust` stage**, not an analysis, because every `ratings.*` consumes its `strength` table. |
 | `predict/` (loader + calibration/comparison notebooks) | `civ_bench/analyses/prediction/` + `…/calibration/` | Scoring views (`evaluate`/`compare`) become `prediction.*`; the reliability + loss-by-progress views become the `calibration.*` family (§ module inventory). |
-| `ratings/` (BT, PL, strategy-Elo, matchups, bootstrap; R+py) | `civ_bench/analyses/ratings/`       | Keep R interop where it exists; wrap each as an Analysis rating the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. **strategy-Elo and bootstrap are NOT separate modules**: strategy-Elo is `group_by: ["player_type","strategy"]` (it already just swaps BT's identity column and reuses `calculate_ratings()`); bootstrap is a shared resample-and-refit `bootstrap` param. |
-| `performance/`, `exploratory/` notebooks | `civ_bench/analyses/{performance,exploratory}/` + report templates | Convert notebook narratives into generated report sections. |
-| `behaviors/` notebooks | **deferred** | The behavioral family scores no strategist; not ported now. Revisit as an opt-in extension later. |
+| `ratings/` (BT, PL, strategy-Elo, matchups, bootstrap; R+py) | `civ_bench/analyses/ratings/`       | Keep R interop where it exists; wrap each as an Analysis rating the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. **strategy-Elo and bootstrap are NOT separate modules**: strategy-Elo is `group_by: ["player_type","strategy"]` (it already just swaps BT's identity column and reuses `calculate_ratings()`); bootstrap is a shared resample-and-refit `bootstrap` param. **R discovery must be cross-platform**: when porting `bradley_terry.py`/`plackett_luce.py`, find `Rscript` via `PATH` and an override env var (`CIV_BENCH_RSCRIPT`) — drop the old `_find_rscript()` hardcoded `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS. |
+| `performance/`, `exploratory/` notebooks | `civ_bench/analyses/{performance,exploratory}/` + report templates | Convert notebook narratives into generated report sections. **Orphans resolved:** `exploratory/group_permutation_importance.ipynb` is a duplicate of `performance/group_permutation_importance.ipynb` → keep only `performance.permutation_importance`; if the exploratory narrative genuinely differs it is a descriptive re-cut and is dropped, not re-added as a module. `exploratory/panel_exploratory_vanilla.ipynb` (vanilla-only cut, `condition_include=["observe-vanilla-standard"]`) has **no new module**: it is `exploratory.panel` run under a vanilla `filter` — config, not code. |
+| `behaviors/` notebooks | **deferred** | The behavioral family scores no strategist; not ported now. Revisit as an opt-in extension later. The derived CSVs `flavor_change_decomposition.ipynb` writes (`atom_dictionary.csv`, `multi_flavor_events.csv`) are **read by nothing else** (grep-confirmed), so deferring the whole family drops no input any retained stage depends on. |
 | checked-in CSVs, `*/output/`, `ratings/output/`, `behaviors/nuke/` | **not ported** | Raw data goes in `runs/` (gitignored); results regenerate into `reports/`. |
 | `template.md` + `sync-template.sh` + template branch | **obsolete** | The whole repo is now reusable by design; no template branch needed. |
+| `models/tune_colab.ipynb` (Colab tuning) | **obsolete** | Tuning is the estimator `tune` block ([configs/benchmark.md](configs/benchmark.md) §4.3); no separate Colab notebook. |
 
 When porting a module, do **not** paste it verbatim. Strip the hardcoded paths, the
 `print(...)`-as-output style, and any single-dataset assumptions; route those through config and
@@ -78,7 +80,7 @@ per-module params.) Modules are split into a **core** set (implemented, in the d
   `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`
 - **adjust** (`civ_bench/adjust/`, derived tables): `strength`
 - **ratings** — *core:* `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`.
-  *optional:* `ratings.iterative_bt`, `ratings.vanilla_slot_effect`.
+  *optional:* `ratings.ablation_bt`, `ratings.vanilla_slot_effect`.
   BT/PL take a `group_by` param (default `["player_type"]`; `["player_type","strategy"]` =
   per-strategy Elo) and a `bootstrap` param (CIs) — so the former `strategy_elo`/`bootstrap_bt`
   modules are folded in, not separate.

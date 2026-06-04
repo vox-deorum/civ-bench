@@ -155,8 +155,8 @@
       "params": { "mode": "mean", "validate_ols": true }
     },
     {
-      "id": "ratings_iterative_bt",
-      "module": "ratings.iterative_bt",
+      "id": "ratings_ablation_bt",
+      "module": "ratings.ablation_bt",
       "enabled": false,
       "uses": { "tables": ["strength"] },
       "params": { "weighted": true }

@@ -66,8 +66,11 @@ civ-bench/
 │   │   ├── performance/          # strength panels, score-ratio regressions, turn-predicted
 │   │   └── exploratory/          # dataset descriptives (token costs, panel/turn summaries)
 │   │   #   behavior/ is DEFERRED — not built now (revisit as an opt-in extension)
+│   ├── stats/                    # statistics layer: OLS/logistic wrappers, clustered/weighted fits,
+│   │                             #   coeff/odds-ratio heatmaps (port of shared/regression_utilities.py).
+│   │                             #   Imported by performance.score_ratio, ratings.matchups, adjust/strength.py
 │   ├── reports/                  # assemble analysis artifacts → markdown/html report
-│   └── plotting/                 # shared styles, colors, plot helpers
+│   └── plotting/                 # shared styles, colors, figure helpers
 ├── runs/                         # raw game-run input data + canonical CSVs (gitignored)
 └── reports/                      # generated reports, figures, trained estimators (gitignored)
 ```
@@ -186,7 +189,9 @@ R packages, failing loudly if any is absent. The full set:
 - **Python core:** `pandas`, `numpy`, `scipy`, `statsmodels`, `matplotlib`, `seaborn`, `plotly`,
   `scikit-learn`, `tabulate`.
 - **Python heavy (still required):** `torch`, `xgboost`, `optuna`, `imbalanced-learn`.
-- **R (for ratings):** `BradleyTerry2`, `PlackettLuce` (needs `Rscript` on `PATH`).
+- **R (for ratings):** `BradleyTerry2`, `PlackettLuce` (needs `Rscript` discoverable on `PATH`, or
+  via the `CIV_BENCH_RSCRIPT` env override — **not** a hardcoded Windows path like the old repo's
+  `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS).
 
 `pyproject.toml` declares the Python set as plain install requirements (one environment, no
 `civ-bench[torch]`-style extras). Code imports these directly; a missing dependency is a hard error,
