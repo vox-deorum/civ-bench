@@ -35,7 +35,7 @@ raw game DBs ──▶ extract ──▶ estimators ──▶ adjust ──▶ a
   panel** (`adjusted_strength`), registered as a named `strength` table. This is the bridge the
   rating models sit on; it makes `ratings.*` depend (transitively) on an estimator.
 - **analyses** — pluggable modules: `ratings.*` (rate the `strength` table), `prediction.*`,
-  `performance.*`, `behavior.*`, `exploratory.*`.
+  `calibration.*`, `performance.*`, `exploratory.*`. (`behavior.*` is deferred.)
 - **report** — assembles the produced artifacts into markdown/html.
 
 See [AGENTS.md](AGENTS.md#the-pipeline-model) for the stage model and [configs/benchmark.md](configs/benchmark.md)
@@ -54,9 +54,10 @@ Port the **logic**, drop the **flatness and the data**. Rough correspondence:
 | `shared/plot_styles.py`, `plot_utilities.py`, `regression_utilities.py` | `civ_bench/plotting/` | Keep style/color logic; trim notebook-only helpers. |
 | `models/` (compare/evaluate/tune + registry) | `civ_bench/estimators/`                  | Predictor registry pattern is already good — fold tune/train/load/infer behind the estimator config block. |
 | `performance/turn_predicted.ipynb` → `prepare_strength_data` (also copied in `ratings/iterative_bt.py`) | `civ_bench/adjust/strength.py` | The strength-panel derivation: estimator `predicted_win_probability` → `adjusted_strength`. It is its own **`adjust` stage**, not an analysis, because every `ratings.*` consumes its `strength` table. |
-| `predict/` (loader + calibration/comparison notebooks) | `civ_bench/analyses/prediction/` | Convert the visualize-* notebooks into generated report sections. |
-| `ratings/` (BT, PL, strategy-Elo, matchups; R+py) | `civ_bench/analyses/ratings/`           | Keep R interop where it exists; wrap each as an Analysis. Each rates the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. |
-| `performance/`, `exploratory/`, `behaviors/` notebooks | `civ_bench/analyses/{performance,behavior}/` + report templates | Convert notebook narratives into generated report sections. |
+| `predict/` (loader + calibration/comparison notebooks) | `civ_bench/analyses/prediction/` + `…/calibration/` | Scoring views (`evaluate`/`compare`) become `prediction.*`; the reliability + loss-by-progress views become the `calibration.*` family (§ module inventory). |
+| `ratings/` (BT, PL, strategy-Elo, matchups, bootstrap; R+py) | `civ_bench/analyses/ratings/`       | Keep R interop where it exists; wrap each as an Analysis rating the `adjust` stage's `strength` table (`uses.tables: ["strength"]`), **not** raw `panel_data`. **strategy-Elo and bootstrap are NOT separate modules**: strategy-Elo is `group_by: ["player_type","strategy"]` (it already just swaps BT's identity column and reuses `calculate_ratings()`); bootstrap is a shared resample-and-refit `bootstrap` param. |
+| `performance/`, `exploratory/` notebooks | `civ_bench/analyses/{performance,exploratory}/` + report templates | Convert notebook narratives into generated report sections. |
+| `behaviors/` notebooks | **deferred** | The behavioral family scores no strategist; not ported now. Revisit as an opt-in extension later. |
 | checked-in CSVs, `*/output/`, `ratings/output/`, `behaviors/nuke/` | **not ported** | Raw data goes in `runs/` (gitignored); results regenerate into `reports/`. |
 | `template.md` + `sync-template.sh` + template branch | **obsolete** | The whole repo is now reusable by design; no template branch needed. |
 
@@ -68,25 +69,45 @@ return values instead.
 
 Every module the harness will include, grouped by stage kind. The registry name in the left column
 is what `configs/benchmark.json` selects. (See [configs/benchmark.md](configs/benchmark.md) for the
-per-module params.)
+per-module params.) Modules are split into a **core** set (implemented, in the default
+`benchmark.json`) and an **optional** set (registry-reserved, `"enabled": false`, shipped only in
+`benchmark.full.json`). See *Core vs. optional* below.
 
 - **extract** — `extract`
 - **estimators** (`civ_bench/estimators/`, selected by `model` id): `naive`, `score`, `baseline`,
   `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`
 - **adjust** (`civ_bench/adjust/`, derived tables): `strength`
-- **ratings** — `ratings.bradley_terry`, `ratings.plackett_luce`,
-  `ratings.strategy_elo`, `ratings.matchups`, `ratings.bootstrap_bt`, `ratings.iterative_bt`,
-  `ratings.vanilla_slot_effect`
-- **prediction** (estimator-facing analyses) — `prediction.evaluate`, `prediction.compare`,
-  `prediction.calibration`, `prediction.loss_by_progress`, `prediction.winner_trajectories`,
-  `prediction.elo_comparison`, `prediction.context_slicing`
-- **performance** — `performance.score_ratio`, `performance.strength_panel`,
-  `performance.turn_predicted`, `performance.permutation_importance`
-- **behavior** — `behavior.flavor_change_clusters`, `behavior.flavor_change_decomposition`,
-  `behavior.pivot_rationale`, `behavior.victory_commitment`, `behavior.nuke_flavor_rationale`
-- **exploratory** — `exploratory.panel`, `exploratory.turn`, `exploratory.strategy_profiles`,
-  `exploratory.model_token_costs`
+- **ratings** — *core:* `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`.
+  *optional:* `ratings.iterative_bt`, `ratings.vanilla_slot_effect`.
+  BT/PL take a `group_by` param (default `["player_type"]`; `["player_type","strategy"]` =
+  per-strategy Elo) and a `bootstrap` param (CIs) — so the former `strategy_elo`/`bootstrap_bt`
+  modules are folded in, not separate.
+- **prediction** (scoring) — *core:* `prediction.evaluate`, `prediction.compare`.
+  *optional:* `prediction.winner_trajectories`, `prediction.elo_comparison`,
+  `prediction.context_slicing`.
+- **calibration** (calibration of the estimator) — *core:* `calibration.reliability`,
+  `calibration.loss_by_progress`.
+- **performance** — *core:* `performance.score_ratio`, `performance.strength_panel`,
+  `performance.turn_predicted`. *optional:* `performance.permutation_importance`.
+- **exploratory** — *core:* `exploratory.model_token_costs`. *optional:* `exploratory.panel`,
+  `exploratory.turn`, `exploratory.strategy_profiles`.
 - **report** — `report`
+
+> **`behavior.*` is deferred** — the whole behavioral family (flavor-change, pivot/nuke rationale,
+> victory commitment) scores no strategist and is not in this inventory. Revisit as an opt-in
+> extension later.
+
+### Core vs. optional
+
+The shipped default `configs/benchmark.json` is the **lean core** (~10 modules): it answers the two
+benchmark questions — *which strategist is stronger* (ratings) and *how good is the win predictor*
+(prediction + calibration) — plus the strength panel that feeds ratings and a cost-efficiency axis.
+The kitchen-sink `configs/benchmark.full.json` adds every optional module with `"enabled": false`,
+so opting in is a one-flag config edit, never a code change (invariant 1). New rating *slices*
+(per-strategy, and later per-stage) arrive as `groupings` catalog entries + a `group_by` value, also
+config-only. **Deferred (not built now):** the optional modules above, the `behavior.*` family, and
+`groupings` dimensions beyond `strategy` (notably a per-game-stage `kind: "bucket"`, which also needs
+the `adjust`/`strength` stage to emit per-stage strength).
 
 ## Status
 

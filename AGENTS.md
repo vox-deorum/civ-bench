@@ -16,9 +16,11 @@ wrong even if it "works":
 1. **Config over code.** Anything that changes between datasets, experiments, model line-ups, or
    report selections lives in a JSON file under `configs/`, never hardcoded in a module. Adding a
    new model or experiment must require *zero* Python edits.
-2. **Modular + pluggable.** Each analysis (ratings, prediction, performance, behavior) is a
-   self-contained unit behind a common interface and a registry. Adding an analysis is adding one
-   module + one registry entry + one config block — touching nothing else.
+2. **Modular + pluggable.** Each analysis (ratings, prediction, calibration, performance,
+   exploratory) is a self-contained unit behind a common interface and a registry. Adding an analysis
+   is adding one module + one registry entry + one config block — touching nothing else. Robustness
+   variants of an existing analysis (bootstrap CIs, identity groupings like per-strategy Elo) are
+   **params on the parent module**, not new modules — trimming or adding them is a config edit.
 3. **Reports are generated, never authored.** The harness consumes raw game-run data and emits a
    complete report (tables + figures + narrative scaffolding). No notebook is the source of truth
    for a result. If a result can't be regenerated from `civ-bench run`, it doesn't belong in the
@@ -35,11 +37,13 @@ civ-bench/
 ├── README.md
 ├── pyproject.toml                # installable: `pip install -e .`, exposes `civ-bench` CLI
 ├── configs/                      # ── the JSON control surface ──
-│   ├── benchmark.json            # top-level run spec (see configs/benchmark.md)
+│   ├── benchmark.json            # DEFAULT run spec = the lean CORE (~10 modules; see configs/benchmark.md)
+│   ├── benchmark.full.json       # kitchen-sink: core + every optional module with "enabled": false
 │   ├── benchmark.md              # the benchmark.json convention / schema reference
 │   ├── models.json               # strategist + prediction model registry (id/aliases/color/pricing)
 │   ├── experiments.json          # experiment → seat/player-type mapping; vanilla/null groups
 │   └── paths.json                # repo-relative data + output roots
+│   #  groupings (rating-identity dimensions, e.g. "strategy") + filters live INLINE in benchmark.json
 ├── civ_bench/
 │   ├── __init__.py
 │   ├── cli.py                    # `civ-bench extract|run|report ...`
@@ -56,10 +60,12 @@ civ-bench/
 │   │   └── strength.py           # adjusted_strength derivation (port of turn_predicted's prepare_strength_data)
 │   ├── analyses/                 # ── pluggable analysis modules ──
 │   │   ├── base.py               # Analysis interface + registry (name → class)
-│   │   ├── ratings/              # Bradley-Terry / Plackett-Luce / Elo / matchups
-│   │   ├── prediction/           # estimator evaluation + calibration/comparison views
+│   │   ├── ratings/              # Bradley-Terry / Plackett-Luce / matchups (group_by + bootstrap params)
+│   │   ├── prediction/           # estimator scoring: evaluate + compare
+│   │   ├── calibration/          # calibration of the estimator: reliability + loss-by-progress
 │   │   ├── performance/          # strength panels, score-ratio regressions, turn-predicted
-│   │   └── behavior/             # flavor/rationale/strategy descriptive analyses
+│   │   └── exploratory/          # dataset descriptives (token costs, panel/turn summaries)
+│   │   #   behavior/ is DEFERRED — not built now (revisit as an opt-in extension)
 │   ├── reports/                  # assemble analysis artifacts → markdown/html report
 │   └── plotting/                 # shared styles, colors, plot helpers
 ├── runs/                         # raw game-run input data + canonical CSVs (gitignored)
@@ -75,9 +81,9 @@ kinds, and they run in dependency order:
 extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
    │            │             │           │            │
 canonical   trained or     strength    ratings /    templated
-  CSVs       pre-trained     panel      performance /  markdown
-            predictors    (adjusted_   behavior       + html
-                           strength)
+  CSVs       pre-trained     panel      prediction /   markdown
+            predictors    (adjusted_   calibration /  + html
+                           strength)   performance
 ```
 
 - **`extract`** turns raw game DBs in `runs/` into canonical CSVs (`turn_data`, `panel_data`,
@@ -91,10 +97,12 @@ canonical   trained or     strength    ratings /    templated
   winner enforcement → OLS civilization adjustment. It registers that panel as a named `strength`
   table, and it is what makes the rating models depend (transitively) on an estimator.
 - **`analyses`** are the pluggable modules. **`ratings.*` consume the `strength` table** (they rate
-  `adjusted_strength`, not raw `panel_data`, so they depend on an `adjust` stage); `prediction.*` and
-  the predicted-strength `performance.*` **depend on an estimator**; `behavior.*`/`exploratory.*` are
-  mostly descriptive over the canonical CSVs, though a few (e.g. `victory_commitment`,
-  `strategy_profiles`) also read the `strength` table.
+  `adjusted_strength`, not raw `panel_data`, so they depend on an `adjust` stage; their `group_by` /
+  `bootstrap` params fold in what were once separate strategy-Elo and bootstrap modules);
+  `prediction.*` (scoring) and `calibration.*` (calibration of the estimator) and the
+  predicted-strength `performance.*` **depend on an estimator**; `exploratory.*` are mostly
+  descriptive over the canonical CSVs, though a few (e.g. `strategy_profiles`) also read the
+  `strength` table.
 - **`report`** walks the produced artifacts and renders them.
 
 There is **no graceful degradation**: every dependency is installed up front via `scripts/install`,

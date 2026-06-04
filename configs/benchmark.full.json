@@ -1,6 +1,6 @@
 {
-  "name": "staff-standard-2026",
-  "description": "Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.json for the opt-in extras. `catalogs` omitted to use the sibling paths.json/models.json/experiments.json.",
+  "name": "staff-standard-2026-full",
+  "description": "Kitchen-sink run: the lean CORE (see benchmark.json) plus every OPTIONAL module wired but `\"enabled\": false`, so opting in is a one-flag edit. Also demonstrates the folded params (bootstrap CIs on bt_main; strategy grouping on bt_strategy) and a pre-trained estimator. behavior.* is deferred and intentionally absent.",
   "seed": 42,
 
   "filters": {
@@ -82,6 +82,17 @@
       }
     },
     {
+      "id": "attention_ref",
+      "model": "attention_mlp",
+      "fit": "pretrained",
+      "enabled": true,
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/attention_ref/predictions.csv",
+      "pretrained": {
+        "model_dir": "reports/reference/attention_2026q1/"
+      }
+    },
+    {
       "id": "xgboost_cv",
       "model": "xgboost",
       "fit": "train",
@@ -120,7 +131,7 @@
       "module": "ratings.bradley_terry",
       "enabled": true,
       "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false, "bootstrap": null }
+      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false, "bootstrap": { "n": 1000, "stratified": true } }
     },
     {
       "id": "bt_strategy",
@@ -144,18 +155,54 @@
       "params": { "mode": "mean", "validate_ols": true }
     },
     {
+      "id": "ratings_iterative_bt",
+      "module": "ratings.iterative_bt",
+      "enabled": false,
+      "uses": { "tables": ["strength"] },
+      "params": { "weighted": true }
+    },
+    {
+      "id": "ratings_vanilla_slot_effect",
+      "module": "ratings.vanilla_slot_effect",
+      "enabled": false,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
       "id": "pred_metrics",
       "module": "prediction.evaluate",
       "enabled": true,
-      "uses": { "estimators": ["score", "attention", "xgboost_cv"] },
+      "uses": { "estimators": ["score", "attention", "attention_ref", "xgboost_cv"] },
       "params": { "metrics": ["roc_auc", "brier_score", "log_loss", "balanced_accuracy"] }
     },
     {
       "id": "pred_compare",
       "module": "prediction.compare",
       "enabled": true,
-      "uses": { "estimators": ["score", "attention", "xgboost_cv"] },
+      "uses": { "estimators": ["score", "attention", "attention_ref", "xgboost_cv"] },
       "params": {}
+    },
+    {
+      "id": "pred_winner_trajectories",
+      "module": "prediction.winner_trajectories",
+      "enabled": false,
+      "uses": { "estimators": ["attention"] },
+      "params": { "sample_games": 12 }
+    },
+    {
+      "id": "pred_vs_elo",
+      "module": "prediction.elo_comparison",
+      "enabled": false,
+      "uses": { "estimators": ["attention"] },
+      "needs": ["bt_main"],
+      "params": {}
+    },
+    {
+      "id": "pred_context_slicing",
+      "module": "prediction.context_slicing",
+      "enabled": false,
+      "uses": { "estimators": ["attention"] },
+      "params": { "by": ["experiment", "player_type"] }
     },
     {
       "id": "cal_reliability",
@@ -169,6 +216,7 @@
       "module": "calibration.loss_by_progress",
       "enabled": true,
       "uses": { "estimators": ["score", "xgboost_cv"] },
+      "filter": "late_game",
       "params": { "n_bins": 20, "metrics": ["brier_score", "log_loss"] }
     },
     {
@@ -190,6 +238,32 @@
       "enabled": true,
       "uses": { "estimators": ["attention"] },
       "params": { "aggregate": "mean", "by": "player_type" }
+    },
+    {
+      "id": "perf_perm_importance",
+      "module": "performance.permutation_importance",
+      "enabled": false,
+      "uses": { "estimators": ["xgboost_cv"] },
+      "params": { "n_repeats": 20, "groups": "feature_families" }
+    },
+    {
+      "id": "explore_panel",
+      "module": "exploratory.panel",
+      "enabled": false,
+      "params": {}
+    },
+    {
+      "id": "explore_turn",
+      "module": "exploratory.turn",
+      "enabled": false,
+      "params": {}
+    },
+    {
+      "id": "explore_strategy_profiles",
+      "module": "exploratory.strategy_profiles",
+      "enabled": false,
+      "uses": { "tables": ["strength"] },
+      "params": { "by": "player_type" }
     },
     {
       "id": "explore_token_costs",

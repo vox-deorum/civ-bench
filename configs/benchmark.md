@@ -64,6 +64,7 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
   },
 
   "filters":    { /* §3.1 */ },          // optional: named, reusable filter presets
+  "groupings":  { /* §3.2 */ },          // optional: named rating-identity grouping dimensions
 
   "data":       { /* §3  */ },           // required: extraction + canonical tables + global filter
   "estimators": [ /* §4  */ ],           // optional: prediction-model producers
@@ -74,8 +75,8 @@ torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byt
 ```
 
 Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`,
-`catalogs`, `filters`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a
-ratings-free / behavior-only run; conversely, any `ratings.*` analysis needs an `adjust` stage to
+`catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and
+`adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an `adjust` stage to
 supply the `strength` table it rates.
 
 **`catalogs` defaults to sibling files.** If omitted, the harness loads `paths.json`, `models.json`,
@@ -162,12 +163,41 @@ The full filter shape (every field optional; omitted ⇒ no constraint):
 A stage's `filter` is then **intersected** with the resolved global `data.filter` — a stage can only
 narrow, never widen (§6.1). Referencing an undefined preset name is a validation error.
 
+### 3.2 `groupings` — named rating-identity dimensions
+
+A **grouping** derives one categorical dimension from the strength panel that `ratings.*` analyses
+can fold into the rated identity (§6.2, `group_by`). Like `filters`, groupings are defined once by
+name and referenced by name — config over code, so adding a way to slice the field is a config edit,
+not a new module. `groupings` is **optional**; omit it for plain per-`player_type` ratings.
+
+```jsonc
+"groupings": {
+  "strategy": {                          // composite identity {player_type}-{dominant strategy}
+    "kind": "argmax",                    // dimension value = column with the largest value per row
+    "columns": ["domination_ratio","culture_ratio","diplomatic_ratio","science_ratio"],
+    "labels":  ["Domination","Culture","Diplomatic","Science"]   // optional; positional with columns
+  }
+}
+```
+
+- **`kind: "argmax"`** (the only kind implemented) assigns each player-game the label of whichever
+  `columns` value is largest — exactly the dominant-strategy rule the old `strategy_ratings.py`
+  uses. `labels` is optional; when given it must be positional with `columns` (else the raw column
+  name is used).
+- A grouping referenced by `group_by` but **absent** from this catalog is a validation error (§8).
+
+> **Reserved / deferred — do not rely on yet.** Other `kind`s are planned but **not implemented**.
+> In particular `kind: "bucket"` (e.g. `{ "kind": "bucket", "column": "turn_progress",
+> "edges": [0, 0.33, 0.66, 1.0], "labels": ["early","mid","late"] }`) would enable per-game-stage
+> ratings, but that additionally requires the `adjust`/`strength` stage to emit *per-stage* strength,
+> which is its own follow-up. Treat anything beyond `argmax` as designed-but-unbuilt.
+
 ---
 
 ## 4. `estimators` — prediction-model producers
 
 Estimators are the pipeline's reason for having stages at all: a `performance.turn_predicted` or
-`prediction.calibration` analysis needs `predicted_win_probability`, which only exists once a
+`calibration.reliability` analysis needs `predicted_win_probability`, which only exists once a
 predictor has run. Declare each predictor once in `estimators`; analyses reference it by `id`.
 
 An estimator answers two **independent** questions, and that separation is the whole design:
@@ -422,45 +452,54 @@ Every `ratings.*` analysis rates `adjusted_strength`, so each one references an 
 via `uses.tables: ["strength"]` (shown once below; the same `uses` applies to all). They do **not**
 read `panel_data` directly, and they depend transitively on the estimator that fed the `adjust` stage.
 
+Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `plackett_luce`):
+
+- **`group_by`** (default `["player_type"]`) — the identity the rating is fit over. Extra dimensions
+  past the base must name a grouping in top-level `groupings` (§3.2); the rated identity is the
+  composite formed by joining the dimension values with `-`. So **per-strategy Elo is not a separate
+  module** — it is `group_by: ["player_type", "strategy"]` on the ordinary BT/PL fit. `min_games`
+  then filters *composite* identities post-fit, and ref/vanilla re-centering is preserved.
+- **`bootstrap`** (default omitted → point estimate only) — when set, a shared resample-and-refit
+  helper draws games with replacement (`stratified` by experiment by default), re-runs the same fit
+  `n` times, and emits percentile CIs + rank stability alongside the point estimate. Bootstrap CIs
+  are **not a separate module**; the resampling is seeded from the top-level `seed`.
+
 ```jsonc
 // ratings.bradley_terry — BT MLE with pairwise score weights (R: BradleyTerry2)
 { "module": "ratings.bradley_terry",
   "uses": { "tables": ["strength"] },
-  "params": { "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false } }
+  "params": { "group_by": ["player_type"],          // ["player_type","strategy"] → per-strategy Elo
+              "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false,
+              "bootstrap": null } }                  // or { "n": 1000, "stratified": true } for CIs
 
 // ratings.plackett_luce — PL MLE over per-game rankings (R: PlackettLuce)
 { "module": "ratings.plackett_luce",
   "uses": { "tables": ["strength"] },
-  "params": { "ref": "Vanilla", "min_games": 5 } }
-
-// ratings.strategy_elo — composite {PlayerType}-{Strategy} identities, single BT fit
-{ "module": "ratings.strategy_elo",
-  "uses": { "tables": ["strength"] },
-  "params": { "strategy_cols": ["domination_ratio","culture_ratio","diplomatic_ratio","science_ratio"],
-              "min_games": 5 } }
+  "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null } }
 
 // ratings.matchups — empirical head-to-head matrices + OLS validation
 { "module": "ratings.matchups",
   "uses": { "tables": ["strength"] },
   "params": { "mode": "mean", "validate_ols": true } }
+```
 
-// ratings.bootstrap_bt — bootstrap CIs around BT ratings
-{ "module": "ratings.bootstrap_bt",
-  "uses": { "tables": ["strength"] },
-  "params": { "n_bootstrap": 1000, "weighted": true } }
+**Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
 
+```jsonc
 // ratings.iterative_bt — incrementally add each player type's games (chronologically) and track
 //   Elo convergence; isolates each game's marginal contribution. (Also writes the ablation_bt_* CSV.)
-{ "module": "ratings.iterative_bt",
-  "uses": { "tables": ["strength"] },
-  "params": { "weighted": true } }
+{ "module": "ratings.iterative_bt", "enabled": false,
+  "uses": { "tables": ["strength"] }, "params": { "weighted": true } }
 
 // ratings.vanilla_slot_effect — tests whether seat position confounds Vanilla rating
-{ "module": "ratings.vanilla_slot_effect",
+{ "module": "ratings.vanilla_slot_effect", "enabled": false,
   "uses": { "tables": ["strength"] }, "params": {} }
 ```
 
-#### `prediction.*` — consume one or more estimators (`uses.estimators` required)
+#### `prediction.*` — score one or more estimators (`uses.estimators` required)
+
+`prediction.*` is the *scoring* family: it answers "how good is the win predictor". Calibration views
+live in their own family (`calibration.*`, below).
 
 ```jsonc
 // prediction.evaluate — metrics table across estimators (ROC-AUC/Brier/log-loss/bal-acc)
@@ -471,26 +510,38 @@ read `panel_data` directly, and they depend transitively on the estimator that f
 // prediction.compare — side-by-side comparison table + ranking
 { "module": "prediction.compare",
   "uses": { "estimators": ["score","grouped_mlp","attention"] }, "params": {} }
+```
 
-// prediction.calibration — reliability diagrams per estimator
-{ "module": "prediction.calibration",
-  "uses": { "estimators": ["attention"] }, "params": { "n_bins": 10 } }
+**Optional `prediction.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
 
-// prediction.loss_by_progress — loss binned by turn_progress
-{ "module": "prediction.loss_by_progress",
-  "uses": { "estimators": ["score","attention"] }, "params": { "n_bins": 20 } }
-
+```jsonc
 // prediction.winner_trajectories — P(win) trajectories for eventual winners
-{ "module": "prediction.winner_trajectories",
+{ "module": "prediction.winner_trajectories", "enabled": false,
   "uses": { "estimators": ["attention"] }, "params": { "sample_games": 12 } }
 
 // prediction.elo_comparison — predicted-strength vs rating-based Elo cross-check
-{ "module": "prediction.elo_comparison",
+{ "module": "prediction.elo_comparison", "enabled": false,
   "uses": { "estimators": ["attention"] }, "needs": ["bt_main"], "params": {} }
 
 // prediction.context_slicing — metrics sliced by experiment / player type / turn range
-{ "module": "prediction.context_slicing",
+{ "module": "prediction.context_slicing", "enabled": false,
   "uses": { "estimators": ["attention"] }, "params": { "by": ["experiment","player_type"] } }
+```
+
+#### `calibration.*` — calibration of the estimator (`uses.estimators` required)
+
+Two single-purpose views of how well an estimator's probabilities are calibrated — one across the
+**probability** axis, one across the **game-progress** axis. Both consume estimator predictions.
+
+```jsonc
+// calibration.reliability — reliability diagram: observed win-rate vs predicted P(win) per bin
+{ "module": "calibration.reliability",
+  "uses": { "estimators": ["attention"] }, "params": { "n_bins": 10 } }
+
+// calibration.loss_by_progress — Brier/log-loss across turn_progress (game-stage) bins
+{ "module": "calibration.loss_by_progress",
+  "uses": { "estimators": ["score","attention"] },
+  "params": { "n_bins": 20, "metrics": ["brier_score","log_loss"] } }
 ```
 
 #### `performance.*` — strength + score, some need the `strength` table
@@ -510,35 +561,38 @@ read `panel_data` directly, and they depend transitively on the estimator that f
 { "module": "performance.turn_predicted",
   "uses": { "estimators": ["attention"] },
   "params": { "aggregate": "mean", "by": "player_type" } }
-
-// performance.permutation_importance — grouped permutation importance over feature families
-{ "module": "performance.permutation_importance",
-  "uses": { "estimators": ["attention"] },
-  "params": { "n_repeats": 20, "groups": "feature_families" } }
 ```
 
-#### `behavior.*` — descriptive over turn/token/flavor data
+**Optional `performance.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
 
 ```jsonc
-{ "module": "behavior.flavor_change_clusters",     "params": { "n_clusters": 8 } }
-{ "module": "behavior.flavor_change_decomposition","params": { "components": 5 } }
-{ "module": "behavior.pivot_rationale",            "params": { "min_pivots": 1 } }
-// victory_commitment correlates commitment with adjusted_strength → needs the strength table
-{ "module": "behavior.victory_commitment", "uses": { "tables": ["strength"] }, "params": { "window": 10 } }
-{ "module": "behavior.nuke_flavor_rationale",      "params": {} }
+// performance.permutation_importance — grouped permutation importance over feature families
+{ "module": "performance.permutation_importance", "enabled": false,
+  "uses": { "estimators": ["attention"] },
+  "params": { "n_repeats": 20, "groups": "feature_families" } }
 ```
 
 #### `exploratory.*` — dataset descriptives
 
 ```jsonc
-{ "module": "exploratory.panel",            "params": {} }
-{ "module": "exploratory.turn",             "params": {} }
-// strategy_profiles joins strategy mix against adjusted_strength → needs the strength table
-{ "module": "exploratory.strategy_profiles","uses": { "tables": ["strength"] }, "params": { "by": "player_type" } }
-// model_token_costs uses tokens table + pricing from models.json
+// model_token_costs uses tokens table + pricing from models.json (cost-efficiency is a benchmark axis)
 { "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
   "params": { "currency": "usd" } }
 ```
+
+**Optional `exploratory.*` (off by default — registry-reserved, shipped only in `benchmark.full.json`):**
+
+```jsonc
+{ "module": "exploratory.panel", "enabled": false, "params": {} }
+{ "module": "exploratory.turn",  "enabled": false, "params": {} }
+// strategy_profiles joins strategy mix against adjusted_strength → needs the strength table
+{ "module": "exploratory.strategy_profiles", "enabled": false,
+  "uses": { "tables": ["strength"] }, "params": { "by": "player_type" } }
+```
+
+> **`behavior.*` is deferred.** The whole behavioral family (flavor-change clusters/decomposition,
+> pivot/nuke rationale, victory commitment) scores no strategist, so it is **not in this schema**.
+> We will revisit how to bring behavioral profiling back as an opt-in extension later.
 
 ---
 
@@ -583,6 +637,12 @@ curate and reorder. No analysis hardcodes its place in the document (invariant 3
 8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; a stage
    `filter` may not select experiments/players/turns excluded by the resolved global `data.filter`;
    a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable).
-9. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled
-   package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install`
-   first so every dependency is present.
+9. **Grouping resolution**: in a `ratings.*` `group_by`, every dimension past the base (`group_by[0]`,
+   typically `player_type`) must name a grouping defined in top-level `groupings` (§3.2); referencing
+   an undefined grouping is an error. Each grouping's `kind` must be implemented (currently only
+   `argmax`); an `argmax` grouping's `labels`, when present, must be positional with `columns`.
+10. **Bootstrap**: a `ratings.*` `bootstrap`, when not null, requires an integer `n >= 1`; its
+    resampling is seeded from the top-level `seed` (determinism — same config ⇒ same CIs).
+11. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled
+    package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install`
+    first so every dependency is present.
