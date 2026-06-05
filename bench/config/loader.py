@@ -391,6 +391,11 @@ def _validate_id_graph(cfg: RunConfig) -> None:
                     f"stage '{stage.id}' needs disabled stage '{dep}'."
                 )
 
+    # Estimator `needs` (rule 3): dangling/disabled deps fail loudly, same as
+    # adjust/analyses. (Estimators carry no `uses`, so `needs` is their only edge.)
+    for stage in cfg.estimators:
+        _check_needs(stage)
+
     # Adjust wiring (rule 7): estimator refs exist + enabled.
     for stage in cfg.adjust:
         _check_needs(stage)

@@ -43,6 +43,14 @@ def _mutations():
         "missing_required": lambda c: c.pop("seed"),
         "unknown_nested_key": lambda c: c["data"]["extract"].__setitem__("typo", 1),
         "dangling_needs": lambda c: c["analyses"][0].__setitem__("needs", ["nope"]),
+        "estimator_dangling_needs": lambda c: c["estimators"][0].__setitem__("needs", ["ghost"]),
+        # rule 3: an estimator may not `needs` a disabled stage (xgboost off, score needs it)
+        "estimator_needs_disabled": lambda c: (
+            c["estimators"][2].__setitem__("enabled", False),
+            c["estimators"][0].__setitem__("needs", ["xgboost"]),
+        ),
+        # disabled-target reference via `uses`: pred_metrics uses the now-disabled score estimator
+        "uses_disabled_estimator": lambda c: c["estimators"][0].__setitem__("enabled", False),
         "dangling_uses_estimator": lambda c: c["analyses"][4]["uses"]["estimators"].append("ghost"),
         "unknown_analysis_module": lambda c: c["analyses"][0].__setitem__("module", "ratings.fake"),
         "unknown_adjust_module": lambda c: c["adjust"][0].__setitem__("module", "nope"),
@@ -63,6 +71,15 @@ def test_malformed_config_raises(name, dev_spec, write_spec):
     _mutations()[name](dev_spec)
     path = write_spec(dev_spec)
     with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_estimator_needs_validated(dev_spec, write_spec):
+    # Estimators carry no `uses`, so `needs` is their only edge — a dangling ref
+    # must fail loudly at load (not be silently dropped at DAG build).
+    dev_spec["estimators"][0]["needs"] = ["ghost"]
+    path = write_spec(dev_spec)
+    with pytest.raises(ConfigError, match="needs unknown id 'ghost'"):
         load_config(path)
 
 
