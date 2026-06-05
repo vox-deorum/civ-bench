@@ -1,7 +1,7 @@
 """Coefficient / forest-plot helpers (ported from ``shared/plot_utilities.py``).
 
 This is the subset of the old notebook plotting module that the statistics layer
-(:mod:`civ_bench.stats`) imports: converting statsmodels coefficient tables into
+(:mod:`bench.stats`) imports: converting statsmodels coefficient tables into
 tidy effect frames and rendering forest plots. The remaining notebook-only
 plotting helpers are ported per-analysis as later stages need them.
 """

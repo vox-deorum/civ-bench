@@ -6,7 +6,7 @@
 
 ## Files to create / port
 
-- `civ_bench/estimators/` — implement the stubs from stage 2: port the train/eval logic from `../vox-deorum-analysis/models/evaluate_model.py` (full-train + cross-val) and the Optuna search from `models/tune_model.py`. Fold them behind the estimator config — **no separate CLIs/notebooks** (`tune_colab.ipynb` is obsolete).
+- `bench/estimators/` — implement the stubs from stage 2: port the train/eval logic from `../vox-deorum-analysis/models/evaluate_model.py` (full-train + cross-val) and the Optuna search from `models/tune_model.py`. Fold them behind the estimator config — **no separate CLIs/notebooks** (`tune_colab.ipynb` is obsolete).
 
 ## Config wiring
 

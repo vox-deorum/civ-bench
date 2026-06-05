@@ -2,14 +2,14 @@
 
 # Stage 2 — estimators (LOAD ONLY)
 
-**Goal.** Stand up `civ_bench/estimators/` with the **load path only**: `fit:"pretrained"` loads a saved `model_dir`, re-runs inference on the current `turns` table, and emits `predictions.csv`. No training. This unblocks adjust → analyses → report using the copied pre-trained models.
+**Goal.** Stand up `bench/estimators/` with the **load path only**: `fit:"pretrained"` loads a saved `model_dir`, re-runs inference on the current `turns` table, and emits `predictions.csv`. No training. This unblocks adjust → analyses → report using the copied pre-trained models.
 
 ## Files to create / port
 
-- `civ_bench/estimators/registry.py` — port `../vox-deorum-analysis/models/utils/model_registry.py` (name → predictor class; `load_model(dir)` dispatches on `metadata.model_class`).
-- `civ_bench/estimators/models/` — port the predictor classes (`score`, `baseline`, `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`, `naive`) from `models/models/`; for load-only we need each class's `_load_model_state()` + `predict_proba()` (training methods can land in stage 6).
+- `bench/estimators/registry.py` — port `../vox-deorum-analysis/models/utils/model_registry.py` (name → predictor class; `load_model(dir)` dispatches on `metadata.model_class`).
+- `bench/estimators/models/` — port the predictor classes (`score`, `baseline`, `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp`, `naive`) from `models/models/`; for load-only we need each class's `_load_model_state()` + `predict_proba()` (training methods can land in stage 6).
 - Feature pipeline — port `models/utils/data_utils.py` (feature engineering) so re-inference rebuilds the exact feature matrix the saved `metadata.selected_features` expects.
-- `civ_bench/estimators/runner.py` (or similar) — resolve a `pretrained` block, load, infer on `predict_subset`, write `<root>/estimators/<id>/predictions.csv`.
+- `bench/estimators/runner.py` (or similar) — resolve a `pretrained` block, load, infer on `predict_subset`, write `<root>/estimators/<id>/predictions.csv`.
 - `fit:"train"` and `tune` are present but **raise NotImplementedError** (stage 6 fills them).
 
 ## One-time copy / reorg (normal group → `reports/`)

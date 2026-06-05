@@ -530,7 +530,7 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
 
 ```jsonc
 "report": {
-  "template": "default",                 // template name under civ_bench/reports/
+  "template": "default",                 // template name under bench/reports/
   "out_dir": "reports/",                 // resolved under the run output root (§2.1); run writes <root><suffix>/<name>/
   "formats": ["md", "html"],             // any of: md, html, pdf
   "sections": null,                      // null = every produced AnalysisResult, in DAG order;

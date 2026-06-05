@@ -1,7 +1,7 @@
 """Player-type styling helpers (ported from ``shared/plot_styles.py``).
 
 The old module read a process-global catalog; here every helper takes an explicit
-:class:`civ_bench.catalog.Catalog` so styling stays config-driven (invariant 1).
+:class:`bench.catalog.Catalog` so styling stays config-driven (invariant 1).
 """
 
 from __future__ import annotations

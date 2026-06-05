@@ -6,7 +6,7 @@
 
 ## Files to create / port
 
-- `civ_bench/reports/` — default template + renderer: walk each produced `AnalysisResult` in DAG order, render its tables/figures/summary to `md` and `html`. No analysis hardcodes its place (invariant 3). Convert the old notebook narratives (`performance/`, `exploratory/`, `predict/`) into generated sections, not authored ones.
+- `bench/reports/` — default template + renderer: walk each produced `AnalysisResult` in DAG order, render its tables/figures/summary to `md` and `html`. No analysis hardcodes its place (invariant 3). Convert the old notebook narratives (`performance/`, `exploratory/`, `predict/`) into generated sections, not authored ones.
 
 ## Config wiring (`report`)
 

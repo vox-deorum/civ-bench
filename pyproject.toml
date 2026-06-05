@@ -29,8 +29,12 @@ dependencies = [
   "imbalanced-learn",
 ]
 
+[project.optional-dependencies]
+# Test tooling only (not a runtime dependency). Install with: pip install -e ".[test]"
+test = ["pytest"]
+
 [project.scripts]
-civ-bench = "civ_bench.cli:main"
+civ-bench = "bench.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["civ_bench*"]
+include = ["bench*"]

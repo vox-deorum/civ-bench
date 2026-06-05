@@ -5,7 +5,7 @@ Ported from ``shared/regression_utilities.py`` (the old paper repo). This is rea
 analysis code — imported by ``performance.score_ratio``, ``ratings.matchups``
 (``validate_ols``), and ``adjust/strength.py``'s civ-adjustment — so it lives
 under ``stats/``, not ``plotting/``. The only change from the source is routing
-the coefficient/forest helpers through :mod:`civ_bench.plotting`.
+the coefficient/forest helpers through :mod:`bench.plotting`.
 """
 
 from __future__ import annotations

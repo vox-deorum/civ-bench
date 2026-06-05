@@ -1,6 +1,6 @@
 """Typed views over a validated run-spec.
 
-These dataclasses are produced by :mod:`civ_bench.config.loader` after validation.
+These dataclasses are produced by :mod:`bench.config.loader` after validation.
 They expose the run-spec in a structured way to every stage and resolve the
 single output root (§2.1) that all save-paths are threaded through.
 """

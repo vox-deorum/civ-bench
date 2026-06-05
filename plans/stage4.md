@@ -6,7 +6,7 @@
 
 ## Files to create / port
 
-- `civ_bench/analyses/base.py` — `Analysis` interface + registry (name → class) and `AnalysisResult`.
+- `bench/analyses/base.py` — `Analysis` interface + registry (name → class) and `AnalysisResult`.
 - **ratings** (`analyses/ratings/`, consume `strength` via `uses.tables:["strength"]`): `ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`. Port from `../vox-deorum-analysis/ratings/` (keep R interop; `Rscript` via `PATH`/`CIV_BENCH_RSCRIPT`). **strategy-Elo and bootstrap are params, not modules:** `group_by` (default `["player_type"]`; `["player_type","strategy"]` = per-strategy) and `bootstrap` (shared resample-and-refit). **When the `strength` table uses a controlled-design `block` adjustment (stage3), the `bootstrap` resample must re-run the `adjust/strength` fit inside each replicate** (resample games upstream of the strength fit, not a fixed panel) so the start-cell baseline's uncertainty is reflected in the CIs.
 - **prediction** (scoring, `analyses/prediction/`): `prediction.evaluate` (multi-metric table), `prediction.compare`. Port from `predict/` loader + comparison logic.
 - **calibration** (`analyses/calibration/`): `calibration.reliability`, `calibration.loss_by_progress`.

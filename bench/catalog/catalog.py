@@ -38,7 +38,7 @@ class Catalog:
 
     @classmethod
     def from_run_config(cls, cfg) -> "Catalog":
-        """Build from a :class:`civ_bench.config.RunConfig` (lazy sibling paths)."""
+        """Build from a :class:`bench.config.RunConfig` (lazy sibling paths)."""
         return cls.from_paths(cfg.catalog_path("models"), cfg.catalog_path("experiments"))
 
     # ── raw config accessors ────────────────────────────────────────────────

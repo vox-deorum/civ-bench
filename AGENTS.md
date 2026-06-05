@@ -34,7 +34,7 @@ civ-bench/
 │   #  ── gitignored: the ACTUAL run-specs (any other configs/benchmark*.json, e.g. benchmark.dev.json) — they
 │   #     point at machine-specific data roots; copy a template to make one. See "Templates vs. local configs" below.
 │   #  groupings (rating-identity dimensions, e.g. "strategy") + filters live INLINE in each benchmark*.json
-├── civ_bench/
+├── bench/
 │   ├── __init__.py
 │   ├── cli.py                    # `civ-bench extract|run|report ...`
 │   ├── pipeline/                 # DAG builder + scheduler: resolve `needs`, topo-sort, run stages
@@ -62,9 +62,17 @@ civ-bench/
 │   │                             #   Imported by performance.score_ratio, ratings.matchups, adjust/strength.py
 │   ├── reports/                  # assemble analysis artifacts → markdown/html report
 │   └── plotting/                 # shared styles, colors, figure helpers
+├── tests/                        # pytest suite (mirrors bench/ by area: config, pipeline, catalog, …)
 ├── runs/                         # raw game-run input data + canonical CSVs (gitignored)
 └── reports/                      # generated reports, figures, trained estimators (gitignored)
 ```
+
+**Tests** live in `tests/` at the repo root (not inside `bench/`), one file per area
+(`test_config.py`, `test_pipeline.py`, `test_catalog.py`, …). Install the test tool with
+`pip install -e ".[test]"` and run `pytest` from the repo root. Tests must not touch
+machine-specific data roots or execute stages against real `runs/` data — they exercise
+config/validation/DAG/catalog logic and use small synthetic fixtures. When you add a module
+or a validation rule, add or extend its test in the same change.
 
 ### Templates vs. local configs
 
@@ -103,7 +111,7 @@ Ordering is expressed in the run-spec (`configs/benchmark*.json`) via implicit k
 Every analysis implements one small interface and registers under a string name so JSON can select it. Keep the contract minimal — config in, structured artifacts out:
 
 ```python
-# civ_bench/analyses/base.py  (sketch)
+# bench/analyses/base.py  (sketch)
 class Analysis:
     name: str                      # registry key used in the run-spec (configs/benchmark*.json)
     def run(self, ctx, params: dict) -> AnalysisResult: ...
@@ -116,11 +124,11 @@ The report stage walks the produced `AnalysisResult`s and renders them — no an
 
 ## Conventions
 
-- **Python package, not loose scripts.** Use absolute imports from `civ_bench.*`. No `cd models && python compare_models.py`; commands run from repo root via the CLI.
+- **Python package, not loose scripts.** Use absolute imports from `bench.*`. No `cd models && python compare_models.py`; commands run from repo root via the CLI.
 - **JSON is the source of truth.** Config files under `configs/` are validated on load (fail loud on unknown keys / missing required fields). A new dataset = new config, never a code branch.
 - **Analyses return data, not side effects.** They produce `AnalysisResult` objects; writing files and printing summaries is the report/CLI layer's job. This makes them testable and composable.
-- **Estimators are producers, not analyses.** Training, tuning, saving, and loading predictors live under `civ_bench/estimators/`. An estimator either trains on the current run or loads pre-trained weights; either way it exposes the same predictions artifact to downstream analyses.
-- **`adjust` stages are derived-table producers, not analyses.** They live under `civ_bench/adjust/`, consume an estimator's predictions, and emit a named table (e.g. `strength`) that downstream stages reference via `uses.tables`. The derivation logic (the strength panel) belongs here once, not duplicated inside each `ratings.*` module — which is exactly the bug being fixed from the old repo, where `prepare_strength_data` was copied between `turn_predicted.ipynb` and `iterative_bt.py`.
+- **Estimators are producers, not analyses.** Training, tuning, saving, and loading predictors live under `bench/estimators/`. An estimator either trains on the current run or loads pre-trained weights; either way it exposes the same predictions artifact to downstream analyses.
+- **`adjust` stages are derived-table producers, not analyses.** They live under `bench/adjust/`, consume an estimator's predictions, and emit a named table (e.g. `strength`) that downstream stages reference via `uses.tables`. The derivation logic (the strength panel) belongs here once, not duplicated inside each `ratings.*` module — which is exactly the bug being fixed from the old repo, where `prepare_strength_data` was copied between `turn_predicted.ipynb` and `iterative_bt.py`.
 - **Determinism.** Same config + same `runs/` data ⇒ byte-stable tables. Thread `seed` from config; never call un-seeded RNGs.
 - **All dependencies are mandatory — no soft-fail.** `torch` / `xgboost` / `optuna` / R packages are installed by `scripts/install`, not gated behind try-imports. Import them directly; if one is missing, the run fails loudly with an install hint. Do **not** add `try/except ImportError` skip-with-warning fallbacks.
 - **Nothing experiment-specific in git** beyond `configs/` examples. `runs/` and `reports/` are gitignored.
@@ -137,7 +145,7 @@ civ-bench run --config configs/benchmark.dev.json --only ratings.bradley_terry  
 civ-bench run --config configs/benchmark.dev.json --skip extract                 # reuse existing CSVs
 ```
 
-Until the CLI exists, mirror the old entrypoints (`python -m civ_bench.extract`, etc.) but always parameterize by config path.
+Until the CLI exists, mirror the old entrypoints (`python -m bench.extract`, etc.) but always parameterize by config path.
 
 ## Dependencies
 
