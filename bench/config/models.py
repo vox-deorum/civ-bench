@@ -100,6 +100,7 @@ class RunConfig:
     analyses: list[Stage] = field(default_factory=list)
     report: dict = field(default_factory=dict)
     _catalog_overrides: dict = field(default_factory=dict)
+    _resolved_graph: Any = field(default=None, repr=False)
 
     # ── catalog resolution (lazy: a path need only exist when a stage needs it)
     def catalog_path(self, which: str) -> Path:

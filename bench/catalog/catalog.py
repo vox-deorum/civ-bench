@@ -26,6 +26,25 @@ class Catalog:
     def __init__(self, models: dict, experiments: dict):
         self._models = models
         self._experiments = experiments
+        self._strategist_models = list(models.get("strategist_models", []))
+        self._strategist_variants = dict(models.get("strategist_variants", {}))
+        self._prediction_models = list(models.get("prediction_models", []))
+        self._prompt_patterns = dict(models.get("prompt_patterns", {}))
+        self._vanilla_aliases = {
+            a.lower() for a in models.get("vanilla_model_aliases", [])
+        }
+        self._null_aliases = {
+            a.lower() for a in models.get("null_strategist_aliases", [])
+        }
+        self._variant_map = dict(models.get("strategist_variant_map", {}))
+        self._labels = dict(experiments.get("player_type_labels", {}))
+        self._strategist_model_lookup = self._build_strategist_model_lookup()
+        self._model_alias_candidates = self._build_model_alias_candidates()
+        self._variant_suffix_order = sorted(
+            self._strategist_variants.items(),
+            key=lambda item: len(item[1].get("suffix", "")),
+            reverse=True,
+        )
 
     # ── construction ────────────────────────────────────────────────────────
     @classmethod
@@ -51,16 +70,16 @@ class Catalog:
         return self._experiments
 
     def strategist_models(self) -> list[dict]:
-        return list(self._models.get("strategist_models", []))
+        return list(self._strategist_models)
 
     def strategist_variants(self) -> dict:
-        return dict(self._models.get("strategist_variants", {}))
+        return dict(self._strategist_variants)
 
     def prediction_models(self) -> list[dict]:
-        return list(self._models.get("prediction_models", []))
+        return list(self._prediction_models)
 
     def prompt_patterns(self) -> dict:
-        return dict(self._models.get("prompt_patterns", {}))
+        return dict(self._prompt_patterns)
 
     # ── orthodox player_type composition (§3.3) ─────────────────────────────
     @property
@@ -77,19 +96,19 @@ class Catalog:
 
     @property
     def _vanilla_model_aliases(self) -> set[str]:
-        return {a.lower() for a in self._models.get("vanilla_model_aliases", [])}
+        return set(self._vanilla_aliases)
 
     @property
     def _null_strategist_aliases(self) -> set[str]:
-        return {a.lower() for a in self._models.get("null_strategist_aliases", [])}
+        return set(self._null_aliases)
 
     @property
     def _strategist_variant_map(self) -> dict:
-        return dict(self._models.get("strategist_variant_map", {}))
+        return dict(self._variant_map)
 
     @property
     def player_type_labels(self) -> dict:
-        return dict(self._experiments.get("player_type_labels", {}))
+        return dict(self._labels)
 
     def compose_player_type(
         self,
@@ -117,8 +136,8 @@ class Catalog:
         if is_baseline:
             composed = self._baseline_label(base, strategist)
         else:
-            variant = self._strategist_variant_map.get(strategist) if strategist else None
-            if variant and variant in self.strategist_variants():
+            variant = self._variant_map.get(strategist) if strategist else None
+            if variant and variant in self._strategist_variants:
                 composed = self.player_type_template.format(
                     model=base, variant=variant, suffix=""
                 )
@@ -142,9 +161,9 @@ class Catalog:
     def _is_null_strategist(self, strategist: Optional[str]) -> bool:
         if not strategist:
             return False
-        if strategist.lower() in self._null_strategist_aliases:
+        if strategist.lower() in self._null_aliases:
             return True
-        return self._strategist_variant_map.get(strategist) == self.null_label
+        return self._variant_map.get(strategist) == self.null_label
 
     def _baseline_label(self, base: str, strategist: Optional[str]) -> str:
         if base == self.null_label or self._is_null_strategist(strategist):
@@ -176,30 +195,36 @@ class Catalog:
         if not normalized:
             return "N/A"
         lowered = normalized.lower()
-        for model in self.strategist_models():
-            candidates = [model["id"], *model.get("aliases", [])]
-            if any(c and c.lower() in lowered for c in candidates):
-                return model["id"]
+        for candidate, model_id in self._model_alias_candidates:
+            if candidate and candidate in lowered:
+                return model_id
         return normalized
 
     def get_strategist_model(self, name: Optional[str]) -> Optional[dict]:
         if not name:
             return None
-        lookup = self._strategist_models_by_name()
-        return lookup.get(name.lower())
+        return self._strategist_model_lookup.get(name.lower())
 
-    def _strategist_models_by_name(self) -> dict:
+    def _build_strategist_model_lookup(self) -> dict:
         out: dict = {}
-        for model in self.strategist_models():
+        for model in self._strategist_models:
             out[model["id"].lower()] = model
             for alias in model.get("aliases", []):
                 out[alias.lower()] = model
         return out
 
+    def _build_model_alias_candidates(self) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for model in self._strategist_models:
+            for candidate in [model["id"], *model.get("aliases", [])]:
+                if candidate:
+                    out.append((candidate.lower(), model["id"]))
+        return out
+
     def get_variant_config(self, name: Optional[str]) -> Optional[dict]:
         if not name:
             return None
-        return self.strategist_variants().get(name)
+        return self._strategist_variants.get(name)
 
     def get_variant_style_key(self, name: Optional[str]) -> Optional[str]:
         config = self.get_variant_config(name)
@@ -213,11 +238,7 @@ class Catalog:
         model = self.get_strategist_model(player_type)
         if model is not None:
             return {"model_id": model["id"], "variant": None}
-        for variant_name, config in sorted(
-            self.strategist_variants().items(),
-            key=lambda item: len(item[1].get("suffix", "")),
-            reverse=True,
-        ):
+        for variant_name, config in self._variant_suffix_order:
             suffix = config.get("suffix", "")
             if suffix and player_type.endswith(suffix):
                 model_id = player_type[: -len(suffix)]

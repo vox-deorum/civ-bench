@@ -43,3 +43,20 @@ def test_render_dag_shows_resolved_root(configs_dir):
     text = render_dag(build_dag(cfg), cfg)
     assert "reports-dev/" in text
     assert "Resolved DAG" in text
+
+
+def test_build_dag_uses_cached_resolved_graph(configs_dir):
+    cfg = load_config(configs_dir / "benchmark.dev.json")
+    cached = cfg._resolved_graph
+    dag = build_dag(cfg)
+    assert cfg._resolved_graph is cached
+    assert dag.order == cached.order
+
+
+def test_dag_node_resolves_save_path(configs_dir):
+    cfg = load_config(configs_dir / "benchmark.dev.json")
+    dag = build_dag(cfg)
+    assert (
+        dag.nodes["strength"].resolved_save_path(cfg)
+        == "reports-dev/adjust/player_strength_panel.csv"
+    )

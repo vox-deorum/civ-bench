@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
+from .dependencies import resolve_stage_graph
 from .errors import ConfigError
+from .filters import (
+    ensure_filter_narrows,
+    resolve_filter_spec,
+    validate_filter_object,
+)
 from .models import OutputConfig, RunConfig, Stage
 from . import schema as S
 
@@ -45,6 +51,19 @@ def _check_type(value: Any, types: tuple, where: str) -> None:
         raise ConfigError(f"{where}: expected {names}, got {type(value).__name__}.")
 
 
+def _check_string_list(value: Any, where: str, allow_empty: bool = True) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+        raise ConfigError(f"{where}: expected a list of strings.")
+    if not allow_empty and not value:
+        raise ConfigError(f"{where}: expected a non-empty list of strings.")
+    return list(value)
+
+
+def _check_domain(value: Any, domain: set, where: str) -> None:
+    if value not in domain:
+        raise ConfigError(f"{where}: must be one of {sorted(domain)}.")
+
+
 def _read_catalog(cfg: RunConfig, which: str, needed_by: str) -> dict:
     """Lazily read a sibling/override catalog json; error only when needed."""
     path = cfg.catalog_path(which)
@@ -59,44 +78,6 @@ def _read_catalog(cfg: RunConfig, which: str, needed_by: str) -> dict:
             return json.load(handle)
     except json.JSONDecodeError as exc:
         raise ConfigError(f"catalog '{which}' at {path} is not valid JSON: {exc}.")
-
-
-# ── filters (§3.1) ──────────────────────────────────────────────────────────
-def _validate_filter_object(obj: dict, where: str) -> None:
-    _check_keys(obj, S.FILTER_KEYS, where)
-    tr = obj.get("turn_range")
-    if tr is not None:
-        if not isinstance(tr, (list, tuple)) or len(tr) != 2:
-            raise ConfigError(
-                f"{where}.turn_range: expected [min, max] (either bound nullable)."
-            )
-        lo, hi = tr
-        if lo is not None and hi is not None and lo > hi:
-            raise ConfigError(
-                f"{where}.turn_range: min ({lo}) must be <= max ({hi})."
-            )
-
-
-def _validate_filter_ref(spec: Any, presets: dict, where: str) -> None:
-    """A filter value may be an inline object, a preset name, or a list of both."""
-    if spec is None:
-        return
-    if isinstance(spec, str):
-        if spec not in presets:
-            raise ConfigError(
-                f"{where}: references undefined filter preset '{spec}'. "
-                f"Defined presets: {sorted(presets)}."
-            )
-    elif isinstance(spec, dict):
-        _validate_filter_object(spec, where)
-    elif isinstance(spec, list):
-        for i, item in enumerate(spec):
-            _validate_filter_ref(item, presets, f"{where}[{i}]")
-    else:
-        raise ConfigError(
-            f"{where}: a filter must be a preset name, an inline object, or a "
-            f"list of those (got {type(spec).__name__})."
-        )
 
 
 # ── output (§2.1) ───────────────────────────────────────────────────────────
@@ -114,7 +95,8 @@ def _parse_output(raw: dict) -> OutputConfig:
 
 
 # ── data (§3) ───────────────────────────────────────────────────────────────
-def _validate_data(data: dict, presets: dict) -> None:
+def _validate_data(data: dict, presets: dict) -> dict:
+    """Validate the `data` block and return the resolved global filter."""
     _require_mapping(data, "data")
     _check_keys(data, S.DATA_KEYS, "data")
     extract = data.get("extract")
@@ -123,17 +105,31 @@ def _validate_data(data: dict, presets: dict) -> None:
         _check_keys(extract, S.EXTRACT_KEYS, "data.extract")
         outputs = extract.get("outputs")
         if outputs is not None:
+            outputs = _check_string_list(outputs, "data.extract.outputs")
             bad = [o for o in outputs if o not in S.TABLE_NAMES]
             if bad:
                 raise ConfigError(
                     f"data.extract.outputs: unknown table name(s) {bad}. "
                     f"Allowed: {list(S.TABLE_NAMES)}."
                 )
+        for key in ("enabled", "prune_missing", "force_rebuild"):
+            if key in extract:
+                _check_type(extract[key], (bool,), f"data.extract.{key}")
+        if "runs_dir" in extract:
+            _check_type(extract["runs_dir"], (str,), "data.extract.runs_dir")
+        max_dbs = extract.get("max_dbs")
+        if max_dbs is not None:
+            if isinstance(max_dbs, bool) or not isinstance(max_dbs, int) or max_dbs < 1:
+                raise ConfigError(
+                    "data.extract.max_dbs: must be null or an integer >= 1."
+                )
     tables = data.get("tables")
     if tables is not None:
         _require_mapping(tables, "data.tables")
         _check_keys(tables, set(S.TABLE_NAMES), "data.tables")
-    _validate_filter_ref(data.get("filter"), presets, "data.filter")
+        for key, value in tables.items():
+            _check_type(value, (str,), f"data.tables.{key}")
+    return resolve_filter_spec(data.get("filter"), presets, "data.filter")
 
 
 # ── estimators (§4) ─────────────────────────────────────────────────────────
@@ -145,8 +141,7 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
     where = f"estimators[{idx}] (id={sid!r})"
 
     fit = entry["fit"]
-    if fit not in S.FIT_VALUES:
-        raise ConfigError(f"{where}.fit: must be one of {sorted(S.FIT_VALUES)}.")
+    _check_domain(fit, S.FIT_VALUES, f"{where}.fit")
 
     model = entry["model"]
     if model not in model_ids:
@@ -156,10 +151,10 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
         )
 
     predict = entry.get("predict", "in_sample")
-    if predict not in S.PREDICT_VALUES:
-        raise ConfigError(
-            f"{where}.predict: must be one of {sorted(S.PREDICT_VALUES)}."
-        )
+    _check_domain(predict, S.PREDICT_VALUES, f"{where}.predict")
+
+    if "needs" in entry:
+        _check_string_list(entry["needs"], f"{where}.needs")
 
     has_train = "train" in entry
     has_pretrained = "pretrained" in entry
@@ -195,6 +190,9 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
     if features is not None:
         _require_mapping(features, f"{where}.features")
         _check_keys(features, S.FEATURES_KEYS, f"{where}.features")
+        for key in ("include", "exclude"):
+            if key in features:
+                _check_string_list(features[key], f"{where}.features.{key}")
 
     return Stage(id=sid, kind="estimators", enabled=entry.get("enabled", True), raw=entry)
 
@@ -205,6 +203,9 @@ def _validate_uses(uses: Any, where: str) -> None:
         return
     _require_mapping(uses, where)
     _check_keys(uses, S.USES_KEYS, where)
+    for key in ("estimators", "tables"):
+        if key in uses:
+            _check_string_list(uses[key], f"{where}.{key}")
 
 
 def _validate_strength_params(params: dict, where: str) -> None:
@@ -237,6 +238,8 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
         )
 
     uses = entry.get("uses")
+    if "needs" in entry:
+        _check_string_list(entry["needs"], f"{where}.needs")
     _validate_uses(uses, f"{where}.uses")
     est = (uses or {}).get("estimators") or []
     if len(est) != 1:
@@ -255,7 +258,13 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
 
 
 # ── analyses (§6) ───────────────────────────────────────────────────────────
-def _validate_analysis(entry: dict, idx: int, presets: dict, groupings: dict) -> Stage:
+def _validate_analysis(
+    entry: dict,
+    idx: int,
+    presets: dict,
+    groupings: dict,
+    global_filter: dict,
+) -> Stage:
     where = f"analyses[{idx}]"
     _require_mapping(entry, where)
     _check_keys(entry, S.ANALYSIS_KEYS, where, required=("id", "module"))
@@ -269,8 +278,12 @@ def _validate_analysis(entry: dict, idx: int, presets: dict, groupings: dict) ->
             f"Known modules: {sorted(S.ANALYSIS_MODULES)}."
         )
 
+    if "needs" in entry:
+        _check_string_list(entry["needs"], f"{where}.needs")
     _validate_uses(entry.get("uses"), f"{where}.uses")
-    _validate_filter_ref(entry.get("filter"), presets, f"{where}.filter")
+    stage_filter = resolve_filter_spec(entry.get("filter"), presets, f"{where}.filter")
+    if entry.get("filter") is not None:
+        ensure_filter_narrows(global_filter, stage_filter, f"{where}.filter")
 
     params = entry.get("params")
     if params is not None:
@@ -286,8 +299,7 @@ def _validate_analysis(entry: dict, idx: int, presets: dict, groupings: dict) ->
 def _validate_group_by(group_by: Any, groupings: dict, where: str) -> None:
     if group_by is None:
         return
-    if not isinstance(group_by, list) or not group_by:
-        raise ConfigError(f"{where}.params.group_by: expected a non-empty list.")
+    _check_string_list(group_by, f"{where}.params.group_by", allow_empty=False)
     # group_by[0] is the base identity (typically player_type); extra dims must
     # name a grouping in top-level `groupings` (§3.2 / rule 9).
     for dim in group_by[1:]:
@@ -330,9 +342,10 @@ def _validate_groupings(groupings: dict) -> None:
             )
         if kind == "argmax":
             cols = g.get("columns")
-            if not isinstance(cols, list) or not cols:
-                raise ConfigError(f"{where}.columns: argmax requires a non-empty list.")
+            _check_string_list(cols, f"{where}.columns", allow_empty=False)
             labels = g.get("labels")
+            if labels is not None:
+                _check_string_list(labels, f"{where}.labels")
             if labels is not None and len(labels) != len(cols):
                 raise ConfigError(
                     f"{where}.labels: must be positional with columns "
@@ -346,111 +359,13 @@ def _validate_report(report: dict) -> None:
     _check_keys(report, S.REPORT_KEYS, "report")
     formats = report.get("formats")
     if formats is not None:
+        formats = _check_string_list(formats, "report.formats")
         bad = [f for f in formats if f not in S.REPORT_FORMATS]
         if bad:
             raise ConfigError(
                 f"report.formats: unknown format(s) {bad}. "
                 f"Allowed: {sorted(S.REPORT_FORMATS)}."
             )
-
-
-# ── id graph rules (§8 rules 3 & 7) ─────────────────────────────────────────
-def _validate_id_graph(cfg: RunConfig) -> None:
-    estimator_ids = {s.id for s in cfg.estimators}
-    adjust_ids = {s.id for s in cfg.adjust}
-    analysis_ids = {s.id for s in cfg.analyses}
-
-    # Rule 3: unique ids across estimators + adjust + analyses.
-    seen: dict[str, str] = {}
-    for stage in cfg.all_stages():
-        if stage.id in seen:
-            raise ConfigError(
-                f"duplicate stage id '{stage.id}' (used by both {seen[stage.id]} "
-                f"and {stage.kind})."
-            )
-        seen[stage.id] = stage.kind
-    if "extract" in seen:
-        raise ConfigError("stage id 'extract' is reserved for the extract stage.")
-    if "report" in seen:
-        raise ConfigError("stage id 'report' is reserved for the report stage.")
-
-    enabled_ids = {s.id for s in cfg.all_stages() if s.enabled}
-    enabled_adjust_ids = {s.id for s in cfg.adjust if s.enabled}
-    table_keys = set(cfg.table_names)
-
-    def _check_needs(stage: Stage) -> None:
-        for dep in stage.needs:
-            if dep == "extract":
-                continue
-            if dep not in seen:
-                raise ConfigError(
-                    f"stage '{stage.id}' needs unknown id '{dep}'."
-                )
-            if dep not in enabled_ids:
-                raise ConfigError(
-                    f"stage '{stage.id}' needs disabled stage '{dep}'."
-                )
-
-    # Estimator `needs` (rule 3): dangling/disabled deps fail loudly, same as
-    # adjust/analyses. (Estimators carry no `uses`, so `needs` is their only edge.)
-    for stage in cfg.estimators:
-        _check_needs(stage)
-
-    # Adjust wiring (rule 7): estimator refs exist + enabled.
-    for stage in cfg.adjust:
-        _check_needs(stage)
-        for est in stage.uses_estimators:
-            if est not in estimator_ids:
-                raise ConfigError(
-                    f"adjust '{stage.id}' uses unknown estimator '{est}'."
-                )
-            if est not in enabled_ids:
-                raise ConfigError(
-                    f"adjust '{stage.id}' uses disabled estimator '{est}'."
-                )
-
-    has_strength_table = any(
-        s.enabled and s.raw.get("module") == "strength" for s in cfg.adjust
-    )
-
-    for stage in cfg.analyses:
-        _check_needs(stage)
-        for est in stage.uses_estimators:
-            if est not in estimator_ids:
-                raise ConfigError(
-                    f"analysis '{stage.id}' uses unknown estimator '{est}'."
-                )
-            if est not in enabled_ids:
-                raise ConfigError(
-                    f"analysis '{stage.id}' uses disabled estimator '{est}'."
-                )
-        for tbl in stage.uses_tables:
-            if tbl in table_keys:
-                continue
-            if tbl in adjust_ids:
-                if tbl not in enabled_adjust_ids:
-                    raise ConfigError(
-                        f"analysis '{stage.id}' uses table '{tbl}' from a disabled "
-                        f"adjust stage."
-                    )
-                continue
-            raise ConfigError(
-                f"analysis '{stage.id}' uses table '{tbl}' which is neither a "
-                f"canonical table {sorted(table_keys)} nor an adjust stage id "
-                f"{sorted(adjust_ids)}."
-            )
-        # Rule 7: any ratings.* analysis must rate a `strength` table.
-        if stage.enabled and stage.module and stage.module.startswith(S.RATINGS_PREFIX):
-            if "strength" not in stage.uses_tables:
-                raise ConfigError(
-                    f"ratings analysis '{stage.id}' must reference a strength table "
-                    f"via uses.tables (it rates adjusted_strength, not panel_data)."
-                )
-            if not has_strength_table:
-                raise ConfigError(
-                    f"ratings analysis '{stage.id}' requires an enabled adjust "
-                    f"'strength' stage to produce the strength table; none found."
-                )
 
 
 # ── top-level entry point ───────────────────────────────────────────────────
@@ -481,15 +396,15 @@ def load_config(path: str | Path) -> RunConfig:
     if presets:
         _require_mapping(presets, "filters")
         for name, f in presets.items():
-            _validate_filter_object(_require_mapping(f, f"filters.{name}"),
-                                    f"filters.{name}")
+            validate_filter_object(_require_mapping(f, f"filters.{name}"),
+                                   f"filters.{name}")
 
     groupings = raw.get("groupings") or {}
     if groupings:
         _validate_groupings(groupings)
 
     output = _parse_output(raw)
-    _validate_data(raw["data"], presets)
+    global_filter = _validate_data(raw["data"], presets)
     _validate_report(raw["report"])
 
     cfg = RunConfig(
@@ -526,15 +441,9 @@ def load_config(path: str | Path) -> RunConfig:
     if not analyses_raw:
         raise ConfigError("analyses: at least one analysis is required.")
     cfg.analyses = [
-        _validate_analysis(a, i, presets, groupings) for i, a in enumerate(analyses_raw)
+        _validate_analysis(a, i, presets, groupings, global_filter)
+        for i, a in enumerate(analyses_raw)
     ]
 
-    _validate_id_graph(cfg)
-
-    # Rule 4 (acyclic after edge resolution): resolving the DAG raises ConfigError
-    # on a cycle. Lazy import keeps the config layer free of a pipeline dependency
-    # at module-load time (pipeline imports config).
-    from ..pipeline.dag import build_dag
-
-    build_dag(cfg)
+    cfg._resolved_graph = resolve_stage_graph(cfg)
     return cfg

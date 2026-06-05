@@ -3,9 +3,10 @@
     civ-bench extract|run|report --config <path> [--only ID] [--skip ID] [--dry-run]
 
 Stage 0 implements config loading + validation + DAG resolution + dry-run
-printing. Actual stage execution (extract/estimators/adjust/analyses/report) is
-filled in by later stages; running without ``--dry-run`` reports what is not yet
-implemented rather than silently doing nothing.
+printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs). The
+estimators/adjust/analyses/report stages are filled in by later stages; running a
+command they cover reports what is not yet implemented rather than silently doing
+nothing.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import sys
 from typing import Optional
 
 from .config import ConfigError, load_config
+from .extract import ExtractError, run_extract
 from .pipeline import build_dag, render_dag
 
 
@@ -76,13 +78,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("Dry run: config loaded and validated; no stage executed.")
         return 0
 
-    # Stage execution is built out in later stages (stage1+).
+    if args.command == "extract":
+        try:
+            result = run_extract(cfg)
+        except (ConfigError, ExtractError) as exc:
+            print(f"civ-bench: extract error: {exc}", file=sys.stderr)
+            return 2
+        if result.skipped:
+            print(f"civ-bench: extract skipped — {result.reason}")
+        return 0
+
+    # estimators/adjust/analyses/report are built out in later stages.
     print(render_dag(dag, cfg))
     print()
     print(
         f"civ-bench: '{args.command}' execution is not implemented yet "
-        f"(stage 0 is scaffold only). Re-run with --dry-run to validate + print "
-        f"the DAG.",
+        f"(stages 2+). The 'extract' command is available; re-run other commands "
+        f"with --dry-run to validate + print the DAG.",
         file=sys.stderr,
     )
     return 3

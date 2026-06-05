@@ -1,8 +1,8 @@
-"""Build the stage DAG from a validated :class:`RunConfig`, topo-sort it, and
-render it.
+"""Project a validated :class:`RunConfig` into renderable DAG nodes.
 
-Edges come from three places (benchmark.md §1), all resolved into one
-topological order before anything runs:
+Dependency semantics live in :mod:`bench.config.dependencies`, where the graph
+is resolved and cached at config-load time. Edges come from three places
+(benchmark.md §1), all resolved into one topological order before anything runs:
 
 1. **Kind ordering (implicit)** — extract → estimators → adjust → analyses →
    report. Concretely: every estimator depends on ``extract`` (it re-infers on
@@ -21,11 +21,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..config import RunConfig
-from ..config.errors import ConfigError
-
-
-EXTRACT_ID = "extract"
-REPORT_ID = "report"
+from ..config.dependencies import (
+    ResolvedGraph,
+    resolve_stage_graph,
+)
 
 
 @dataclass
@@ -34,6 +33,19 @@ class DagNode:
     kind: str
     deps: set[str] = field(default_factory=set)  # ids this node must run after
     raw: dict = field(default_factory=dict)
+
+    @property
+    def save_path(self) -> Optional[str]:
+        if self.kind == "estimators":
+            return self.raw.get("save_predictions")
+        if self.kind == "adjust":
+            return self.raw.get("save")
+        if self.kind == "report":
+            return self.raw.get("out_dir")
+        return None
+
+    def resolved_save_path(self, cfg: RunConfig) -> Optional[str]:
+        return cfg.output.resolve(self.save_path)
 
 
 @dataclass
@@ -48,108 +60,25 @@ class Dag:
 
 def build_dag(cfg: RunConfig) -> Dag:
     """Resolve the run-spec into a topologically sorted DAG of enabled stages."""
-    nodes: dict[str, DagNode] = {}
-
-    extract_enabled = cfg.extract_enabled
-    if extract_enabled:
-        nodes[EXTRACT_ID] = DagNode(id=EXTRACT_ID, kind="extract",
-                                    raw=cfg.data.get("extract", {}))
-
-    enabled_estimators = [s for s in cfg.estimators if s.enabled]
-    enabled_adjust = [s for s in cfg.adjust if s.enabled]
-    enabled_analyses = [s for s in cfg.analyses if s.enabled]
-
-    adjust_ids = {s.id for s in enabled_adjust}
-    table_keys = set(cfg.table_names)
-
-    # estimators
-    for s in enabled_estimators:
-        node = DagNode(id=s.id, kind="estimators", raw=s.raw)
-        if extract_enabled:
-            node.deps.add(EXTRACT_ID)
-        node.deps.update(d for d in s.needs if d != EXTRACT_ID or extract_enabled)
-        nodes[s.id] = node
-
-    # adjust
-    for s in enabled_adjust:
-        node = DagNode(id=s.id, kind="adjust", raw=s.raw)
-        if extract_enabled:
-            node.deps.add(EXTRACT_ID)
-        node.deps.update(s.uses_estimators)
-        node.deps.update(_resolve_needs(s.needs, extract_enabled))
-        nodes[s.id] = node
-
-    # analyses
-    for s in enabled_analyses:
-        node = DagNode(id=s.id, kind="analyses", raw=s.raw)
-        node.deps.update(s.uses_estimators)
-        for tbl in s.uses_tables:
-            if tbl in adjust_ids:
-                node.deps.add(tbl)
-            elif tbl in table_keys and extract_enabled:
-                node.deps.add(EXTRACT_ID)
-        node.deps.update(_resolve_needs(s.needs, extract_enabled))
-        # An analysis with no explicit producer still reads canonical CSVs.
-        if extract_enabled and not node.deps:
-            node.deps.add(EXTRACT_ID)
-        nodes[s.id] = node
-
-    # report — depends on every enabled analysis (it walks their results)
-    report_node = DagNode(id=REPORT_ID, kind="report", raw=cfg.report)
-    report_node.deps.update(s.id for s in enabled_analyses)
-    nodes[REPORT_ID] = report_node
-
-    # Drop dangling deps that point at disabled/absent nodes only if they were
-    # never validated away. (Validation already guarantees needs/uses target
-    # enabled ids; extract may be absent when disabled.)
-    for node in nodes.values():
-        node.deps = {d for d in node.deps if d in nodes}
-
-    order = _topo_sort(nodes)
-    return Dag(nodes=nodes, order=order)
-
-
-def _resolve_needs(needs: list[str], extract_enabled: bool) -> set[str]:
-    out: set[str] = set()
-    for d in needs:
-        if d == EXTRACT_ID and not extract_enabled:
-            continue
-        out.add(d)
-    return out
-
-
-def _topo_sort(nodes: dict[str, DagNode]) -> list[str]:
-    """Kahn's algorithm with deterministic ordering; raises on a cycle."""
-    # indegree = number of unmet deps
-    indeg = {nid: len(node.deps) for nid, node in nodes.items()}
-    # dependents map
-    dependents: dict[str, list[str]] = {nid: [] for nid in nodes}
-    for nid, node in nodes.items():
-        for dep in node.deps:
-            dependents[dep].append(nid)
-
-    ready = sorted(nid for nid, d in indeg.items() if d == 0)
-    order: list[str] = []
-    while ready:
-        nid = ready.pop(0)
-        order.append(nid)
-        for dependent in sorted(dependents[nid]):
-            indeg[dependent] -= 1
-            if indeg[dependent] == 0:
-                ready.append(dependent)
-                ready.sort()
-
-    if len(order) != len(nodes):
-        cyclic = sorted(nid for nid in nodes if nid not in set(order))
-        raise ConfigError(
-            f"pipeline DAG has a cycle among stages: {cyclic}. "
-            f"Check `needs`/`uses` references."
+    graph = _resolved_graph(cfg)
+    nodes = {
+        nid: DagNode(
+            id=node.id,
+            kind=node.kind,
+            deps=set(node.deps),
+            raw=node.raw,
         )
-    return order
+        for nid, node in graph.nodes.items()
+    }
+    return Dag(nodes=nodes, order=list(graph.order))
 
 
-# ── pretty printer (dry run) ────────────────────────────────────────────────
-_KIND_ORDER = {"extract": 0, "estimators": 1, "adjust": 2, "analyses": 3, "report": 4}
+def _resolved_graph(cfg: RunConfig) -> ResolvedGraph:
+    graph = cfg._resolved_graph
+    if graph is None:
+        graph = resolve_stage_graph(cfg)
+        cfg._resolved_graph = graph
+    return graph
 
 
 def render_dag(dag: Dag, cfg: RunConfig) -> str:
@@ -179,19 +108,8 @@ def render_dag(dag: Dag, cfg: RunConfig) -> str:
         lines.append(
             f"  {i:>2}. {nid:<{width}}  [{kind_label}]  <- {dep_str}"
         )
-        save = _save_path(node)
+        save = node.resolved_save_path(cfg)
         if save is not None:
-            lines.append(f"      └ writes: {out.resolve(save)}")
+            lines.append(f"      └ writes: {save}")
 
     return "\n".join(lines)
-
-
-def _save_path(node: DagNode) -> Optional[str]:
-    raw = node.raw
-    if node.kind == "estimators":
-        return raw.get("save_predictions")
-    if node.kind == "adjust":
-        return raw.get("save")
-    if node.kind == "report":
-        return raw.get("out_dir")
-    return None

@@ -6,7 +6,7 @@
 
 ## Files to create / port
 
-- `bench/extract/` — port `../vox-deorum-analysis/extract/` (`__main__.py`, `extract_turns.py`, `extract_panel.py`, `extract_model_tokens.py`, `utilities.py`). Keep the DB-discovery + extractor logic; **strip hardcoded paths** — drive roots from `data.extract.runs_dir` / `data.tables.*`, consulting the paths catalog only when an enabled configuration actually provides or requires it.
+- `bench/extract/` — port `../vox-deorum-analysis/extract/` (`extract_turns.py`, `extract_panel.py`, `extract_model_tokens.py`, `utilities.py`). Keep the DB-discovery + extractor logic; **strip hardcoded paths** — drive roots from `data.extract.runs_dir` / `data.tables.*`, consulting the paths catalog only when an enabled configuration actually provides or requires it. The source `__init__.py`/`__main__.py` orchestration (which read a global `shared.paths.ROOT_DIR`) is replaced by a config-driven [`runner.py`](../bench/extract/runner.py) (`run_extract(cfg, catalog)`) invoked from `civ-bench extract`. New helpers: [`identity.py`](../bench/extract/identity.py) (orthodox `player_type` composition shared by panel/turn/token), [`extract_games.py`](../bench/extract/extract_games.py) (the renamed `game_data`), and `utilities.extract_seeding_fields` (controlled-seed/seating reduction). The old `shared.model_catalog` imports in the token extractor route through `bench.catalog` instead.
 
 ### New: import controlled seeds/seating + orthodox player_type (benchmark.md §3.3)
 
@@ -31,11 +31,12 @@ Set `extract.enabled:false` in your local load-only config (copied from `benchma
 
 ## Done
 
-`civ-bench extract --config …` produces the four canonical CSVs at `data.tables.*` (incl. `game_data.csv` with `seed`/`seating_rotation` and the `-1` sentinels), and `bench/data/` loads them with the orthodox `player_type` applied (joining `player_type`/`seed` by `(game_id, player_id)` / `game_id`, not the static seat map).
+`civ-bench extract --config …` produces the four canonical CSVs at `data.tables.*` (incl. `game_data.csv` with `seed`/`seating_rotation` and the `-1` sentinels), and `bench/data/` loads them with the orthodox `player_type` applied (joining `player_type`/`seed` by `(game_id, player_id)` / `game_id`, not the static seat map). `player_type` is composed once per (game, player) at extract from `GameMetadata` (`model-{id}` + `strategist-{id}`) and written to `panel_data` (with `model`/`strategist`/`config_slot`), broadcast across `turn_data`, and reused as the single source of truth in `model_token_usage`. The extract stage honors `enabled`/`runs_dir`/`outputs`/`max_dbs`/`prune_missing`/`force_rebuild` and auto-skips when every output CSV is newer than every source DB.
 
-## Verification
+## Verification (all passing — `tests/test_extract.py`, 17 tests)
 
-- Row/column sanity vs. the old `turn_data.csv`/`panel_data.csv` — turn_data unchanged except for the retained `player_type`; `seed`/seating live only in `game_data`; no `seat` column.
-- A fabricated controlled game with `configuredSyncRandSeed != configuredMapRandSeed` **aborts** with a clear civ-bench policy error; uncontrolled games and absent configured seeds still use `-1` sentinels.
-- `player_type` follows `model-{id}`/`strategist-{id}` through a seat rotation; a leading-`-` label appends, a non-`-` label overrides, `(condition, slot)` beats `condition`; a legacy game with no metadata falls back to the static map.
-- Re-running with unchanged DBs is a no-op (skip-if-newer); `force_rebuild:true` rebuilds.
+- A fabricated controlled game with `configuredSyncRandSeed != configuredMapRandSeed` **aborts** with a clear civ-bench `ExtractError` policy error; uncontrolled games and absent configured seeds still use `-1` sentinels, and a configured `0` ("pick random") reads as uncontrolled; a `seatingRotation` of `0` stays a valid (≥ 0) rotation.
+- `seatingMap` (`{config_slot: player_id}`) inverts to per-player `config_slot`; `player_type` follows `model-{id}`/`strategist-{id}` through a seat rotation (identity travels with the player, not the seat); a `VPAI` seat resolves to the `Vanilla` baseline; a legacy game with no metadata falls back to the static `(condition, slot)` seat map.
+- End-to-end `game_data` extraction writes `seed`/`seating_rotation` (incl. the `-1` sentinels) and the filename `timestamp`; end-to-end `panel_data` extraction lands `player_type`/`model`/`config_slot` for a two-player synthetic DB.
+- `run_extract` skips when outputs are newer than the DBs and runs anyway under `force_rebuild`; a disabled `extract` is reported as skipped (loaders read `tables.*` directly).
+- Config validation: `data.extract` scalar types (`enabled`/`runs_dir`/`max_dbs ≥ 1`/`prune_missing`/`force_rebuild`) and `data.tables` string paths fail loud on the wrong shape.

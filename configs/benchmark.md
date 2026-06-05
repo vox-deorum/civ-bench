@@ -28,6 +28,8 @@ Each stage has a stable **`id`**. Edges come from three places, all resolved int
 
 A cycle, an unknown `id`, or a reference to a disabled stage is a validation error. Disabled stages (`"enabled": false`) are dropped from the graph, and anything that *needed* one is a validation error. There is **no graceful degradation for missing dependencies**: if a stage needs `torch` / `xgboost` / `optuna` / R and it isn't installed, the run **fails loud** — install everything first (see [AGENTS.md](../AGENTS.md#dependencies) and `scripts/install`).
 
+The dependency graph is resolved once at config-load time and then reused by the dry-run printer and runner. Validation and execution therefore share the same interpretation of `needs`, `uses.estimators`, and `uses.tables`.
+
 **Determinism.** The top-level `seed` is threaded into every stage that uses randomness (CV splits, torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byte-stable outputs.
 
 ---
@@ -144,6 +146,8 @@ The full filter shape (every field optional; omitted ⇒ no constraint):
 - a **list** mixing preset names and inline objects, which are merged left-to-right (later entries win per field). E.g. `"filter": ["llm_only", { "turn_range": [200, null] }]`.
 
 A stage's `filter` is then **intersected** with the resolved global `data.filter` — a stage can only narrow, never widen (§6.1). Referencing an undefined preset name is a validation error.
+
+The same resolved filter object is what the shared data loaders accept, so analysis modules should pass config-shaped filters through the loader helpers instead of translating `experiments`, `players`, `only_llm`, `min_games`, and `turn_range` by hand.
 
 ### 3.2 `groupings` — named rating-identity dimensions
 
@@ -547,13 +551,13 @@ The report walks each produced `AnalysisResult` (tables + figures + summary). Wi
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
-2. **No unknown keys** at any level — typos fail loud.
-3. **Unique ids** across `estimators` + `adjust` + `analyses`; `needs`/`uses` must reference existing, enabled ids.
+2. **No unknown keys** at any level — typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `group_by`, extract `outputs`, report `formats`, etc.) must be JSON arrays of strings; a bare string is an error.
+3. **Unique ids** across `estimators` + `adjust` + `analyses`; `needs`/`uses` must reference existing, enabled ids. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
 6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust` `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves in `catalogs.models` `prediction_models`.
 7. **Adjust wiring**: each `adjust` stage must declare exactly one estimator in `uses.estimators`. A `uses.tables` name must resolve to either a `data.tables` key or an enabled `adjust` stage `id`; any `ratings.*` analysis must reference a `strength` table (no `adjust` stage ⇒ a `ratings.*` analysis is a validation error, since there is nothing to rate).
-8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; a stage `filter` may not select experiments/players/turns excluded by the resolved global `data.filter`; a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable).
+8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; list filters merge left-to-right; a stage `filter` may not select experiments/players/turns excluded by the resolved global `data.filter` or lower constraints like `only_llm`/`min_games`; a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable).
 9. **Grouping resolution**: in a `ratings.*` `group_by`, every dimension past the base (`group_by[0]`, typically `player_type`) must name a grouping defined in top-level `groupings` (§3.2); referencing an undefined grouping is an error. Each grouping's `kind` must be implemented (currently only `argmax`); an `argmax` grouping's `labels`, when present, must be positional with `columns`.
 10. **Bootstrap**: a `ratings.*` `bootstrap`, when not null, requires an integer `n >= 1`; its resampling is seeded from the top-level `seed` (determinism — same config ⇒ same CIs).
 11. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install` first so every dependency is present.

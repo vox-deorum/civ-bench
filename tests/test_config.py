@@ -52,6 +52,9 @@ def _mutations():
         # disabled-target reference via `uses`: pred_metrics uses the now-disabled score estimator
         "uses_disabled_estimator": lambda c: c["estimators"][0].__setitem__("enabled", False),
         "dangling_uses_estimator": lambda c: c["analyses"][4]["uses"]["estimators"].append("ghost"),
+        "uses_estimator_string": lambda c: c["analyses"][4]["uses"].__setitem__("estimators", "score"),
+        "needs_string": lambda c: c["analyses"][4].__setitem__("needs", "score"),
+        "report_formats_string": lambda c: c["report"].__setitem__("formats", "html"),
         "unknown_analysis_module": lambda c: c["analyses"][0].__setitem__("module", "ratings.fake"),
         "unknown_adjust_module": lambda c: c["adjust"][0].__setitem__("module", "nope"),
         "bad_strength_enum": lambda c: c["adjust"][0]["params"].__setitem__("block", "wild"),
@@ -63,6 +66,14 @@ def _mutations():
         "duplicate_ids": lambda c: c["analyses"][1].__setitem__("id", "bt_main"),
         "reserved_id": lambda c: c["analyses"][0].__setitem__("id", "extract"),
         "turn_range_min_gt_max": lambda c: c["filters"].__setitem__("late_game", {"turn_range": [300, 100]}),
+        # stage 1: data.extract scalar + data.tables path types fail loud
+        "extract_enabled_not_bool": lambda c: c["data"]["extract"].__setitem__("enabled", "yes"),
+        "extract_max_dbs_zero": lambda c: c["data"]["extract"].__setitem__("max_dbs", 0),
+        "tables_path_not_string": lambda c: c["data"]["tables"].__setitem__("turns", 7),
+        "stage_filter_widens_global": lambda c: (
+            c["data"].__setitem__("filter", {"experiments": ["global_only"]}),
+            c["analyses"][4].__setitem__("filter", {"experiments": ["other"]}),
+        ),
     }
 
 
@@ -90,3 +101,10 @@ def test_cycle_detected_at_load(dev_spec, write_spec):
     path = write_spec(dev_spec)
     with pytest.raises(ConfigError, match="cycle"):
         load_config(path)
+
+
+def test_stage_filter_list_can_narrow_global(dev_spec, write_spec):
+    dev_spec["data"]["filter"] = {"turn_range": [100, None]}
+    dev_spec["analyses"][4]["filter"] = ["late_game", {"players": ["Sonnet-4.5"]}]
+    path = write_spec(dev_spec)
+    assert load_config(path).analyses[4].raw["filter"][0] == "late_game"
