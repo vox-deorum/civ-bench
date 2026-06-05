@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "civ-bench"
+version = "0.1.0"
+description = "Modular, JSON-configurable benchmark harness for LLM strategists in Civilization V: Vox Populi (via Vox Deorum)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Everything is required and installed up front — there are no optional extras
+# (see AGENTS.md §Dependencies). A missing dependency is a hard error, never a
+# skipped stage. scripts/install.{ps1,sh} install + verify these and the R packages.
+dependencies = [
+  "pandas",
+  "numpy",
+  "scipy",
+  "statsmodels",
+  "matplotlib",
+  "seaborn",
+  "plotly",
+  "scikit-learn",
+  "tabulate",
+  "torch",
+  "xgboost",
+  "optuna",
+  "imbalanced-learn",
+]
+
+[project.scripts]
+civ-bench = "civ_bench.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["civ_bench*"]

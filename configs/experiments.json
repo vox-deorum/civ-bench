@@ -1,0 +1,203 @@
+{
+  "player_type_labels": {},
+
+  "condition_player_mapping": {
+    "2026-staff-oss": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" }
+    ],
+    "2026-staff-glm": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "GLM-4.6", "variant": "Simple" },
+      { "model": "GLM-4.6", "variant": "Briefed" }
+    ],
+    "2026-staff-haiku": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Haiku-4.5", "variant": "Simple" },
+      { "model": "Haiku-4.5", "variant": "Briefed" }
+    ],
+    "2026-staff-sonnet": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" }
+    ],
+    "2026-only-sonnet": [
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" },
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" }
+    ],
+    "2026-glm-v-sonnet-standard": [
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" },
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" }
+    ],
+    "2026-oss-v-sonnet-standard": [
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" }
+    ],
+    "2026-oss-v-glm-standard": [
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" }
+    ],
+    "2026-deepseek-v-kimi-v-glm-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" },
+      { "model": "Deepseek-3.2", "variant": "Simple" },
+      { "model": "Deepseek-3.2", "variant": "Briefed" }
+    ],
+    "2026-deepseek-v-kimi2-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "Deepseek-3.2", "variant": "Simple" },
+      { "model": "Deepseek-3.2", "variant": "Briefed" }
+    ],
+    "2026-oss-v-kimi2-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" }
+    ],
+    "2026-oss-v-qwen-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Qwen-3.5", "variant": "Simple" },
+      { "model": "Qwen-3.5", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" }
+    ],
+    "2026-qwen-v-kimi2-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "Qwen-3.5", "variant": "Simple" },
+      { "model": "Qwen-3.5", "variant": "Briefed" }
+    ],
+    "2026-glm-v-kimi2-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" }
+    ],
+    "2026-oss-v-minimax-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "Minimax-M2.5", "variant": "Simple" },
+      { "model": "Minimax-M2.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" }
+    ],
+    "2026-deepseek-v-kimi2-v-glm-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" },
+      { "model": "Deepseek-3.2", "variant": "Simple" },
+      { "model": "Deepseek-3.2", "variant": "Briefed" }
+    ],
+    "2026-deepseek-v-kimi-v-oss-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "Deepseek-3.2", "variant": "Simple" },
+      { "model": "Deepseek-3.2", "variant": "Briefed" }
+    ],
+    "2026-deepseek-v-kimi2-v-oss-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Kimi-K2.5", "variant": "Simple" },
+      { "model": "Kimi-K2.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "Deepseek-3.2", "variant": "Simple" },
+      { "model": "Deepseek-3.2", "variant": "Briefed" }
+    ],
+    "2026-staff-standard": [
+      "Vanilla",
+      "Vanilla",
+      { "model": "Sonnet-4.5", "variant": "Simple" },
+      { "model": "Sonnet-4.5", "variant": "Briefed" },
+      { "model": "GPT-OSS-120B", "variant": "Simple" },
+      { "model": "GPT-OSS-120B", "variant": "Briefed" },
+      { "model": "GLM-4.7", "variant": "Simple" },
+      { "model": "GLM-4.7", "variant": "Briefed" }
+    ],
+    "observe-vanilla-standard": [
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla"
+    ],
+    "2026-null-ai-standard": [
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Vanilla",
+      "Null",
+      "Null",
+      "Null",
+      "Null"
+    ]
+  },
+  "vanilla_experiments": [
+    "observe-vanilla-standard"
+  ],
+  "null_ai_experiments": [
+    "2026-null-ai-standard"
+  ],
+  "default_excluded_experiments": []
+}

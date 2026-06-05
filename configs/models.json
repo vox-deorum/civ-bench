@@ -1,0 +1,264 @@
+{
+  "player_type_template": "{model}-{variant}{suffix}",
+  "vanilla_model_aliases": ["VPAI", "vanilla"],
+  "vanilla_label": "Vanilla",
+  "null_label": "Null",
+  "null_strategist_aliases": ["null-strategist", "null"],
+  "strategist_variant_map": {
+    "simple-strategist": "Simple",
+    "simple-strategist-briefed": "Briefed"
+  },
+  "strategist_models": [
+    {
+      "id": "Vanilla",
+      "aliases": ["vanilla"],
+      "color": "#555555"
+    },
+    {
+      "id": "Null",
+      "aliases": ["null"],
+      "color": "#999999"
+    },
+    {
+      "id": "GPT-OSS-120B",
+      "aliases": [
+        "gpt-oss-120b",
+        "oss-120b",
+        "openai-compatible/gpt-oss-120b"
+      ],
+      "color": "#FF7F00",
+      "pricing": { "input_per_million": 0.039, "output_per_million": 0.19 }
+    },
+    {
+      "id": "Sonnet-4.5",
+      "aliases": [
+        "claude-sonnet-4-5",
+        "sonnet-4-5",
+        "sonnet-4.5"
+      ],
+      "color": "#377EB8",
+      "pricing": { "input_per_million": 3.0, "output_per_million": 15.0 }
+    },
+    {
+      "id": "Haiku-4.5",
+      "aliases": [
+        "claude-haiku-4-5",
+        "haiku-4-5",
+        "haiku-4.5"
+      ],
+      "color": "#1B9E77"
+    },
+    {
+      "id": "GLM-4.6",
+      "aliases": [
+        "glm-4.6",
+        "openai-compatible/glm-4.6"
+      ],
+      "color": "#4DAF4A"
+    },
+    {
+      "id": "GLM-4.7",
+      "aliases": [
+        "glm-4.7",
+        "openai-compatible/glm-4.7"
+      ],
+      "color": "#4DAF4A",
+      "pricing": { "input_per_million": 0.39, "output_per_million": 1.75 }
+    },
+    {
+      "id": "GLM-5.1",
+      "aliases": [
+        "glm-5.1",
+        "openai-compatible/glm-5.1"
+      ],
+      "color": "#4DAF4A",
+      "pricing": { "input_per_million": 1.05, "output_per_million": 3.5 }
+    },
+    {
+      "id": "Minimax-M2.5",
+      "aliases": [
+        "minimax-m2.5",
+        "minimax"
+      ],
+      "color": "#984EA3",
+      "pricing": { "input_per_million": 0.2, "output_per_million": 1.17 }
+    },
+    {
+      "id": "Minimax-M2.7",
+      "aliases": [
+        "minimax-m2.7",
+        "openai-compatible/Minimax-M2.7",
+        "openai-compatible/minimax-m2.7"
+      ],
+      "color": "#984EA3",
+      "pricing": { "input_per_million": 0.3, "output_per_million": 1.2 }
+    },
+    {
+      "id": "Kimi-K2.5",
+      "aliases": [
+        "kimi-k2.5",
+        "kimi-k2-thinking",
+        "kimi-k2",
+        "openai-compatible/kimi-k2.5"
+      ],
+      "color": "#E377C2",
+      "pricing": { "input_per_million": 0.4, "output_per_million": 2 }
+    },
+    {
+      "id": "Kimi-K2.6",
+      "aliases": [
+        "kimi-k2.6",
+        "openai-compatible/kimi-k2.6"
+      ],
+      "color": "#E377C2",
+      "pricing": { "input_per_million": 0.75, "output_per_million": 3.5 }
+    },
+    {
+      "id": "DeepSeek-3.2",
+      "aliases": [
+        "deepseek-v3.2",
+        "deepseek-v3-2",
+        "deepseek-3.2",
+        "openai-compatible/deepseek-v3.2"
+      ],
+      "color": "#8C564B",
+      "pricing": { "input_per_million": 0.26, "output_per_million": 0.38 }
+    },
+    {
+      "id": "DeepSeek-4",
+      "aliases": [
+        "deepseek-v4",
+        "deepseek-4",
+        "openai-compatible/deepseek-v4"
+      ],
+      "color": "#8C564B",
+      "pricing": { "input_per_million": 0.435, "output_per_million": 0.87 }
+    },
+    {
+      "id": "Qwen-3.5",
+      "aliases": [
+        "qwen-3.5",
+        "openai-compatible/qwen-3.5"
+      ],
+      "color": "#E41A1C",
+      "pricing": { "input_per_million": 0.39, "output_per_million": 2.34 }
+    },
+    {
+      "id": "Qwen-3.6-27B",
+      "aliases": [
+        "qwen-3.6-27b",
+        "openai-compatible/qwen-3.6-27b"
+      ],
+      "color": "#CB181D",
+      "pricing": { "input_per_million": 0.13, "output_per_million": 0.76 }
+    },
+    {
+      "id": "Mistral-Small-4",
+      "aliases": [
+        "mistrial-small-4",
+        "openai-compatible/mistrial-small-4"
+      ],
+      "color": "#17BECF",
+      "pricing": { "input_per_million": 0.15, "output_per_million": 0.6 }
+    },
+    {
+      "id": "Gemma-4",
+      "aliases": [
+        "gemma-4",
+        "openai-compatible/gemma-4"
+      ],
+      "color": "#BCBD22",
+      "pricing": { "input_per_million": 0.13, "output_per_million": 0.38 }
+    },
+    {
+      "id": "Gemini-3.5-Flash",
+      "aliases": [
+        "gemini-3.5-flash",
+        "google/Gemini-3.5-Flash"
+      ],
+      "color": "#BCBD22",
+      "pricing": { "input_per_million": 0.75, "output_per_million": 4.5 }
+    },
+    {
+      "id": "GPT-5.4",
+      "aliases": [
+        "gpt-5.4",
+        "openai-compatible/gpt-5.4"
+      ],
+      "color": "#FF6347",
+      "pricing": { "input_per_million": 2.5, "output_per_million": 15 }
+    }
+  ],
+  "strategist_variants": {
+    "Simple": {
+      "suffix": "-Simple",
+      "style_key": "Simple"
+    },
+    "Briefed": {
+      "suffix": "-Briefed",
+      "style_key": "Briefed"
+    }
+  },
+  "prediction_models": [
+    {
+      "id": "naive",
+      "color": "#999999",
+      "predict_order": 10
+    },
+    {
+      "id": "score",
+      "color": "#8C564B",
+      "predict_order": 20
+    },
+    {
+      "id": "baseline",
+      "color": "#BCBD22",
+      "predict_order": 30
+    },
+    {
+      "id": "xgboost",
+      "color": "#2CA02C",
+      "predict_order": 40
+    },
+    {
+      "id": "mlp",
+      "color": "#1F77B4",
+      "predict_order": 50
+    },
+    {
+      "id": "grouped_mlp",
+      "color": "#FF7F0E",
+      "predict_order": 60
+    },
+    {
+      "id": "interaction_mlp",
+      "color": "#9467BD",
+      "predict_order": 70
+    },
+    {
+      "id": "attention_mlp",
+      "color": "#D62728",
+      "predict_order": 80
+    }
+  ],
+  "prompt_patterns": {
+    "Simple": {
+      "hatch": "",
+      "linestyle": "-",
+      "marker": "o",
+      "alpha": 0.8
+    },
+    "Briefed": {
+      "hatch": "///",
+      "linestyle": "--",
+      "marker": "s",
+      "alpha": 0.8
+    },
+    "Vanilla": {
+      "hatch": "",
+      "linestyle": "-",
+      "marker": "d",
+      "alpha": 0.9
+    }
+  }
+}
