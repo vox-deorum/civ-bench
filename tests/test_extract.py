@@ -36,8 +36,12 @@ def catalog(configs_dir) -> Catalog:
     return Catalog.from_paths(configs_dir / "models.json", configs_dir / "experiments.json")
 
 
-def _make_game_db(path: Path, metadata: dict, players=None, summaries=None) -> None:
-    """Create a minimal game DB with a GameMetadata Key→Value table (+ optional rows)."""
+def _make_game_db(path: Path, metadata: dict, players=None, summaries=None, flavor_rows=None) -> None:
+    """Create a minimal game DB with a GameMetadata Key→Value table (+ optional rows).
+
+    ``flavor_rows`` is a list of ``(ID, Key, Turn, Changes, GrandStrategy, Rationale,
+    Nuke, UseNuke)`` tuples inserted into ``FlavorChanges`` (for decision counting).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     cur = conn.cursor()
@@ -58,6 +62,8 @@ def _make_game_db(path: Path, metadata: dict, players=None, summaries=None) -> N
         # Empty change/event tables so the verbatim per-player queries take the
         # normal (non-exception) path instead of the catch-all N/A fallback.
         cur.execute("CREATE TABLE FlavorChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Changes TEXT, GrandStrategy TEXT, Rationale TEXT, Nuke INTEGER, UseNuke INTEGER)")
+        if flavor_rows:
+            cur.executemany("INSERT INTO FlavorChanges VALUES (?, ?, ?, ?, ?, ?, ?, ?)", flavor_rows)
         cur.execute("CREATE TABLE StrategyChanges (ID INTEGER, Key INTEGER, Turn INTEGER, GrandStrategy TEXT, Changes TEXT, Rationale TEXT)")
         cur.execute("CREATE TABLE PersonaChanges (Key INTEGER, Changes TEXT)")
         cur.execute("CREATE TABLE ResearchChanges (Key INTEGER, Changes TEXT)")
@@ -110,8 +116,8 @@ def test_seeding_absent_uses_sentinels():
     assert info.seed == UNCONTROLLED
     assert info.seating_rotation == UNCONTROLLED
     assert info.config_slots == {}
-    # an absent player still gets identity config_slot
-    assert info.config_slot(2) == 2
+    # a seat absent from the seatingMap is not part of the controlled seating → -1
+    assert info.config_slot(2) == UNCONTROLLED
 
 
 def test_seeding_rotation_zero_is_valid():
@@ -156,11 +162,21 @@ def test_identity_follows_player_through_rotation(catalog):
     assert ids[0]["config_slot"] == 1
 
 
-def test_identity_legacy_game_falls_back_to_seat_map(catalog):
-    # No model-{id}/strategist-{id} metadata → static (condition, slot) fallback.
-    ids = compose_identities({}, [0], "unknown-condition", catalog, extract_seeding_fields({}))
-    assert ids[0]["player_type"] == "Player 0"
-    assert ids[0]["model"] == "N/A"
+def test_identity_unmarked_seat_defaults_to_vpai(catalog):
+    # No model-{id} metadata and no legacy seat map → default VPAI → Vanilla.
+    ids = compose_identities({}, [0], "gemma-4-standard-fixed", catalog, extract_seeding_fields({}))
+    assert ids[0]["player_type"] == "Vanilla"
+    assert ids[0]["model"] == "VPAI"
+    assert ids[0]["config_slot"] == UNCONTROLLED
+
+
+def test_identity_legacy_condition_uses_static_seat_map(catalog):
+    # A condition present in condition_player_mapping keeps the legacy seat label
+    # for an unmarked seat (games that predate the per-player metadata).
+    mapping = catalog.condition_player_mapping()
+    legacy_cond = next(iter(mapping))
+    ids = compose_identities({}, [0], legacy_cond, catalog, extract_seeding_fields({}))
+    assert ids[0]["player_type"] == mapping[legacy_cond][0]
 
 
 # ── skip-if-newer (§3) ───────────────────────────────────────────────────────
@@ -276,17 +292,38 @@ def test_run_extract_force_rebuild_runs_anyway(tmp_path, catalog):
     assert result.new_rows["games"] == 1
 
 
+def test_run_extract_force_rebuild_param_overrides_config(tmp_path, catalog):
+    # CLI --force-rebuild (the param) overrides data.extract.force_rebuild=false.
+    runs = tmp_path / "runs"
+    db = runs / "exp" / "g_1.db"
+    _make_game_db(db, {"gameId": "g", "configuredSyncRandSeed": "9", "configuredMapRandSeed": "9"})
+    out = tmp_path / "game_data.csv"
+    out.write_text("game_id,timestamp,experiment,seed,seating_rotation\n", encoding="utf-8")
+    time.sleep(0.01)
+    os.utime(str(out), None)  # output newer than the DB → would normally skip
+
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "force_rebuild": False},
+        {"games": str(out)},
+    )
+    result = run_extract(cfg, catalog=catalog, force_rebuild=True)
+    assert result.skipped is False
+    assert result.new_rows["games"] == 1
+
+
 def test_run_extract_panel_writes_player_type(tmp_path, catalog):
     runs = tmp_path / "runs"
-    db = runs / "2026-staff-standard" / "g1_100.db"
+    db = runs / "gemma-4-standard-fixed" / "g1_100.db"
     _make_game_db(
         db,
         metadata={
             "gameId": "g1",
+            # one marked treatment seat at config slot 0; the other seat is an
+            # unmarked in-game-AI opponent (no model-{id} metadata).
             "model-0": "claude-sonnet-4-5",
             "strategist-0": "simple-strategist-briefed",
-            "model-1": "VPAI",
-            "strategist-1": "none-strategist",
+            "seatingMap": '{"0": 0}',
             "configuredSyncRandSeed": "5",
             "configuredMapRandSeed": "5",
             "seatingRotation": "0",
@@ -308,7 +345,57 @@ def test_run_extract_panel_writes_player_type(tmp_path, catalog):
 
     import csv
     rows = {int(r["player_id"]): r for r in csv.DictReader(panel_out.open(encoding="utf-8"))}
+    # marked treatment seat
     assert rows[0]["player_type"] == "Sonnet-4.5-Briefed"
     assert rows[0]["model"] == "claude-sonnet-4-5"
-    assert rows[1]["player_type"] == "Vanilla"
     assert rows[0]["config_slot"] == "0"
+    # unmarked seat → VPAI default (→ Vanilla), config_slot -1
+    assert rows[1]["player_type"] == "Vanilla"
+    assert rows[1]["model"] == "VPAI"
+    assert rows[1]["config_slot"] == "-1"
+
+
+def test_is_decision_changes_predicate():
+    from bench.extract.utilities import is_decision_changes
+    assert is_decision_changes('["Rationale"]') is True            # status quo + rationale
+    assert is_decision_changes('["Rationale","Offense"]') is True  # actual change
+    assert is_decision_changes("[]") is False                      # empty
+    assert is_decision_changes("") is False
+    assert is_decision_changes(None) is False                      # carry-forward
+
+
+def test_panel_decisions_count_includes_status_quo(tmp_path, catalog):
+    runs = tmp_path / "runs"
+    db = runs / "gemma-4-standard-fixed" / "g2_100.db"
+    _make_game_db(
+        db,
+        metadata={
+            "gameId": "g2",
+            "model-0": "claude-sonnet-4-5",
+            "strategist-0": "simple-strategist-briefed",
+            "seatingMap": '{"0": 0}',
+            "configuredSyncRandSeed": "5",
+            "configuredMapRandSeed": "5",
+            "seatingRotation": "0",
+        },
+        players=[(0, "America", 1)],
+        summaries=[(1, 0, 10, 500, 1, "Pottery")],
+        # 2 status-quo decisions + 1 actual change for player 0.
+        flavor_rows=[
+            (1, 0, 2, '["Rationale"]', "Conquest", "keep status quo", 50, 50),
+            (2, 0, 3, '["Rationale"]', "Conquest", "still optimal", 50, 50),
+            (3, 0, 4, '["Rationale","Offense"]', "Conquest", "ramp offense", 60, 50),
+        ],
+    )
+    panel_out = tmp_path / "panel_data.csv"
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["panel"]},
+        {"panel": str(panel_out)},
+    )
+    run_extract(cfg, catalog=catalog)
+
+    import csv
+    row = list(csv.DictReader(panel_out.open(encoding="utf-8")))[0]
+    assert row["decisions"] == "3"        # all three turns are decisions
+    assert row["strategy_changes"] == "1"  # only the one with an actual flavor change

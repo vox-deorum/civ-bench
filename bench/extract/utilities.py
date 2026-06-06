@@ -65,15 +65,33 @@ class SeedingInfo:
 
     seed: int = UNCONTROLLED
     seating_rotation: int = UNCONTROLLED
-    # player_id → config_slot. Absent players default to identity (player_id).
+    # player_id → config_slot, inverted from ``seatingMap``. Only the controlled
+    # (treatment) seats appear here.
     config_slots: dict = field(default_factory=dict)
 
     def config_slot(self, player_id: int) -> int:
-        return self.config_slots.get(player_id, player_id)
+        # A seat absent from the seatingMap is not part of the controlled seating
+        # (an in-game-AI opponent) → the uncontrolled sentinel, NOT its player_id,
+        # so downstream can tell treatment seats from the field.
+        return self.config_slots.get(player_id, UNCONTROLLED)
 
     @property
     def controlled(self) -> bool:
         return self.seed != UNCONTROLLED and self.seating_rotation != UNCONTROLLED
+
+
+def is_decision_changes(changes_json) -> bool:
+    """True when a ``Changes`` value records a strategist **decision**.
+
+    The strategist writes a ``FlavorChanges``/``StrategyChanges`` row every turn it
+    acts, listing the fields it touched. A status-quo turn — the agent chose to
+    keep everything the same but still gave a rationale — is ``'["Rationale"]'``:
+    no flavor numbers changed, yet it *is* a decision. Only a truly empty row
+    (``'[]'``/null) is not a decision (no agent output, e.g. carry-forward).
+    """
+    if changes_json is None:
+        return False
+    return changes_json not in ("", "[]")
 
 
 def _maybe_int(value) -> int | None:

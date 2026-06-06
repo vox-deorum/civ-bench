@@ -54,6 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         p = sub.add_parser(cmd, help=help_text)
         _add_common(p)
+        if cmd in ("extract", "run"):
+            p.add_argument(
+                "--force-rebuild", "--force_rebuild", "-f",
+                dest="force_rebuild", action="store_true",
+                help="re-extract even when outputs are newer than the DBs "
+                     "(overrides data.extract.force_rebuild)",
+            )
     return parser
 
 
@@ -80,7 +87,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "extract":
         try:
-            result = run_extract(cfg)
+            result = run_extract(cfg, force_rebuild=getattr(args, "force_rebuild", False))
         except (ConfigError, ExtractError) as exc:
             print(f"civ-bench: extract error: {exc}", file=sys.stderr)
             return 2

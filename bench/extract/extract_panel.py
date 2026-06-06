@@ -27,6 +27,7 @@ from .utilities import (
 ALL_PLAYER_FIELDS = (
     PLAYER_CORE_FIELDS
     + CHANGE_FIELDS
+    + ["decisions"]
     + list(STRATEGY_MAPPINGS.values())
     + POLICY_BRANCHES
 )
@@ -62,7 +63,8 @@ PANEL_FIELD_MAPPINGS = {
     "input_tokens": None,
     "reasoning_tokens": None,
     "output_tokens": None,
-    "strategy_changes": None,
+    "strategy_changes": None,  # turns with an *actual* flavor-number change
+    "decisions": None,         # turns the strategist acted, incl. status-quo+rationale
     "persona_changes": None,
     "research_changes": None,
     "policy_changes": None,
@@ -213,14 +215,35 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
         """, (player_id,))
         all_strategy_changes = cursor.fetchall()
 
+        # strategy_changes: turns with an *actual* flavor-number change — i.e. a
+        # decision that touched a field other than the rationale (excludes both
+        # the status-quo '["Rationale"]' and the truly empty '[]'/null rows).
         cursor.execute("""
-            SELECT COUNT(*) FROM FlavorChanges WHERE Key = ? AND Changes != '["Rationale"]'
+            SELECT COUNT(*) FROM FlavorChanges
+            WHERE Key = ? AND Changes IS NOT NULL AND Changes NOT IN ('[]', '["Rationale"]')
         """, (player_id,))
         flavor_changes = cursor.fetchone()[0] or 0
         if flavor_changes != 0:
             player_data["strategy_changes"] = flavor_changes
         else:
-            player_data["strategy_changes"] = sum(1 for row in all_strategy_changes if row[2] != '["Rationale"]')
+            player_data["strategy_changes"] = sum(
+                1 for row in all_strategy_changes if row[2] not in (None, "[]", '["Rationale"]')
+            )
+
+        # decisions: every turn the strategist acted, including a status-quo turn
+        # ('["Rationale"]') where it kept everything the same but gave a rationale.
+        # Only a truly empty row ('[]'/null) is not a decision.
+        cursor.execute("""
+            SELECT COUNT(*) FROM FlavorChanges
+            WHERE Key = ? AND Changes IS NOT NULL AND Changes != '[]'
+        """, (player_id,))
+        flavor_decisions = cursor.fetchone()[0] or 0
+        if flavor_decisions != 0:
+            player_data["decisions"] = flavor_decisions
+        else:
+            player_data["decisions"] = sum(
+                1 for row in all_strategy_changes if row[2] not in (None, "[]")
+            )
 
         cursor.execute("""
             SELECT COUNT(*) FROM PlayerSummaries

@@ -41,8 +41,16 @@ def _table_path(cfg: RunConfig, key: str) -> str:
     return tables.get(key) or DEFAULT_TABLE_PATHS[key]
 
 
-def run_extract(cfg: RunConfig, catalog: Optional[Catalog] = None) -> ExtractResult:
-    """Run the extract stage for ``cfg`` and return a summary of what was written."""
+def run_extract(
+    cfg: RunConfig,
+    catalog: Optional[Catalog] = None,
+    force_rebuild: bool = False,
+) -> ExtractResult:
+    """Run the extract stage for ``cfg`` and return a summary of what was written.
+
+    ``force_rebuild`` (e.g. the CLI ``--force-rebuild`` flag) overrides the
+    config's ``data.extract.force_rebuild`` when either is set.
+    """
     extract_cfg = cfg.data.get("extract", {}) or {}
 
     if not cfg.extract_enabled:
@@ -55,7 +63,7 @@ def run_extract(cfg: RunConfig, catalog: Optional[Catalog] = None) -> ExtractRes
     outputs = list(extract_cfg.get("outputs", list(DEFAULT_TABLE_PATHS)))
     max_dbs = extract_cfg.get("max_dbs")
     prune_only = bool(extract_cfg.get("prune_missing", False))
-    force_rebuild = bool(extract_cfg.get("force_rebuild", False))
+    force_rebuild = force_rebuild or bool(extract_cfg.get("force_rebuild", False))
 
     output_paths = {key: _table_path(cfg, key) for key in outputs}
 

@@ -32,14 +32,21 @@ def compose_identities(
     For each player, ``model-{id}`` / ``strategist-{id}`` are read from
     ``metadata`` and composed via :meth:`Catalog.compose_player_type` (with the
     player's ``config_slot`` so ``(condition, slot)`` label overrides apply). A
-    player with no ``model-{id}`` metadata is a **legacy seat**: its
-    ``player_type`` falls back to the catalog's static ``(condition, slot)`` map.
+    seat with **no** ``model-{id}`` metadata is an unmarked in-game-AI opponent:
+
+    - if the condition has a legacy ``condition_player_mapping`` entry (games that
+      predate the metadata), that static ``(condition, slot)`` seat label is used;
+    - otherwise the seat **defaults to ``VPAI``** (the vanilla in-game AI), which
+      composes to the ``Vanilla`` baseline. The recorded ``model`` is ``VPAI`` so
+      the default is explicit rather than an empty cell.
     """
     identities: dict[int, dict] = {}
+    seat_map = catalog.condition_player_mapping() if catalog is not None else {}
     for pid in player_ids:
         model = metadata.get(f"model-{pid}")
         strategist = metadata.get(f"strategist-{pid}")
         config_slot = seeding.config_slot(pid)
+        model_out = model if model is not None else "N/A"
 
         if catalog is None:
             player_type = None
@@ -48,12 +55,20 @@ def compose_identities(
                 model, strategist, condition=experiment, config_slot=config_slot
             )
         else:
-            # Legacy game (no per-player metadata) → static seat-map fallback.
-            player_type = catalog.fallback_player_type(experiment, pid)
+            legacy_seats = seat_map.get(experiment)
+            if legacy_seats is not None and 0 <= pid < len(legacy_seats):
+                # Legacy game with a known static seat map.
+                player_type = legacy_seats[pid]
+            else:
+                # Unmarked seat → default to VPAI (→ Vanilla baseline).
+                model_out = "VPAI"
+                player_type = catalog.compose_player_type(
+                    "VPAI", strategist, condition=experiment, config_slot=config_slot
+                )
 
         identities[pid] = {
             "player_type": player_type,
-            "model": model if model is not None else "N/A",
+            "model": model_out,
             "strategist": strategist if strategist is not None else "N/A",
             "config_slot": config_slot,
         }

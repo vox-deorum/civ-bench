@@ -19,8 +19,8 @@ from .identity import compose_identities
 from .utilities import (
     append_csv_file, extract_seeding_fields, filter_existing_data,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    open_database_readonly, read_existing_csv, read_game_metadata,
-    should_skip_game, write_csv_file,
+    is_decision_changes, open_database_readonly, read_existing_csv,
+    read_game_metadata, should_skip_game, write_csv_file,
 )
 
 # Mapping from FlavorChanges DB column (PascalCase) to CSV column (snake_case)
@@ -99,7 +99,8 @@ TURN_FIELD_MAPPINGS = {
     "friendships": None,
     "defensive_pacts": None,
     "is_winner": None,
-    "is_changed": None,
+    "is_changed": None,    # this turn has an actual flavor-number change
+    "is_decision": None,   # the strategist acted this turn (incl. status-quo+rationale)
     **{csv_col: None for _, csv_col in FLAVOR_COLUMNS},
     "grand_strategy": None,
     "rationale": None,
@@ -563,6 +564,7 @@ def process_turn_group(turn_players, turn_data, experiment_name, game_id, max_tu
             "defensive_pacts": player_info["defensive_pacts"],
             "is_winner": 1 if player_id == victory_player_id else 0,
             "is_changed": is_changed,
+            "is_decision": 1 if is_decision_changes(flavor_changes) else 0,
         }
 
         for (_, csv_col), value in zip(FLAVOR_COLUMNS, flavor_values):
