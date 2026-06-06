@@ -1,0 +1,35 @@
+{
+  "model_class": "BaselineVictoryPredictor",
+  "selected_features": [
+    "science_share",
+    "culture_share",
+    "food_share",
+    "cities_share",
+    "faith_share",
+    "tourism_share",
+    "gold_share",
+    "production_share",
+    "military_share",
+    "population_share",
+    "votes_share",
+    "minor_allies_share",
+    "highest_war_weariness",
+    "active_wars",
+    "truces",
+    "defensive_pacts",
+    "friendships",
+    "technologies_gap",
+    "policies_gap",
+    "happiness_percentage",
+    "religion_percentage",
+    "military_utilization",
+    "score_ratio"
+  ],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {
+    "calibrate": true,
+    "calibration_method": "isotonic"
+  }
+}

@@ -63,6 +63,9 @@ civ-bench/
 │   ├── reports/                  # assemble analysis artifacts → markdown/html report
 │   └── plotting/                 # shared styles, colors, figure helpers
 ├── tests/                        # pytest suite (mirrors bench/ by area: config, pipeline, catalog, …)
+├── pretrained/                   # TRACKED reference model snapshots, one per prediction_models id
+│   └── <model_id>/               #   (metadata.json + state) — fit:pretrained model_dir points here.
+│                                 #   An INPUT, NOT re-rooted by output.suffix (only save-paths are).
 ├── runs/                         # raw game-run input data + canonical CSVs (gitignored)
 └── reports/                      # generated reports, figures, trained estimators (gitignored)
 ```

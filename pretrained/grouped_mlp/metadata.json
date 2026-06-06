@@ -1,0 +1,43 @@
+{
+  "model_class": "GroupedMLPPredictor",
+  "selected_features": [
+    "science_share",
+    "culture_share",
+    "tourism_share",
+    "gold_share",
+    "food_share",
+    "military_share",
+    "cities_share",
+    "population_share",
+    "votes_share",
+    "faith_raw_share",
+    "production_raw_share",
+    "highest_war_weariness",
+    "active_wars",
+    "truces",
+    "defensive_pacts",
+    "friendships",
+    "minor_allies_share",
+    "technologies_gap",
+    "policies_gap",
+    "happiness_percentage",
+    "military_utilization",
+    "religion_percentage",
+    "turn_progress",
+    "score_ratio"
+  ],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {
+    "dropout": 0.211075,
+    "lr": 0.00777935,
+    "weight_decay": 0.00311362,
+    "epochs": 21,
+    "loss_tp_alpha": 0.398396,
+    "batch_size_groups": 4096,
+    "layer_sizes": [
+      222
+    ]
+  }
+}

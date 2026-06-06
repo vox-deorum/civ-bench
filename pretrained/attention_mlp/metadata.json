@@ -1,0 +1,53 @@
+{
+  "model_class": "AttentionMLPPredictor",
+  "selected_features": [
+    "science_adj",
+    "culture_adj",
+    "tourism_adj",
+    "gold_adj",
+    "food_adj",
+    "production_adj",
+    "military_adj",
+    "faith_adj",
+    "population",
+    "cities",
+    "votes",
+    "minor_allies",
+    "technologies_gap",
+    "policies_gap",
+    "highest_war_weariness",
+    "active_wars",
+    "truces",
+    "defensive_pacts",
+    "friendships",
+    "happiness_percentage",
+    "religion_percentage",
+    "military_utilization",
+    "turn_progress",
+    "score_ratio"
+  ],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {
+    "dropout": 0.488257,
+    "lr": 0.00292321,
+    "weight_decay": 0.00647453,
+    "epochs": 24,
+    "loss_tp_alpha": 0.331643,
+    "batch_size_groups": 4096,
+    "encoder_sizes": [
+      33
+    ],
+    "decoder_sizes": [
+      20,
+      20,
+      20,
+      20,
+      20
+    ],
+    "num_heads": 3,
+    "n_attn_layers": 1,
+    "attn_dropout": 0.22826
+  }
+}

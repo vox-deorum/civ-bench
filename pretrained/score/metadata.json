@@ -1,0 +1,12 @@
+{
+  "model_class": "ScorePredictor",
+  "selected_features": [
+    "score_ratio"
+  ],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {
+    "exponent": 4.236
+  }
+}

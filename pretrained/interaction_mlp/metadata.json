@@ -1,0 +1,47 @@
+{
+  "model_class": "InteractionMLPPredictor",
+  "selected_features": [
+    "science_adj",
+    "culture_adj",
+    "tourism_adj",
+    "gold_adj",
+    "food_adj",
+    "production_adj",
+    "military_adj",
+    "faith_adj",
+    "population",
+    "cities",
+    "votes",
+    "minor_allies",
+    "highest_war_weariness",
+    "active_wars",
+    "truces",
+    "defensive_pacts",
+    "friendships",
+    "technologies_gap",
+    "policies_gap",
+    "happiness_percentage",
+    "religion_percentage",
+    "military_utilization",
+    "turn_progress",
+    "score_ratio"
+  ],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {
+    "dropout": 0.402918,
+    "lr": 0.00105235,
+    "weight_decay": 0.00258942,
+    "epochs": 24,
+    "loss_tp_alpha": 0.961865,
+    "batch_size_groups": 4096,
+    "encoder_sizes": [
+      238
+    ],
+    "decoder_sizes": [
+      214
+    ],
+    "pool_mode": "mean+max"
+  }
+}

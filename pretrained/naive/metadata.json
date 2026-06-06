@@ -1,0 +1,8 @@
+{
+  "model_class": "NaivePredictor",
+  "selected_features": [],
+  "random_state": 42,
+  "include_features": null,
+  "exclude_features": [],
+  "hyperparams": {}
+}

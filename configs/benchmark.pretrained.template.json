@@ -1,6 +1,6 @@
 {
   "name": "staff-standard-2026",
-  "description": "TEMPLATE for the LOAD-ONLY driver (tracked example — copy to a local, gitignored configs/benchmark*.json to run; configs/benchmark.dev.json is the worked dev instance). Same run as benchmark.template.json but every estimator is fit:pretrained, loaded from a copied model_dir under reports/estimators/<id>/model/ (no training, no torch/xgboost/optuna training paths exercised). Stages 1-5 of plans/ run against a local copy of this; extract is disabled here and the canonical CSVs are dropped into runs/ directly. Honest cross-val/OOF and the non-LLM cross variant come from the fit:train pipeline (benchmark.template.json / stage6).",
+  "description": "TEMPLATE for the LOAD-ONLY driver (tracked example — copy to a local, gitignored configs/benchmark*.json to run; configs/benchmark.dev.json is the worked dev instance). Same run as benchmark.template.json but every estimator is fit:pretrained, loaded from the tracked pretrained/<model_id>/ store (one snapshot per prediction_models id — e.g. pretrained/attention_mlp/) (no training, no torch/xgboost/optuna training paths exercised). Note model_dir is an INPUT read as-authored — it is NOT re-rooted by output.suffix (only save-paths are), so the same pretrained/ store serves the default and -dev/-cross variants alike. Stages 1-5 of plans/ run against a local copy of this; extract is disabled here and the canonical CSVs are dropped into runs/ directly. Honest cross-val/OOF and the non-LLM cross variant come from the fit:train pipeline (benchmark.template.json / stage6).",
   "seed": 42,
 
   "output": {
@@ -50,7 +50,7 @@
       "predict_subset": "all",
       "save_predictions": "reports/estimators/score/predictions.csv",
       "pretrained": {
-        "model_dir": "reports/estimators/score/model/"
+        "model_dir": "pretrained/score/"
       }
     },
     {
@@ -62,7 +62,7 @@
       "predict_subset": "all",
       "save_predictions": "reports/estimators/attention/predictions.csv",
       "pretrained": {
-        "model_dir": "reports/estimators/attention/model/"
+        "model_dir": "pretrained/attention_mlp/"
       }
     },
     {
@@ -74,7 +74,7 @@
       "predict_subset": "all",
       "save_predictions": "reports/estimators/xgboost/predictions.csv",
       "pretrained": {
-        "model_dir": "reports/estimators/xgboost/model/"
+        "model_dir": "pretrained/xgboost/"
       }
     }
   ],

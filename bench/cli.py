@@ -3,10 +3,11 @@
     civ-bench extract|run|report --config <path> [--only ID] [--skip ID] [--dry-run]
 
 Stage 0 implements config loading + validation + DAG resolution + dry-run
-printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs). The
-estimators/adjust/analyses/report stages are filled in by later stages; running a
-command they cover reports what is not yet implemented rather than silently doing
-nothing.
+printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs);
+stage 2 adds the **load-only** ``estimators`` stage (``fit:"pretrained"`` →
+``predictions.csv``). The adjust/analyses/report stages are filled in by later
+stages; ``run`` executes the implemented prefix of the resolved DAG and reports
+loudly when it reaches a stage kind that is not implemented yet.
 """
 
 from __future__ import annotations
@@ -15,9 +16,10 @@ import argparse
 import sys
 from typing import Optional
 
+from .catalog import Catalog
 from .config import ConfigError, load_config
 from .extract import ExtractError, run_extract
-from .pipeline import build_dag, render_dag
+from .pipeline import Dag, build_dag, render_dag
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -69,6 +71,84 @@ def _is_dry(args: argparse.Namespace) -> bool:
     return bool(args.dry_run) or any(s.lower() == "all" for s in args.skip)
 
 
+# Stage kinds with an executable implementation today (the rest land in later stages).
+_IMPLEMENTED_KINDS = {"extract", "estimators"}
+
+
+def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
+    """Return the topo-ordered node ids to execute, honouring ``--only``/``--skip``.
+
+    ``--only ID`` keeps that node plus its transitive deps; ``--skip ID`` drops a
+    node. Unknown ids are a ``ValueError`` (fail loud, never silently no-op).
+    """
+    skip_ids = {s for s in skip if s.lower() != "all"}
+    for sid in skip_ids:
+        if sid not in dag.nodes:
+            raise ValueError(f"--skip references unknown stage id '{sid}'.")
+
+    if only:
+        for oid in only:
+            if oid not in dag.nodes:
+                raise ValueError(f"--only references unknown stage id '{oid}'.")
+        keep: set[str] = set()
+        stack = list(only)
+        while stack:
+            nid = stack.pop()
+            if nid in keep:
+                continue
+            keep.add(nid)
+            stack.extend(dag.nodes[nid].deps)
+    else:
+        keep = set(dag.order)
+
+    keep -= skip_ids
+    return [nid for nid in dag.order if nid in keep]
+
+
+def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
+    """Execute every *implemented* stage in ``subset`` (topo order).
+
+    Stages whose kind isn't implemented yet (adjust/analyses/report) are skipped
+    rather than aborting the run, so all estimators still produce their
+    ``predictions.csv``. The deps of an implemented stage are always implemented
+    too (an estimator only depends on ``extract``), so skipping never breaks an
+    executed stage. If anything was skipped, exit non-zero with a stage-N pointer.
+    """
+    catalog: Optional[Catalog] = None
+    skipped: list[tuple[str, str]] = []
+    for nid in subset:
+        node = dag.nodes[nid]
+        if node.kind not in _IMPLEMENTED_KINDS:
+            skipped.append((nid, node.kind))
+            continue
+        if catalog is None:
+            catalog = Catalog.from_run_config(cfg)
+        if node.kind == "extract":
+            result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
+            if result.skipped:
+                print(f"civ-bench: extract skipped — {result.reason}")
+        elif node.kind == "estimators":
+            from .estimators import run_estimator  # lazy: pulls torch/xgboost
+
+            result = run_estimator(cfg, node.raw, catalog=catalog)
+            print(
+                f"civ-bench: estimator '{result.id}' ({result.model}) → "
+                f"{result.predictions_path} ({result.n_rows} rows)"
+            )
+
+    if skipped:
+        kinds = ", ".join(sorted({k for _, k in skipped}))
+        print(
+            f"civ-bench: ran the implemented stages; skipped {len(skipped)} "
+            f"not-yet-implemented stage(s) [{kinds}] (adjust→stage 3, "
+            f"analyses→stage 4, report→stage 5). Use --dry-run to inspect the "
+            f"full DAG, or --only on an estimator to run just that.",
+            file=sys.stderr,
+        )
+        return 3
+    return 0
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -85,9 +165,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("Dry run: config loaded and validated; no stage executed.")
         return 0
 
+    force_rebuild = getattr(args, "force_rebuild", False)
+
     if args.command == "extract":
         try:
-            result = run_extract(cfg, force_rebuild=getattr(args, "force_rebuild", False))
+            result = run_extract(cfg, force_rebuild=force_rebuild)
         except (ConfigError, ExtractError) as exc:
             print(f"civ-bench: extract error: {exc}", file=sys.stderr)
             return 2
@@ -95,16 +177,39 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"civ-bench: extract skipped — {result.reason}")
         return 0
 
-    # estimators/adjust/analyses/report are built out in later stages.
-    print(render_dag(dag, cfg))
-    print()
-    print(
-        f"civ-bench: '{args.command}' execution is not implemented yet "
-        f"(stages 2+). The 'extract' command is available; re-run other commands "
-        f"with --dry-run to validate + print the DAG.",
-        file=sys.stderr,
-    )
-    return 3
+    if args.command == "report":
+        # Report rendering lands in stage 5; until then point users at run/--dry-run.
+        print(render_dag(dag, cfg))
+        print()
+        print(
+            "civ-bench: 'report' rendering is not implemented yet (stage 5). "
+            "Use --dry-run to validate + print the DAG.",
+            file=sys.stderr,
+        )
+        return 3
+
+    # `run`: execute the implemented prefix of the resolved DAG.
+    try:
+        subset = _resolve_subset(dag, args.only, args.skip)
+    except ValueError as exc:
+        print(f"civ-bench: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        return _run_pipeline(cfg, dag, subset, force_rebuild)
+    except (ConfigError, ExtractError) as exc:
+        print(f"civ-bench: run error: {exc}", file=sys.stderr)
+        return 2
+    except NotImplementedError as exc:
+        print(f"civ-bench: {exc}", file=sys.stderr)
+        return 3
+    except Exception as exc:  # estimator / load failures — fail loud, not silent
+        from .estimators import EstimatorError
+
+        if isinstance(exc, (EstimatorError, FileNotFoundError, ValueError)):
+            print(f"civ-bench: run error: {exc}", file=sys.stderr)
+            return 2
+        raise
 
 
 if __name__ == "__main__":

@@ -77,6 +77,7 @@ Every stage that writes (`estimators` `save_predictions`/`save_model`, `adjust` 
 ```
 
 - A stage save-path written as `reports/estimators/<id>/…` is interpreted **relative to the resolved root** (`<root><suffix>/estimators/<id>/…`). Authoring paths under `reports/` keeps the default run unchanged; setting `suffix: "-cross"` moves the *same* config's outputs to `reports-cross/`.
+- **Only save-paths are re-rooted — input paths are read as-authored.** `estimators.pretrained.model_dir` (§4.6), `data.tables.*`, and `data.extract.runs_dir` are inputs the run *reads*; the suffix never rewrites them. This is what lets the tracked `pretrained/<model_id>/` store feed every variant: a `-dev` run loads the same `pretrained/score/` but writes its predictions under `reports-dev/`.
 - The **cross variant is otherwise an ordinary `fit: train` run** with `train.train_subset: "non_llm"` (§4.4) — there is no separate "cross" estimator kind and no special prediction-loading path. Pair the non-LLM training subset with `output.suffix: "-cross"` (typically as its own config, e.g. `benchmark.cross.json`, or a CLI suffix override) so the two variants coexist on disk.
 - `output` is optional; omit it for the default `reports/` root and no suffix.
 
@@ -294,11 +295,13 @@ Ignored for `fit: pretrained` — the saved `metadata.json` already carries the 
 
 ```jsonc
 "pretrained": {
-  "model_dir": "reports/reference/attention_2026q1/"  // dir with metadata.json (dispatches class)
+  "model_dir": "pretrained/attention_mlp/"  // dir with metadata.json (dispatches class)
 }
 ```
 
 No `params` / `features` / `tune` are consulted — the saved `metadata.json` carries the architecture and selected features; the class is resolved from the registry by `metadata.model_class`. Inference runs on the entry's `predict_subset` and writes `save_predictions`.
+
+**`model_dir` is an INPUT, read as-authored — it is NOT re-rooted by `output.suffix`** (only save-paths are; §2.1). The repo ships tracked reference snapshots under `pretrained/<model_id>/` (one per `prediction_models` id); pointing `model_dir` there means the same store serves the default run *and* the `-dev`/`-cross` variants (a `suffix: "-dev"` run loads `pretrained/score/` yet writes to `reports-dev/estimators/score/`).
 
 ### 4.7 Why evaluation is a *step*, not a *source*
 
