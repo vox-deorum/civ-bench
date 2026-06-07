@@ -20,6 +20,7 @@ import pandas as pd
 
 from ..catalog import Catalog
 from ..config import RunConfig
+from ..data import apply_filter_spec
 from .errors import EstimatorError
 from .features import build_feature_frame, needs_variant_columns, prepare_features
 from .registry import load_model
@@ -155,6 +156,17 @@ def run_estimator(
 
     if catalog is None:
         catalog = Catalog.from_run_config(cfg)
+    df = apply_filter_spec(
+        df,
+        catalog=catalog,
+        filter_spec=cfg.data.get("filter"),
+        presets=cfg.filters,
+    )
+    if df.empty:
+        raise EstimatorError(
+            f"estimator '{stage_id}': data.filter selected zero rows from the turns table."
+        )
+
     df_pred = _apply_predict_subset(df, stage_raw.get("predict_subset", "all"), catalog)
     if df_pred.empty:
         raise EstimatorError(

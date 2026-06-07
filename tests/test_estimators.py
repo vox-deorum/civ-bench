@@ -220,6 +220,22 @@ def test_predict_subset_non_llm_narrows_rows(turns_csv, score_model_dir, tmp_pat
     assert result.n_rows == len(out)
 
 
+def test_data_filter_narrows_predictions(turns_csv, score_model_dir, tmp_path, write_spec):
+    save_pred = tmp_path / "predictions.csv"
+    spec = _spec(turns_csv, score_model_dir, save_pred)
+    spec["data"]["filter"] = {
+        "experiments": ["exp-llm"],
+        "turn_range": [2, None],
+    }
+    cfg = load_config(write_spec(spec))
+    result = run_estimator(cfg, cfg.estimators[0].raw)
+    out = pd.read_csv(save_pred)
+
+    assert set(out["experiment"]) == {"exp-llm"}
+    assert out["turn"].min() >= 2
+    assert result.n_rows == len(out)
+
+
 def test_predict_subset_empty_raises(turns_csv, score_model_dir, tmp_path, write_spec):
     save_pred = tmp_path / "predictions.csv"
     spec = _spec(turns_csv, score_model_dir, save_pred)
