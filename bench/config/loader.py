@@ -4,7 +4,7 @@ Validation follows `configs/benchmark.md` §8. Unknown keys and missing required
 fields are hard errors (invariant 1). Per-module analysis ``params`` schemas are
 validated by each module as it lands (stages 3-5); stage 0 validates the common
 envelope, the estimator/adjust wiring, filters, groupings, bootstrap, the output
-root, and the strength controlled-design enums.
+root, and the strength params available before the stage implementation lands.
 """
 
 from __future__ import annotations
@@ -211,11 +211,13 @@ def _validate_uses(uses: Any, where: str) -> None:
 def _validate_strength_params(
     params: dict, where: str, experiment_ids: set[str] | None = None
 ) -> None:
+    _check_keys(params, S.STRENGTH_PARAM_KEYS, f"{where}.params")
     enum_checks = {
+        "weight": S.STRENGTH_WEIGHT,
+        "relative_to": S.STRENGTH_RELATIVE_TO,
+        "civ_adjust": S.STRENGTH_CIV_ADJUST,
         "block": S.STRENGTH_BLOCK,
-        "baseline_source": S.STRENGTH_BASELINE_SOURCE,
         "post_cell_normalize": S.STRENGTH_POST_CELL_NORMALIZE,
-        "engine": S.STRENGTH_ENGINE,
     }
     for key, domain in enum_checks.items():
         if key in params and params[key] not in domain:
@@ -223,6 +225,14 @@ def _validate_strength_params(
                 f"{where}.params.{key}: '{params[key]}' invalid; "
                 f"must be one of {sorted(domain)}."
             )
+    if "turn_progress_min" in params:
+        value = params["turn_progress_min"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ConfigError(
+                f"{where}.params.turn_progress_min: must be numeric in [0, 1]."
+            )
+    if "enforce_winner" in params:
+        _check_type(params["enforce_winner"], (bool,), f"{where}.params.enforce_winner")
     # `baseline_experiment` (§5.1): null ⇒ implicit per-experiment path; a value names the explicit
     # baseline source and must be a known experiment id.
     be = params.get("baseline_experiment")

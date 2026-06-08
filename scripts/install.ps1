@@ -62,15 +62,14 @@ print('All Python dependencies import OK.')
 if ($LASTEXITCODE -ne 0) { throw "Python dependency verification failed." }
 
 # --- R rating packages ------------------------------------------------------
-Write-Host "`n[4/4] Installing & verifying R packages (BradleyTerry2, PlackettLuce, lme4, Matrix)" -ForegroundColor Cyan
+Write-Host "`n[4/4] Installing & verifying R packages (BradleyTerry2, PlackettLuce)" -ForegroundColor Cyan
 $Rscript = Get-Command Rscript -ErrorAction SilentlyContinue
 if (-not $Rscript) {
     throw "Rscript not found on PATH. Install R (https://cran.r-project.org/) then re-run. " +
-          "ratings.* analyses require BradleyTerry2 and PlackettLuce; the controlled-design strength " +
-          "baseline requires lme4 (+Matrix)."
+          "ratings.* analyses require BradleyTerry2 and PlackettLuce."
 }
 $rCode = @'
-pkgs <- c("BradleyTerry2", "PlackettLuce", "lme4", "Matrix")
+pkgs <- c("BradleyTerry2", "PlackettLuce")
 missing <- pkgs[!(pkgs %in% rownames(installed.packages()))]
 if (length(missing) > 0) {
   install.packages(missing, repos = "https://cloud.r-project.org")

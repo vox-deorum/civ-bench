@@ -47,8 +47,7 @@ civ-bench/
 │   │   └── models/               # score / baseline / xgboost / mlp / grouped / interaction / attention
 │   ├── adjust/                   # derived-table stages: estimator P(win) → strength panel
 │   │   ├── registry.py           # name → adjust class (currently: strength)
-│   │   ├── strength.py           # adjusted_strength derivation (port of turn_predicted's prepare_strength_data); controlled games use the matched start-cell Vanilla-baseline correction
-│   │   └── strength_lmm.R        # lme4 shrinkage fit for the per-(seed,seat) Vanilla baseline (controlled-design)
+│   │   └── strength.py           # adjusted_strength derivation; controlled games use matched final-seat Vanilla-baseline correction
 │   ├── analyses/                 # ── pluggable analysis modules ──
 │   │   ├── base.py               # Analysis interface + registry (name → class)
 │   │   ├── ratings/              # Bradley-Terry / Plackett-Luce / matchups (group_by + bootstrap params)
@@ -163,7 +162,7 @@ It installs the package (`pip install -e .`) and every dependency, then verifies
 
 - **Python core:** `pandas`, `numpy`, `scipy`, `statsmodels`, `matplotlib`, `seaborn`, `plotly`, `scikit-learn`, `tabulate`.
 - **Python heavy (still required):** `torch`, `xgboost`, `optuna`, `imbalanced-learn`.
-- **R (for ratings + the controlled-design strength baseline):** `BradleyTerry2`, `PlackettLuce`, and `lme4` (+`Matrix`) for the `adjust/strength` start-cell shrinkage fit (needs `Rscript` discoverable on `PATH`, or via the `CIV_BENCH_RSCRIPT` env override — **not** a hardcoded Windows path like the old repo's `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS).
+- **R (for ratings):** `BradleyTerry2` and `PlackettLuce` for the R-backed ratings analyses (needs `Rscript` discoverable on `PATH`, or via the `CIV_BENCH_RSCRIPT` env override — **not** a hardcoded Windows path like the old repo's `C:`/`D:\Program Files\R` scan, which silently fails on Linux/macOS).
 
 `pyproject.toml` declares the Python set as plain install requirements (one environment, no `civ-bench[torch]`-style extras). Code imports these directly; a missing dependency is a hard error, never a skipped stage (see the dependency convention above).
 

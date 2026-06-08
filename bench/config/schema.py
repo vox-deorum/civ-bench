@@ -103,10 +103,21 @@ ADJUST_KEYS = {"id", "module", "enabled", "uses", "save", "needs", "params"}
 ADJUST_MODULES = {"strength"}
 USES_KEYS = {"estimators", "tables"}
 # strength params (§5.1) — enum domains validated in stage 0
-STRENGTH_BLOCK = {"none", "seed", "start_cell", "auto"}
-STRENGTH_BASELINE_SOURCE = {"same_condition_first", "pooled"}
+STRENGTH_PARAM_KEYS = {
+    "turn_progress_min",
+    "weight",
+    "relative_to",
+    "enforce_winner",
+    "civ_adjust",
+    "block",
+    "baseline_experiment",
+    "post_cell_normalize",
+}
+STRENGTH_WEIGHT = {"turn_progress", "uniform"}
+STRENGTH_RELATIVE_TO = {"game_leader"}
+STRENGTH_CIV_ADJUST = {"none", "ols_logit"}
+STRENGTH_BLOCK = {"none", "start_cell", "auto"}
 STRENGTH_POST_CELL_NORMALIZE = {"none", "relative_to_leader"}
-STRENGTH_ENGINE = {"r_lmer", "statsmodels"}
 # `baseline_experiment` is a free-form experiment id (not an enum): when set it must name a known
 # experiment in the experiments catalog — validated in stage 0 against condition_player_mapping.
 

@@ -55,14 +55,14 @@ PYEOF
 
 # --- R rating packages ------------------------------------------------------
 echo
-echo "[4/4] Installing & verifying R packages (BradleyTerry2, PlackettLuce, lme4, Matrix)"
+echo "[4/4] Installing & verifying R packages (BradleyTerry2, PlackettLuce)"
 if ! command -v Rscript >/dev/null 2>&1; then
     echo "Rscript not found on PATH. Install R (https://cran.r-project.org/) then re-run." >&2
-    echo "ratings.* analyses require BradleyTerry2 and PlackettLuce; the controlled-design strength baseline requires lme4 (+Matrix)." >&2
+    echo "ratings.* analyses require BradleyTerry2 and PlackettLuce." >&2
     exit 1
 fi
 Rscript - <<'REOF'
-pkgs <- c("BradleyTerry2", "PlackettLuce", "lme4", "Matrix")
+pkgs <- c("BradleyTerry2", "PlackettLuce")
 missing <- pkgs[!(pkgs %in% rownames(installed.packages()))]
 if (length(missing) > 0) {
   install.packages(missing, repos = "https://cloud.r-project.org")

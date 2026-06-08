@@ -3,8 +3,7 @@
 The old repo's ``_find_rscript()`` hardcoded a Windows ``C:``/``D:\\Program Files\\R``
 scan that silently fails on Linux/macOS (plans/stage0.md, D5). Here we locate
 ``Rscript`` via the ``PATH`` and an explicit ``CIV_BENCH_RSCRIPT`` override only —
-no platform-specific guesses. Used by the R-backed ratings analyses and the
-controlled-design strength baseline (``adjust/strength``).
+no platform-specific guesses. Used by the R-backed ratings analyses.
 """
 
 from __future__ import annotations
@@ -45,7 +44,6 @@ def find_rscript(required: bool = False) -> Optional[str]:
         raise RuntimeError(
             "Rscript not found. Install R (https://cran.r-project.org/) and ensure "
             f"Rscript is on PATH, or set {RSCRIPT_ENV} to its full path. The R-backed "
-            "ratings analyses (BradleyTerry2 / PlackettLuce) and the controlled-design "
-            "strength baseline (lme4) require it."
+            "ratings analyses (BradleyTerry2 / PlackettLuce) require it."
         )
     return None

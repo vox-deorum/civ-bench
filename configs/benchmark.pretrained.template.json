@@ -93,9 +93,7 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "baseline_source": "same_condition_first",
-        "post_cell_normalize": "none",
-        "engine": "r_lmer"
+        "post_cell_normalize": "none"
       }
     }
   ],
