@@ -342,7 +342,9 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
                                          //   "none" leaves adjusted = relative_strength
     "block": "auto",                     // CONTROLLED games: matched start-cell adjustment (replaces civ_adjust):
                                          //   "none" | "seed" | "start_cell" | "auto" (= start_cell when controlled)
-    "baseline_source": "same_condition_first",  // per-cell Vanilla baseline pool: "same_condition_first" | "pooled"
+    "baseline_experiment": null,         // explicit per-cell baseline source (e.g. a pure VP self-play experiment id);
+                                         //   null ⇒ implicit per-experiment VPAI extraction. Must name a known experiment.
+    "baseline_source": "same_condition_first",  // implicit-path per-cell Vanilla baseline pool: "same_condition_first" | "pooled"
     "post_cell_normalize": "none",       // optional final re-normalization after the cell effect: "none" | "relative_to_leader"
     "engine": "r_lmer"                   // shrinkage engine for the cell baseline: "r_lmer" (lme4) | "statsmodels"
   }
@@ -353,12 +355,16 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
 - `uses.estimators` is **required and single-source** in practice: strength is defined relative to one predictor's win-probabilities. Point it at a `cross_val` estimator for out-of-fold-honest strength, or an `in_sample`/`pretrained` one to mirror a deployed model.
 - The emitted table is per-player-game with at least `game_id, player_id, player_type, civilization, adjusted_strength` — the exact columns `ratings.*` require (§6.2) — plus `seed`/`seating_rotation` joined from `games` and `config_slot` carried from `panel_data` for the controlled-design diagnostics.
 - `civ_adjust: "none"` skips the OLS step (then `adjusted_strength == relative_strength`); any other value selects an adjustment scheme (currently `ols_logit`).
-- **Controlled-design adjustment (`block`).** When a game carries controlled seeds **and** seating (`seed != -1` and `seating_rotation != -1` in the `games` table), `block` replaces `civ_adjust` on those rows with a **matched start-cell** correction: it subtracts the per-`(seed, player_id)` **Vanilla/VPAI baseline**, estimated with shrinkage (a variance-components model over `seed` / `player_id` / their interaction) so one-game cells borrow strength. Because the start-cell fixes the seat-bound civilization, this subsumes the civ adjustment. Uncontrolled rows fall back to `civ_adjust`; `block: "none"` ⇒ pure legacy behavior (byte-identical). `baseline_source` chooses whether the per-cell baseline pools VPAI rotations within the same condition first (cleanest match) or across all conditions; `engine` selects the shrinkage backend (`r_lmer` via lme4 — reusing the cross-platform `Rscript` locator — or `statsmodels` MixedLM). Incomplete cycles, cells with no Vanilla baseline, and player types disconnected from `Vanilla` are **warned, never fatal** (keep all games, proceed).
-- **Intermediate adjustment diagnostics — always written (no config).** Like every other audit trail, the stage *always* emits the per-group values it subtracts, next to the strength panel (in the directory of `save`, default `reports/adjust/`), so the correction can be inspected without opting in:
-  - `civ_effects.csv` — per-`civilization` OLS-logit effect table (`civilization, civ_effect, n_rows`) from the uncontrolled (`civ_adjust`) path.
-  - `cell_baseline.csv` — per-`(seed, player_id)` table from the controlled (`block`) path: `seed, player_id, civilization, cell_baseline, n_vanilla, n_games, n_models, has_vanilla_baseline, vanilla_connected`, plus the fitted variance components (σ²_seed / σ²_seat / σ²_cell / σ²_resid).
+- **Controlled-design adjustment (`block`).** When a game carries controlled seeds **and** seating (`seed != -1` and `seating_rotation != -1` in the `games` table), `block` replaces `civ_adjust` on those rows with a **matched start-cell** correction: it subtracts the per-`(seed, player_id)` **Vanilla/VPAI baseline**. Because the start-cell fixes the seat-bound civilization, this subsumes the civ adjustment. Uncontrolled rows fall back to `civ_adjust`; `block: "none"` ⇒ pure legacy behavior (byte-identical). The baseline is built via one of two pathways:
+  - **Explicit** (`baseline_experiment` set, e.g. a pure VP self-play condition): the per-cell baseline comes from the *designated* experiment's VPAI rows. With one VPAI row per `(player, seat)` cell that observed value is used **directly as the fixed baseline** (no shrinkage — the dedicated run is ground truth); multi-row cells fall back to the shrinkage fit.
+  - **Implicit** (`baseline_experiment: null`, default): the per-cell baseline is estimated from **each experiment's own VPAI rows** with shrinkage (a variance-components model over `seed` / `player_id` / their interaction) so one-game cells borrow strength. `baseline_source` chooses whether it pools VPAI rotations within the same condition first (cleanest match) or across all conditions. **Hard error** if any controlled seat feeding the panel has no VPAI counterpart for its `(seed, seat)` cell — a missing reference makes the comparison undefined.
 
-  A mixed dataset writes both; each is simply empty/absent when its path didn't run. `performance.strength_panel` always surfaces whichever exist (§6.2) — no flag.
+  `engine` selects the shrinkage backend (`r_lmer` via lme4 — reusing the cross-platform `Rscript` locator — or `statsmodels` MixedLM). **Both pathways are computed every run**: the one selected by `baseline_experiment` feeds `adjusted_strength` (and enforces the implicit throw); the other is best-effort for the report only. Outside the selected-implicit throw, per-model coverage gaps, cells with no Vanilla baseline in the non-selected pathway, and player types disconnected from `Vanilla` are **warned, never fatal** (keep all games, proceed).
+- **Intermediate adjustment diagnostics — always written (no config).** Like every other audit trail, the stage *always* emits the per-group values it subtracts, next to the strength panel (in the directory of `save`, default `reports/adjust/`), so the correction can be inspected without opting in:
+  - `civ_effects.csv` — per-`civilization` OLS-logit effect table (`civilization, civ_effect, n_rows`) — the **civilization-level effect** from the uncontrolled (`civ_adjust`) path.
+  - `cell_baseline.csv` — the **VPAI seating×seed effect** from the controlled (`block`) path: `experiment, pathway, seed, player_id, civilization, cell_baseline, n_vanilla, n_games, n_models, has_vanilla_baseline, vanilla_connected`, plus the fitted variance components (σ²_seed / σ²_seat / σ²_cell / σ²_resid — null for fixed-baseline explicit cells). It carries **both** pathways' rows (`pathway ∈ {explicit, implicit}`), each whenever it ran, so the report can compare them regardless of which fed downstream.
+
+  A mixed dataset writes both files; each is simply empty/absent when its path didn't run. `performance.strength_panel` always surfaces whichever exist (§6.2) — no flag.
 
 ---
 
@@ -490,11 +496,16 @@ Two single-purpose views of how well an estimator's probabilities are calibrated
 
 // performance.strength_panel — summarizes the adjust stage's strength table by player type.
 //   It CONSUMES the `strength` table (does not derive it — that's the adjust stage, §5).
-//   It also surfaces the adjust stage's always-written adjustment diagnostics — the per-civ effect table
-//   and/or the per-(seed,seat) cell baseline (§5.1) — whenever they exist. No flag.
+//   It always reports per-identity n_games + bootstrap CI AND flags identities below
+//   `min_games_preliminary` as preliminary (the controlled design exists to estimate strength from
+//   very few games, so the small-sample basis is surfaced, not hidden).
+//   It also surfaces the adjust stage's always-written adjustment diagnostics — the civilization-level
+//   effect table and the VPAI seating×seed effect (cell baseline, BOTH explicit+implicit pathways,
+//   §5.1) — whenever they exist. No flag on the diagnostics.
 { "module": "performance.strength_panel",
   "uses": { "tables": ["strength"] },
-  "params": { "metric": "adjusted_strength", "by": "player_type" } }
+  "params": { "metric": "adjusted_strength", "by": "player_type",
+              "min_games_preliminary": 5 } }   // < this ⇒ flagged preliminary (defaults to ratings min_games)
 
 // performance.turn_predicted — P(win) / strength trajectory over the game from an estimator
 { "module": "performance.turn_predicted",

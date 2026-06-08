@@ -107,6 +107,8 @@ STRENGTH_BLOCK = {"none", "seed", "start_cell", "auto"}
 STRENGTH_BASELINE_SOURCE = {"same_condition_first", "pooled"}
 STRENGTH_POST_CELL_NORMALIZE = {"none", "relative_to_leader"}
 STRENGTH_ENGINE = {"r_lmer", "statsmodels"}
+# `baseline_experiment` is a free-form experiment id (not an enum): when set it must name a known
+# experiment in the experiments catalog — validated in stage 0 against condition_player_mapping.
 
 # ── analyses (§6) ──────────────────────────────────────────────────────────
 ANALYSIS_KEYS = {"id", "module", "enabled", "needs", "uses", "filter", "params"}

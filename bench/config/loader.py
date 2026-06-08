@@ -208,7 +208,9 @@ def _validate_uses(uses: Any, where: str) -> None:
             _check_string_list(uses[key], f"{where}.{key}")
 
 
-def _validate_strength_params(params: dict, where: str) -> None:
+def _validate_strength_params(
+    params: dict, where: str, experiment_ids: set[str] | None = None
+) -> None:
     enum_checks = {
         "block": S.STRENGTH_BLOCK,
         "baseline_source": S.STRENGTH_BASELINE_SOURCE,
@@ -221,9 +223,24 @@ def _validate_strength_params(params: dict, where: str) -> None:
                 f"{where}.params.{key}: '{params[key]}' invalid; "
                 f"must be one of {sorted(domain)}."
             )
+    # `baseline_experiment` (§5.1): null ⇒ implicit per-experiment path; a value names the explicit
+    # baseline source and must be a known experiment id.
+    be = params.get("baseline_experiment")
+    if be is not None:
+        if not isinstance(be, str):
+            raise ConfigError(
+                f"{where}.params.baseline_experiment: must be a string experiment id or null."
+            )
+        if experiment_ids is not None and be not in experiment_ids:
+            raise ConfigError(
+                f"{where}.params.baseline_experiment: '{be}' is not a known experiment "
+                f"(experiments.json condition_player_mapping)."
+            )
 
 
-def _validate_adjust(entry: dict, idx: int) -> Stage:
+def _validate_adjust(
+    entry: dict, idx: int, experiment_ids: set[str] | None = None
+) -> Stage:
     where = f"adjust[{idx}]"
     _require_mapping(entry, where)
     _check_keys(entry, S.ADJUST_KEYS, where, required=("id", "module"))
@@ -252,7 +269,7 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
         params = entry.get("params")
         if params is not None:
             _require_mapping(params, f"{where}.params")
-            _validate_strength_params(params, where)
+            _validate_strength_params(params, where, experiment_ids)
 
     return Stage(id=sid, kind="adjust", enabled=entry.get("enabled", True), raw=entry)
 
@@ -434,7 +451,21 @@ def load_config(path: str | Path) -> RunConfig:
     adjust_raw = raw.get("adjust")
     if adjust_raw is not None:
         _check_type(adjust_raw, (list,), "adjust")
-        cfg.adjust = [_validate_adjust(a, i) for i, a in enumerate(adjust_raw)]
+        # Only read experiments.json (lazily) when an adjust stage designates an explicit
+        # baseline_experiment that must be checked for membership.
+        experiment_ids = None
+        if any(
+            isinstance(a, dict)
+            and (a.get("params") or {}).get("baseline_experiment") is not None
+            for a in adjust_raw
+        ):
+            experiments_cat = _read_catalog(
+                cfg, "experiments", "an adjust stage 'baseline_experiment'"
+            )
+            experiment_ids = set(experiments_cat.get("condition_player_mapping", {}))
+        cfg.adjust = [
+            _validate_adjust(a, i, experiment_ids) for i, a in enumerate(adjust_raw)
+        ]
 
     analyses_raw = raw["analyses"]
     _check_type(analyses_raw, (list,), "analyses")
