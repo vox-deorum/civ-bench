@@ -122,7 +122,7 @@
       "module": "ratings.bradley_terry",
       "enabled": true,
       "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "only_llm": false, "bootstrap": null }
+      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
     },
     {
       "id": "bt_strategy",

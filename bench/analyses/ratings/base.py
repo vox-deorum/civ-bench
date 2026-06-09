@@ -50,13 +50,16 @@ class RatingsAnalysis(Analysis):
         panel = ctx.load_table(table_id)
         panel = ctx.apply_filter(panel)
 
-        only_llm = bool(self.params.get("only_llm", False))
-        if only_llm:
-            non_llm = set(ctx.catalog.non_llm_experiments())
-            col = "experiment" if "experiment" in panel.columns else None
-            if col:
-                # Keep games from LLM experiments; the reference seats inside them stay.
-                panel = panel[~panel[col].isin(non_llm)]
+        only_llm = bool(self.params.get("only_llm", True))
+        if only_llm and "player_type" in panel.columns:
+            # Drop degenerate self-play games (a single distinct player_type): they yield zero
+            # cross-type comparisons and orphan high-index reference slots in the BT fit
+            # (all-Vanilla games mint Vanilla_6/_7 -> NaN abilities that poison the Vanilla
+            # reference and NaN out every worth/elo). player_type based so it survives
+            # experiment-id naming drift; mixed baseline games (e.g. Null-vs-Vanilla) are kept
+            # so Null stays a rated identity.
+            distinct = panel.groupby("game_id")["player_type"].transform("nunique")
+            panel = panel[distinct >= 2]
 
         min_games = int(self.params.get("min_games", 0) or 0)
         if min_games > 0 and "player_type" in panel.columns:
