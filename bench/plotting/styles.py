@@ -18,10 +18,25 @@ def sort_player_types(player_types: Iterable[str]) -> list[str]:
 
 
 def get_player_color(catalog: Catalog, player_type: str) -> str:
-    parsed = catalog.split_player_type(player_type)
-    model_id = parsed["model_id"]
+    """Resolve a player_type to its base strategist model's color.
+
+    The strict ``split_player_type`` parse covers plain ``{model}-{variant}``
+    types. When a ``player_type_labels`` suffix leaves extra trailing text the
+    parse doesn't recognize (e.g. ``GPT-OSS-120B-Simple-Per-5`` from a
+    ``"*-per-5": "-Per-5"`` label), fall back generically to the longest known
+    model id that prefixes the player_type — so any rotation/tweak variant shares
+    its base model's color instead of falling through to black.
+    """
     colors = catalog.strategist_model_colors()
-    return colors.get(model_id, "#000000")
+    model_id = catalog.split_player_type(player_type)["model_id"]
+    if model_id in colors:
+        return colors[model_id]
+    base = max(
+        (mid for mid in colors if player_type.startswith(mid)),
+        key=len,
+        default=None,
+    )
+    return colors.get(base, "#000000")
 
 
 def _style_key(catalog: Catalog, player_type: str) -> Optional[str]:

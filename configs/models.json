@@ -187,6 +187,15 @@
       ],
       "color": "#FF6347",
       "pricing": { "input_per_million": 2.5, "output_per_million": 15 }
+    },
+    {
+      "id": "Nemotron-3-Super",
+      "aliases": [
+        "nemotron-3-super",
+        "openai-compatible/nemotron-3-super"
+      ],
+      "color": "#76B900",
+      "pricing": { "input_per_million": 0.1, "output_per_million": 0.5 }
     }
   ],
   "strategist_variants": {

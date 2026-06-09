@@ -94,3 +94,21 @@ def test_fallback_seat_map(catalog):
     assert catalog.fallback_player_type("2026-staff-standard", 3) == "Sonnet-4.5-Briefed"
     # unknown condition/slot → Player {id}
     assert catalog.fallback_player_type("no-such-condition", 7) == "Player 7"
+
+
+def test_player_color_resolution(catalog):
+    from bench.plotting.styles import get_player_color
+
+    oss = catalog.strategist_model_colors()["GPT-OSS-120B"]
+    # plain variant resolves to the base model color
+    assert get_player_color(catalog, "GPT-OSS-120B-Simple") == oss
+    # a label suffix (e.g. -Per-5) still resolves to the same base model color
+    assert get_player_color(catalog, "GPT-OSS-120B-Simple-Per-5") == oss
+    assert get_player_color(catalog, "GPT-OSS-120B-Briefed-Per-5") == oss
+    # newly added model gets its own color, suffix-stable
+    nemo = catalog.strategist_model_colors()["Nemotron-3-Super"]
+    assert nemo == "#76B900"
+    assert get_player_color(catalog, "Nemotron-3-Super-Simple") == nemo
+    assert get_player_color(catalog, "Nemotron-3-Super-Briefed-Per-5") == nemo
+    # an unrecognized full-override label falls through to black
+    assert get_player_color(catalog, "Custom-Thing") == "#000000"
