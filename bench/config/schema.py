@@ -118,8 +118,9 @@ STRENGTH_RELATIVE_TO = {"game_leader"}
 STRENGTH_CIV_ADJUST = {"none", "ols_logit"}
 STRENGTH_BLOCK = {"none", "start_cell", "auto"}
 STRENGTH_POST_CELL_NORMALIZE = {"none", "relative_to_leader"}
-# `baseline_experiment` is a free-form experiment id (not an enum): when set it must name a known
-# experiment in the experiments catalog — validated in stage 0 against condition_player_mapping.
+# `baseline_experiment` is a free-form experiment id (not an enum). It is type-checked in
+# stage 0, but not validated against the legacy experiments catalog because ids can be
+# inferred from extracted data.
 
 # ── analyses (§6) ──────────────────────────────────────────────────────────
 ANALYSIS_KEYS = {"id", "module", "enabled", "needs", "uses", "filter", "params"}

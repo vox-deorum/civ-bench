@@ -440,12 +440,10 @@ def test_run_adjust_missing_predictions_raises(tmp_path, write_spec):
         run_adjust(cfg, cfg.adjust[0].raw)
 
 
-# ── config validation: invalid baseline_experiment id ────────────────────────
-def test_invalid_baseline_experiment_id_rejected(tmp_path, write_spec):
-    from bench.config import ConfigError
-
+# ── config validation: free-form baseline_experiment id ──────────────────────
+def test_unknown_baseline_experiment_id_allowed_at_config_load(tmp_path, write_spec):
     pp, pa, gp = _write(tmp_path, _uncontrolled_games())
     spec = _run_spec(tmp_path / "t.csv", pp, pa, gp, tmp_path / "o.csv",
                      {"block": "auto"}, baseline="no-such-experiment")
-    with pytest.raises(ConfigError, match="baseline_experiment"):
-        load_config(write_spec(spec))
+    cfg = load_config(write_spec(spec))
+    assert cfg.adjust[0].raw["params"]["baseline_experiment"] == "no-such-experiment"
