@@ -379,13 +379,17 @@ class RatingsAnalysis(Analysis):
                 ax.errorbar(x, i, xerr=[[max(0, x - lo)], [max(0, hi - x)]], fmt="o",
                             color=color, markersize=7, capsize=4, elinewidth=1.5, ecolor=color)
             else:
+                # +/-1 SE, matching the raw `+/- se_elo` annotation in the strategy
+                # heatmap's General column so the generic category reads the same
+                # across both figures (the bootstrap branch above stays a true CI).
                 se = row.get("se_elo", 0) or 0
-                ax.errorbar(x, i, xerr=1.96 * se, fmt="o", color=color, markersize=7,
+                ax.errorbar(x, i, xerr=se, fmt="o", color=color, markersize=7,
                             capsize=4, elinewidth=1.5, ecolor=color)
         ax.axvline(1500, color="gray", linestyle="--", linewidth=1, label="Reference (1500)")
         ax.set_yticks(range(len(df)))
         ax.set_yticklabels(df[identity_col])
-        ax.set_xlabel("Elo rating")
+        ax.set_xlabel("Elo rating (error bars: bootstrap CI)" if has_ci
+                      else "Elo rating (error bars: +/-1 SE)")
         ax.set_title(f"{self.module} ratings", fontsize=12, fontweight="bold")
         ax.legend(fontsize=9, loc="lower right")
         ax.grid(True, axis="x", alpha=0.3)
