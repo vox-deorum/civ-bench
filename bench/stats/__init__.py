@@ -19,8 +19,10 @@ from .regression import (
     plot_regression_coefficient_heatmap,
     run_regression_suite,
 )
+from .transforms import LOGIT_EPS, inv_logit, logit
 
 __all__ = [
+    "LOGIT_EPS",
     "LogisticHeatmapData",
     "RegressionHeatmapData",
     "RegressionResult",
@@ -28,6 +30,8 @@ __all__ = [
     "build_regression_heatmap_data",
     "fit_logistic_regression",
     "fit_regression",
+    "inv_logit",
+    "logit",
     "plot_logistic_odds_ratio_heatmap",
     "plot_regression_coefficient_heatmap",
     "run_regression_suite",

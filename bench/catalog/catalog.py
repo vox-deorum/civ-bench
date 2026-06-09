@@ -153,6 +153,19 @@ class Catalog:
                 composed = label
         return composed
 
+    def vanilla_model_aliases(self) -> set[str]:
+        """Lower-cased raw-model aliases that denote the Vanilla VPAI engine.
+
+        Used by the controlled-design baseline (``adjust/strength.py``) to keep
+        "Vanilla VPAI baseline" narrow: a row counts as baseline evidence only
+        when its raw ``model`` is one of these (e.g. ``VPAI``).
+        """
+        return set(self._vanilla_aliases)
+
+    def is_vanilla_model(self, model: Optional[str]) -> bool:
+        """True when a raw ``model`` value is the Vanilla/VPAI engine."""
+        return bool(model) and str(model).lower() in self._vanilla_aliases
+
     def _is_baseline_model(self, raw_model: str, base: str) -> bool:
         if base in (self.vanilla_label, self.null_label):
             return True

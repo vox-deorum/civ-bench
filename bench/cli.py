@@ -72,7 +72,7 @@ def _is_dry(args: argparse.Namespace) -> bool:
 
 
 # Stage kinds with an executable implementation today (the rest land in later stages).
-_IMPLEMENTED_KINDS = {"extract", "estimators"}
+_IMPLEMENTED_KINDS = {"extract", "estimators", "adjust"}
 
 
 def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
@@ -135,6 +135,16 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
                 f"civ-bench: estimator '{result.id}' ({result.model}) → "
                 f"{result.predictions_path} ({result.n_rows} rows)"
             )
+        elif node.kind == "adjust":
+            from .adjust import run_adjust  # lazy: pulls statsmodels
+
+            result = run_adjust(cfg, node.raw, catalog=catalog)
+            print(
+                f"civ-bench: adjust '{result.id}' ({result.module}, est={result.estimator_id}) → "
+                f"{result.table_path} ({result.n_rows} rows)"
+            )
+            for warning in result.warnings:
+                print(f"civ-bench: adjust '{result.id}' WARN — {warning}", file=sys.stderr)
 
     if skipped:
         kinds = ", ".join(sorted({k for _, k in skipped}))
@@ -203,10 +213,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     except NotImplementedError as exc:
         print(f"civ-bench: {exc}", file=sys.stderr)
         return 3
-    except Exception as exc:  # estimator / load failures — fail loud, not silent
+    except Exception as exc:  # estimator / adjust / load failures — fail loud, not silent
+        from .adjust import AdjustError
         from .estimators import EstimatorError
 
-        if isinstance(exc, (EstimatorError, FileNotFoundError, ValueError)):
+        if isinstance(exc, (EstimatorError, AdjustError, FileNotFoundError, ValueError)):
             print(f"civ-bench: run error: {exc}", file=sys.stderr)
             return 2
         raise
