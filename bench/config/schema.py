@@ -114,7 +114,7 @@ STRENGTH_PARAM_KEYS = {
     "post_cell_normalize",
 }
 STRENGTH_WEIGHT = {"turn_progress", "uniform"}
-STRENGTH_RELATIVE_TO = {"game_leader"}
+STRENGTH_RELATIVE_TO = {"game_leader", "none"}
 STRENGTH_CIV_ADJUST = {"none", "ols_logit"}
 STRENGTH_BLOCK = {"none", "start_cell", "auto"}
 STRENGTH_POST_CELL_NORMALIZE = {"none", "relative_to_leader"}

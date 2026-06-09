@@ -73,6 +73,7 @@ def _mutations():
         "unknown_analysis_module": lambda c: c["analyses"][0].__setitem__("module", "ratings.fake"),
         "unknown_adjust_module": lambda c: c["adjust"][0].__setitem__("module", "nope"),
         "bad_strength_enum": lambda c: c["adjust"][0]["params"].__setitem__("block", "wild"),
+        "bad_relative_to": lambda c: c["adjust"][0]["params"].__setitem__("relative_to", "wild"),
         "adjust_params_not_object": lambda c: c["adjust"][0].__setitem__("params", "bad"),
         "group_by_undefined": lambda c: c["analyses"][1]["params"].__setitem__("group_by", ["player_type", "nope"]),
         "bootstrap_n_zero": lambda c: c["analyses"][0]["params"].__setitem__("bootstrap", {"n": 0}),
@@ -99,6 +100,14 @@ def test_malformed_config_raises(name, dev_spec, write_spec):
     path = write_spec(dev_spec)
     with pytest.raises(ConfigError):
         load_config(path)
+
+
+@pytest.mark.parametrize("value", ["none", None, "game_leader"])
+def test_relative_to_none_and_null_load(dev_spec, write_spec, value):
+    """relative_to accepts "none"/null (⇒ no leader normalization) and "game_leader"."""
+    dev_spec["adjust"][0]["params"]["relative_to"] = value
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg is not None
 
 
 def test_estimator_needs_validated(dev_spec, write_spec):

@@ -34,6 +34,9 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 from .civ_effects import _adjust_table_id
 
 # The enforced-winner / clip sentinel on the logit scale (relative_strength == 1-eps).
+# This is specific to relative_to="game_leader" (where every game's leader is pinned to
+# 1.0). Under relative_to unset/"none" (absolute strength) no cell sits on this rail, so
+# the annotation simply flags nothing — harmless, just less informative in that mode.
 _SENTINEL = float(logit(np.array([1.0 - LOGIT_EPS]))[0])
 _SENTINEL_TOL = 0.5
 _EXPLICIT_ROW = "(explicit baseline)"

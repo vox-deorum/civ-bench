@@ -217,8 +217,14 @@ def _validate_strength_params(params: dict, where: str) -> None:
         "block": S.STRENGTH_BLOCK,
         "post_cell_normalize": S.STRENGTH_POST_CELL_NORMALIZE,
     }
+    # `relative_to` is nullable: null (or omission) ⇒ "none" (no leader normalization).
+    nullable = {"relative_to"}
     for key, domain in enum_checks.items():
-        if key in params and params[key] not in domain:
+        if key not in params:
+            continue
+        if params[key] is None and key in nullable:
+            continue
+        if params[key] not in domain:
             raise ConfigError(
                 f"{where}.params.{key}: '{params[key]}' invalid; "
                 f"must be one of {sorted(domain)}."

@@ -6,7 +6,7 @@ by this module). Turns an estimator's per-turn ``predicted_win_probability`` int
 a per-player-game ``adjusted_strength`` panel:
 
     late-game weighted average (turn_progress_min, weight)
-      → relative-to-leader (relative_to)
+      → optional relative-to-leader (relative_to="game_leader"; unset/"none" ⇒ raw P(win))
       → winner enforcement (enforce_winner)
       → finite logit_strength = logit(clip(relative_strength, eps, 1-eps))
       → adjustment: civ OLS (uncontrolled) OR matched start-cell baseline (controlled)
@@ -36,7 +36,9 @@ from .errors import AdjustError
 DEFAULT_PARAMS = {
     "turn_progress_min": 0.2,
     "weight": "turn_progress",
-    "relative_to": "game_leader",
+    # None ("unset") ⇒ no leader normalization (strength is the raw P(win)); set
+    # "game_leader" to normalize each seat to its game's strongest seat.
+    "relative_to": None,
     "enforce_winner": True,
     "civ_adjust": "ols_logit",
     "block": "auto",
@@ -119,24 +121,43 @@ def _weighted_strength(pred: pd.DataFrame, turn_progress_min: float, weight_mode
     return pd.DataFrame.from_records(records)
 
 
-def _relative_and_logit(strength_df: pd.DataFrame, enforce_winner: bool) -> pd.DataFrame:
+def _relative_and_logit(
+    strength_df: pd.DataFrame, enforce_winner: bool, relative_to: str | None
+) -> pd.DataFrame:
+    # game_max is needed in both modes: the game_leader path divides by it, and the
+    # absolute path uses it for the raw-scale winner bump.
     game_max = (
         strength_df.groupby("game_id")["weighted_strength"].max().rename("max_weighted_strength")
     )
     strength_df = strength_df.merge(game_max, on="game_id")
-    strength_df["relative_strength"] = (
-        strength_df["weighted_strength"] / strength_df["max_weighted_strength"]
-    )
 
-    winner_mask = (strength_df["is_winner"] == 1) & (strength_df["relative_strength"] < 1.0)
-    if enforce_winner:
-        strength_df.loc[winner_mask, "weighted_strength"] = (
-            strength_df.loc[winner_mask, "max_weighted_strength"] + 0.001
+    if relative_to == "game_leader":
+        # Leader-relative: each seat's strength as a fraction of its game's strongest seat.
+        strength_df["relative_strength"] = (
+            strength_df["weighted_strength"] / strength_df["max_weighted_strength"]
         )
-        strength_df.loc[winner_mask, "relative_strength"] = 1.0
+        winner_mask = (strength_df["is_winner"] == 1) & (strength_df["relative_strength"] < 1.0)
+        if enforce_winner:
+            strength_df.loc[winner_mask, "weighted_strength"] = (
+                strength_df.loc[winner_mask, "max_weighted_strength"] + 0.001
+            )
+            strength_df.loc[winner_mask, "relative_strength"] = 1.0
+    else:
+        # Absolute (relative_to unset/"none"): strength is the raw late-game P(win); the
+        # leader is NOT relied upon. enforce_winner still guarantees the actual winner holds
+        # the top raw strength. relative_strength mirrors weighted_strength so the panel
+        # contract and the relative_strength fallbacks keep using the raw (not relative) value.
+        winner_mask = (strength_df["is_winner"] == 1) & (
+            strength_df["weighted_strength"] < strength_df["max_weighted_strength"]
+        )
+        if enforce_winner:
+            strength_df.loc[winner_mask, "weighted_strength"] = (
+                strength_df.loc[winner_mask, "max_weighted_strength"] + 0.001
+            )
+        strength_df["relative_strength"] = strength_df["weighted_strength"]
 
-    # Audit: relative_strength stays 1.0 for enforced winners, but the logit-scale
-    # fit/adjustment always uses the clipped value (eps=1e-5) so it is finite.
+    # Audit: relative_strength stays 1.0 for enforced winners (game_leader), but the
+    # logit-scale fit/adjustment always uses the clipped value (eps=1e-5) so it is finite.
     strength_df["logit_strength"] = logit(strength_df["relative_strength"].to_numpy())
     return strength_df.drop(columns=["max_weighted_strength"])
 
@@ -435,7 +456,7 @@ def build_strength_panel(
             f"strength: no rows survived turn_progress > {p['turn_progress_min']} "
             f"from '{predictions_path}'."
         )
-    df = _relative_and_logit(df, p["enforce_winner"])
+    df = _relative_and_logit(df, p["enforce_winner"], p["relative_to"])
     df = _join_identity(df, panel, games, catalog)
 
     controlled_any = bool(df["controlled"].any())

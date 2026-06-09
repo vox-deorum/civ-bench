@@ -128,6 +128,58 @@ def test_weighted_relative_logit_exact(tmp_path, catalog):
     assert np.isfinite(art.panel["logit_strength"]).all()
 
 
+def test_absolute_strength_no_leader_division(tmp_path, catalog):
+    """relative_to="none" ⇒ strength is the raw P(win); not divided by the game leader."""
+    games = [{
+        "experiment": "exp-llm", "game_id": "g1", "seed": -1, "seating_rotation": -1,
+        "seats": [
+            (0, "TestLLM-Simple", "TestLLM", "Rome", 0.5, True),
+            (1, "Vanilla", "VPAI", "Egypt", 0.25, False),
+        ],
+    }]
+    pp, pa, gp = _write(tmp_path, games)
+    art = build_strength_panel(pp, pa, gp, _params(relative_to="none", civ_adjust="none"), catalog)
+    p = art.panel.set_index("player_id")
+    # relative_strength mirrors the raw weighted_strength (NOT 1.0 / 0.5 leader-relative)
+    assert p.loc[0, "relative_strength"] == pytest.approx(0.5)
+    assert p.loc[1, "relative_strength"] == pytest.approx(0.25)
+    # logit_strength is the logit of the raw P(win)
+    assert p.loc[0, "logit_strength"] == pytest.approx(logit(np.array([0.5]))[0])
+    assert p.loc[1, "logit_strength"] == pytest.approx(logit(np.array([0.25]))[0])
+    assert np.isfinite(art.panel["logit_strength"]).all()
+
+
+def test_absolute_is_default_when_relative_to_unset(tmp_path, catalog):
+    """Omitting relative_to falls to the coded default (None) ⇒ absolute strength."""
+    pp, pa, gp = _write(tmp_path, _uncontrolled_games())
+    params = {  # deliberately no relative_to key
+        "turn_progress_min": 0.2, "weight": "turn_progress", "enforce_winner": True,
+        "civ_adjust": "none", "block": "none", "baseline_experiment": None,
+        "post_cell_normalize": "none",
+    }
+    art = build_strength_panel(pp, pa, gp, params, catalog)
+    # absolute: relative_strength == raw weighted_strength (no leader normalization)
+    assert np.allclose(art.panel["relative_strength"], art.panel["weighted_strength"])
+
+
+def test_absolute_enforce_winner_bumps_to_top_raw(tmp_path, catalog):
+    """In absolute mode enforce_winner still guarantees the winner holds the top raw strength."""
+    games = [{
+        "experiment": "exp-llm", "game_id": "g1", "seed": -1, "seating_rotation": -1,
+        "seats": [
+            (0, "TestLLM-Simple", "TestLLM", "Rome", 0.30, True),   # winner, but lower raw P(win)
+            (1, "Vanilla", "VPAI", "Egypt", 0.60, False),           # higher raw P(win), did not win
+        ],
+    }]
+    pp, pa, gp = _write(tmp_path, games)
+    art = build_strength_panel(pp, pa, gp, _params(relative_to="none", civ_adjust="none"), catalog)
+    p = art.panel.set_index("player_id")
+    # winner bumped above the original max (0.60 + 0.001); strictly the top raw strength
+    assert p.loc[0, "weighted_strength"] == pytest.approx(0.601)
+    assert p.loc[0, "weighted_strength"] > p.loc[1, "weighted_strength"]
+    assert p.loc[0, "relative_strength"] == pytest.approx(p.loc[0, "weighted_strength"])
+
+
 def test_uniform_weight_is_simple_mean(tmp_path, catalog):
     games = [{
         "experiment": "exp-llm", "game_id": "g1", "seed": -1, "seating_rotation": -1,
