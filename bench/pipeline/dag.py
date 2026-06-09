@@ -47,7 +47,12 @@ class DagNode:
         return None
 
     def resolved_save_path(self, cfg: RunConfig) -> Optional[str]:
-        return cfg.output.resolve(self.save_path)
+        resolved = cfg.output.resolve(self.save_path)
+        if self.kind == "report" and resolved is not None:
+            # The report writes the per-run subdir <resolved-out_dir>/<name>/ (§7);
+            # show that, not just the bare output root, so the dry-run is faithful.
+            return f"{resolved.rstrip('/')}/{cfg.name}/"
+        return resolved
 
 
 @dataclass

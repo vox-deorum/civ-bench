@@ -559,17 +559,21 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 
 ```jsonc
 "report": {
-  "template": "default",                 // template name under bench/reports/
-  "out_dir": "reports/",                 // resolved under the run output root (§2.1); run writes <root><suffix>/<name>/
-  "formats": ["md", "html"],             // any of: md, html, pdf
-  "sections": null,                      // null = every produced AnalysisResult, in DAG order;
-                                         //   or an explicit ordered list of stage ids to include
+  "template": "default",                 // template name in the bench/reports/ registry (only "default" today)
+  "out_dir": "reports/",                 // authored under the base output root (§2.1); run writes <root><suffix>/<name>/
+  "formats": ["md", "html"],             // md + html implemented; pdf is schema-reserved (errors at render time)
+  "sections": null,                      // null = every enabled analysis (canonical family order, members in dep order);
+                                         //   or an explicit ordered list of stage ids to include (authored order kept)
   "title": null,                         // null = derive from `name`
   "include_disabled": false              // never render skipped/disabled stages
 }
 ```
 
-The report walks each produced `AnalysisResult` (tables + figures + summary). With `sections: null`, every enabled analysis appears in dependency order; pass an ordered `id` list to curate and reorder. No analysis hardcodes its place in the document (invariant 3).
+The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null`, every enabled analysis appears — bucketed into the five module families (ratings / prediction / calibration / performance / exploratory) in that canonical order, with members in dependency order; pass an ordered `id` list to curate and reorder (the authored order is preserved, including across families). No analysis hardcodes its place in the document (invariant 3).
+
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, `report.html`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic** — no timestamps — so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+
+**The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, summary, metadata, ordered table/figure filenames, `empty` flag). This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis. An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
 ---
 

@@ -6,6 +6,13 @@ registered module, then persists the returned :class:`AnalysisResult` — tables
 CSV and figures to PNG under ``<root>/analyses/<id>/`` — and returns a small
 summary object for the CLI / report stage.
 
+Alongside the artifacts it writes a small ``result.json`` **manifest** (id,
+module, summary, metadata, ordered table/figure filenames, empty flag). The
+manifest is what makes the report stage (stage 5) re-renderable from disk: a
+plain ``civ-bench report`` reads each enabled analysis's manifest + artifacts
+without re-running the module (invariant 3 — reports are generated, never
+authored).
+
 Imports matplotlib (figures), statsmodels (regressions), and optionally calls
 ``Rscript`` (ratings), so it lives off the import-light config/dry-run path and
 is only imported from the CLI run dispatch.
@@ -13,9 +20,12 @@ is only imported from the CLI run dispatch.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+MANIFEST_NAME = "result.json"
 
 import matplotlib
 
@@ -38,6 +48,7 @@ class AnalysisRunResult:
     summary: str = ""
     empty: bool = False
     metadata: dict = field(default_factory=dict)
+    manifest_path: Optional[str] = None
 
 
 def _analyses_out_dir(cfg: RunConfig, stage_id: str) -> Path:
@@ -73,8 +84,11 @@ def run_analysis(
 
     table_paths: dict[str, str] = {}
     figure_paths: dict[str, str] = {}
+    # Always create the dir + write a manifest, even for an empty result, so the
+    # report stage can record the section as produced-but-empty rather than
+    # mistaking it for a never-run stage.
+    out_dir.mkdir(parents=True, exist_ok=True)
     if not result.is_empty():
-        out_dir.mkdir(parents=True, exist_ok=True)
         for name, table in result.tables.items():
             path = out_dir / f"{name}.csv"
             table.to_csv(path, index=False)
@@ -85,6 +99,10 @@ def run_analysis(
             plt.close(fig)
             figure_paths[name] = str(path)
 
+    manifest_path = _write_manifest(
+        out_dir, stage_id, module, result, table_paths, figure_paths
+    )
+
     return AnalysisRunResult(
         id=stage_id,
         module=module,
@@ -93,4 +111,51 @@ def run_analysis(
         summary=result.summary,
         empty=result.is_empty(),
         metadata=result.metadata,
+        manifest_path=str(manifest_path),
     )
+
+
+def _write_manifest(
+    out_dir: Path,
+    stage_id: str,
+    module: str,
+    result: AnalysisResult,
+    table_paths: dict[str, str],
+    figure_paths: dict[str, str],
+) -> Path:
+    """Persist a ``result.json`` describing the produced artifacts.
+
+    Filenames are stored relative to the analysis dir (artifacts live beside the
+    manifest); ordered lists preserve the module's table/figure emission order so
+    the report renders them as the author intended.
+    """
+    manifest = {
+        "id": stage_id,
+        "module": module,
+        "summary": result.summary,
+        "metadata": _jsonable(result.metadata),
+        "empty": result.is_empty(),
+        "tables": [
+            {"name": name, "file": Path(path).name}
+            for name, path in table_paths.items()
+        ],
+        "figures": [
+            {"name": name, "file": Path(path).name}
+            for name, path in figure_paths.items()
+        ],
+    }
+    path = out_dir / MANIFEST_NAME
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=False, default=str)
+    return path
+
+
+def _jsonable(value):
+    """Best-effort coercion of analysis metadata to JSON-serialisable values."""
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)

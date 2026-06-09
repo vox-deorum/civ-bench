@@ -5,9 +5,10 @@
 Stage 0 implements config loading + validation + DAG resolution + dry-run
 printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs);
 stage 2 adds the **load-only** ``estimators`` stage (``fit:"pretrained"`` →
-``predictions.csv``). The adjust/analyses/report stages are filled in by later
-stages; ``run`` executes the implemented prefix of the resolved DAG and reports
-loudly when it reaches a stage kind that is not implemented yet.
+``predictions.csv``); stages 3-4 add ``adjust`` (the strength panel) and the
+``analyses`` modules; stage 5 adds ``report`` rendering. ``run`` executes the full
+resolved DAG (extract → estimators → adjust → analyses → report); the standalone
+``report`` command re-renders the document from existing analysis artifacts.
 """
 
 from __future__ import annotations
@@ -71,8 +72,8 @@ def _is_dry(args: argparse.Namespace) -> bool:
     return bool(args.dry_run) or any(s.lower() == "all" for s in args.skip)
 
 
-# Stage kinds with an executable implementation today (report lands in stage 5).
-_IMPLEMENTED_KINDS = {"extract", "estimators", "adjust", "analyses"}
+# Every stage kind now has an executable implementation (report landed in stage 5).
+_IMPLEMENTED_KINDS = {"extract", "estimators", "adjust", "analyses", "report"}
 
 
 def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
@@ -106,13 +107,12 @@ def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
 
 
 def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
-    """Execute every *implemented* stage in ``subset`` (topo order).
+    """Execute every stage in ``subset`` (topo order).
 
-    Stages whose kind isn't implemented yet (adjust/analyses/report) are skipped
-    rather than aborting the run, so all estimators still produce their
-    ``predictions.csv``. The deps of an implemented stage are always implemented
-    too (an estimator only depends on ``extract``), so skipping never breaks an
-    executed stage. If anything was skipped, exit non-zero with a stage-N pointer.
+    Every stage kind is now implemented (extract → estimators → adjust → analyses
+    → report). The ``_IMPLEMENTED_KINDS`` guard is retained as a defensive net for
+    any future, not-yet-wired kind: such a stage is skipped (not aborted) and the
+    run exits non-zero with a pointer rather than failing an executed stage.
     """
     catalog: Optional[Catalog] = None
     skipped: list[tuple[str, str]] = []
@@ -157,6 +157,18 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
             )
             if result.summary:
                 print(f"           {result.summary}")
+        elif node.kind == "report":
+            from .reports import run_report  # lazy: pulls pandas only
+
+            result = run_report(cfg, catalog=catalog)
+            print(
+                f"civ-bench: report → {result.report_dir} "
+                f"({result.n_sections} section(s); {', '.join(result.formats)})"
+            )
+            for path in result.written:
+                print(f"           wrote {path}")
+            for warning in result.warnings:
+                print(f"civ-bench: report WARN — {warning}", file=sys.stderr)
 
     if skipped:
         kinds = ", ".join(sorted({k for _, k in skipped}))
@@ -199,15 +211,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "report":
-        # Report rendering lands in stage 5; until then point users at run/--dry-run.
-        print(render_dag(dag, cfg))
-        print()
+        # Re-render the document from existing analysis artifacts (no stage re-run).
+        from .reports import ReportError, run_report
+
+        try:
+            result = run_report(cfg)
+        except (ConfigError, ReportError) as exc:
+            print(f"civ-bench: report error: {exc}", file=sys.stderr)
+            return 2
         print(
-            "civ-bench: 'report' rendering is not implemented yet (stage 5). "
-            "Use --dry-run to validate + print the DAG.",
-            file=sys.stderr,
+            f"civ-bench: report → {result.report_dir} "
+            f"({result.n_sections} section(s); {', '.join(result.formats)})"
         )
-        return 3
+        for path in result.written:
+            print(f"           wrote {path}")
+        for warning in result.warnings:
+            print(f"civ-bench: report WARN — {warning}", file=sys.stderr)
+        return 0
 
     # `run`: execute the implemented prefix of the resolved DAG.
     try:
@@ -224,12 +244,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     except NotImplementedError as exc:
         print(f"civ-bench: {exc}", file=sys.stderr)
         return 3
-    except Exception as exc:  # estimator / adjust / analysis / load failures — fail loud
+    except Exception as exc:  # estimator / adjust / analysis / report / load failures — fail loud
         from .adjust import AdjustError
         from .analyses import AnalysisError
         from .estimators import EstimatorError
+        from .reports import ReportError
 
-        if isinstance(exc, (EstimatorError, AdjustError, AnalysisError, FileNotFoundError, ValueError)):
+        if isinstance(exc, (EstimatorError, AdjustError, AnalysisError, ReportError,
+                            FileNotFoundError, ValueError)):
             print(f"civ-bench: run error: {exc}", file=sys.stderr)
             return 2
         raise

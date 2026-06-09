@@ -73,14 +73,14 @@ The shipped default `configs/benchmark.template.json` is the **lean core** (~10 
 
 ## Status
 
-Greenfield. No `bench/` package or `pyproject.toml` exists yet; the repo so far is the build plan — this document plus [AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), the example `configs/*.template.json`, the `scripts/install*`, and the staged [plans/](stages.md).
+**Stages 0–5 are built & validated** (the full load-only pipeline runs end-to-end); **stage 6 (train/tune + cross variant) is the remaining work.** The installable `bench/` package + `pyproject.toml` exist alongside the build plan ([AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), the example `configs/*.template.json`, the `scripts/install*`, and the staged [plans/](stages.md)).
 
 **Build order — load-only first.** We bring up the pipeline using **pre-trained estimators loaded from copied model dirs** (zero training), then implement training/tuning last. The authoritative ordering lives in [stages.md](stages.md); in brief:
 
-0. **Scaffold** — `configs/` (port `models.json`/`experiments.json`/`paths.json`), `bench/config/` (load + validate, resolve the output root §2.1), `bench/pipeline/` (DAG), and the shared `data`/`catalog`/`stats`/`plotting` infra. ([stage0.md](stage0.md))
-1. **extract** → canonical CSVs. ([stage1.md](stage1.md))
-2. **estimators (load only)** — `fit:"pretrained"` loads a copied `model_dir` and infers; no training yet (a local config copied from `configs/benchmark.pretrained.template.json`, e.g. `configs/benchmark.dev.json`). ([stage2.md](stage2.md))
-3. **adjust** — the `strength` panel. ([stage3.md](stage3.md))
-4. **analyses** — the core modules. ([stage4.md](stage4.md))
-5. **report** — full pipeline end-to-end with no training. ([stage5.md](stage5.md))
+0. ✅ **Scaffold** — `configs/` (port `models.json`/`experiments.json`/`paths.json`), `bench/config/` (load + validate, resolve the output root §2.1), `bench/pipeline/` (DAG), and the shared `data`/`catalog`/`stats`/`plotting` infra. ([stage0.md](stage0.md))
+1. ✅ **extract** → canonical CSVs. ([stage1.md](stage1.md))
+2. ✅ **estimators (load only)** — `fit:"pretrained"` loads a copied `model_dir` and infers; no training yet (a local config copied from `configs/benchmark.pretrained.template.json`, e.g. `configs/benchmark.dev.json`). ([stage2.md](stage2.md))
+3. ✅ **adjust** — the `strength` panel. ([stage3.md](stage3.md))
+4. ✅ **analyses** — the core modules. ([stage4.md](stage4.md))
+5. ✅ **report** — full pipeline end-to-end with no training; renders `md`+`html` under `<root><suffix>/<name>/`, re-rendered byte-identically by `civ-bench report`. ([stage5.md](stage5.md))
 6. **train / tune** — implement `fit:"train"`+`tune`; bring up the train-based `benchmark.template.json` and the **cross variant** (estimator trained on non-LLM seats → `reports-cross/`, configurable suffix §2.1). ([stage6.md](stage6.md))
