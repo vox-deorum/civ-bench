@@ -121,6 +121,13 @@
       "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
     },
     {
+      "id": "pl_strategy",
+      "module": "ratings.plackett_luce",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "group_by": ["player_type", "strategy"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+    },
+    {
       "id": "matchups",
       "module": "ratings.matchups",
       "enabled": true,

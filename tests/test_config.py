@@ -15,9 +15,9 @@ def test_dev_config_loads(configs_dir):
     assert cfg.seed == 42
     assert cfg.output.resolved_root == "reports-dev"
     assert len(cfg.estimators) == 3
-    # 12 original core analyses + the two controlled-design calibration views
-    # (calibration.civ_effects, calibration.cell_baseline) added in stage 4.
-    assert len(cfg.analyses) == 14
+    # 12 original core analyses + PL strategy ratings + the two controlled-design
+    # calibration views (calibration.civ_effects, calibration.cell_baseline).
+    assert len(cfg.analyses) == 15
 
 
 def test_pretrained_template_loads(configs_dir):

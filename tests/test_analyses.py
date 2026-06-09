@@ -377,6 +377,7 @@ def test_ratings_strategy_group_by(env, monkeypatch):
     assert {"player_type", "strategy", "composite_type", "elo"} <= set(tbl.columns)
     # composite identity = player_type-strategy (the strategy grouping label)
     assert tbl["composite_type"].str.contains("-").all()
+    assert "ratings" in r.figure_paths
 
 
 def test_ratings_bootstrap_blocked_with_strategy(env, monkeypatch):

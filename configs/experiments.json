@@ -1,5 +1,7 @@
 {
-  "player_type_labels": {},
+  "player_type_labels": {
+    "oss-120b-standard-fixed-per-5": "-Per-5"
+  },
 
   "condition_player_mapping": {
     "2026-staff-oss": [

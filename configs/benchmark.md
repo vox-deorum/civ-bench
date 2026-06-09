@@ -410,6 +410,11 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 - **`group_by`** (default `["player_type"]`) — the identity the rating is fit over. Extra dimensions past the base must name a grouping in top-level `groupings` (§3.2); the rated identity is the composite formed by joining the dimension values with `-`. So **per-strategy Elo is not a separate module** — it is `group_by: ["player_type", "strategy"]` on the ordinary BT/PL fit. `min_games` then filters *composite* identities post-fit, and ref/vanilla re-centering is preserved.
 - **`bootstrap`** (default omitted → point estimate only) — when set, a shared resample-and-refit helper draws games with replacement (`stratified` by experiment by default), re-runs the same fit `n` times, and emits percentile CIs + rank stability alongside the point estimate. Bootstrap CIs are **not a separate module**; the resampling is seeded from the top-level `seed`. When the `strength` table uses a controlled-design `block` adjustment, the resample **re-runs the `adjust/strength` fit inside each replicate** (not a fixed panel) so the start-cell baseline's uncertainty is reflected in the CIs.
 
+When `group_by` includes the `strategy` grouping, fitted ratings render a heatmap
+matching the legacy Vox Deorum analysis: rows are player types, columns are
+`General` plus the configured strategy labels (normally Domination, Culture,
+Diplomatic, Science), and annotations include Elo, SE, and game support.
+
 ```jsonc
 // ratings.bradley_terry — BT MLE with pairwise score weights (R: BradleyTerry2)
 { "module": "ratings.bradley_terry",
@@ -421,7 +426,8 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 // ratings.plackett_luce — PL MLE over per-game rankings (R: PlackettLuce)
 { "module": "ratings.plackett_luce",
   "uses": { "tables": ["strength"] },
-  "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null } }
+  "params": { "group_by": ["player_type"],          // ["player_type","strategy"] → same heatmap view
+              "ref": "Vanilla", "min_games": 5, "bootstrap": null } }
 
 // ratings.matchups — empirical head-to-head matrices + OLS validation
 { "module": "ratings.matchups",
