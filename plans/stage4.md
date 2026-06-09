@@ -2,7 +2,9 @@
 
 # Stage 4 — analyses
 
-**Goal.** Implement the pluggable analysis layer and the **core** modules. Each is a self-contained unit behind the `Analysis` interface + registry; JSON selects it by name; it returns an `AnalysisResult` (tables + figures + summary), never side effects.
+**Goal.** Implement the pluggable analysis layer and the **core** modules. Each is a self-contained unit behind the `Analysis` interface + registry; JSON selects it by name; it returns an `AnalysisResult` (tables + figures + summary), never side effects. **Status: built & validated.**
+
+**Layout as built.** `bench/analyses/` holds `base.py` (`Analysis` + `AnalysisResult` + `AnalysisContext`), `errors.py` (`AnalysisError`), `registry.py` (name → class; reserved/optional names resolve to a loud "registry-reserved" error), `runner.py` (`run_analysis` → builds the context, runs the module, persists tables to `<root>/analyses/<id>/*.csv` + figures to `*.png`), and `grouping.py` (the `argmax` grouping label). Modules live under `ratings/`, `prediction/`, `calibration/`, `performance/`, `exploratory/`. The CLI dispatches `node.kind == "analyses"` to `run_analysis`; per-module `params` schemas live in `bench/config/schema.py` (`ANALYSIS_PARAM_KEYS` + enum domains) and are enforced in `loader._validate_analysis_params` (import-light, so the dry-run path stays torch/matplotlib-free). R-backed ratings are gated on `find_rscript`; absent R raises a clean `AnalysisError`.
 
 ## Files to create / port
 

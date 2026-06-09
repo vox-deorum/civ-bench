@@ -315,12 +315,48 @@ def _validate_analysis(
     params = entry.get("params")
     if params is not None:
         _require_mapping(params, f"{where}.params")
+        _validate_analysis_params(module, params, where)
         # Cross-cutting params on fitted ratings (group_by + bootstrap), §6.2.
         if module in ("ratings.bradley_terry", "ratings.plackett_luce"):
             _validate_group_by(params.get("group_by"), groupings, where)
             _validate_bootstrap(params.get("bootstrap"), where)
 
     return Stage(id=sid, kind="analyses", enabled=entry.get("enabled", True), raw=entry)
+
+
+def _validate_analysis_params(module: str, params: dict, where: str) -> None:
+    """Per-module param-key + enum validation (unknown keys are hard errors, §6)."""
+    allowed = S.ANALYSIS_PARAM_KEYS.get(module)
+    if allowed is None:
+        return  # not a core module with a param schema yet (reserved/optional)
+    _check_keys(params, allowed, f"{where}.params")
+    # Enum / type checks for the params with a constrained domain.
+    if "metrics" in params:
+        metrics = _check_string_list(params["metrics"], f"{where}.params.metrics")
+        bad = [m for m in metrics if m not in S.PREDICTION_METRICS]
+        if bad:
+            raise ConfigError(
+                f"{where}.params.metrics: unknown metric(s) {bad}. "
+                f"Allowed: {sorted(S.PREDICTION_METRICS)}."
+            )
+    if module == "ratings.matchups" and "mode" in params:
+        _check_domain(params["mode"], S.MATCHUPS_MODE, f"{where}.params.mode")
+    if module == "performance.turn_predicted" and "aggregate" in params:
+        _check_domain(params["aggregate"], S.TURN_PREDICTED_AGGREGATE, f"{where}.params.aggregate")
+    if "predictors" in params:
+        _check_string_list(params["predictors"], f"{where}.params.predictors", allow_empty=False)
+    for key in ("n_bins", "min_games", "min_games_preliminary", "bootstrap_n"):
+        if key in params:
+            v = params[key]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                raise ConfigError(f"{where}.params.{key}: must be an integer >= 1.")
+    if "ci_level" in params:
+        v = params["ci_level"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1:
+            raise ConfigError(f"{where}.params.ci_level: must be a number in (0, 1).")
+    for key in ("weighted", "only_llm", "validate_ols", "by_strategist"):
+        if key in params:
+            _check_type(params[key], (bool,), f"{where}.params.{key}")
 
 
 def _validate_group_by(group_by: Any, groupings: dict, where: str) -> None:

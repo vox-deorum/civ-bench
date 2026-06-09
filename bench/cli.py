@@ -71,8 +71,8 @@ def _is_dry(args: argparse.Namespace) -> bool:
     return bool(args.dry_run) or any(s.lower() == "all" for s in args.skip)
 
 
-# Stage kinds with an executable implementation today (the rest land in later stages).
-_IMPLEMENTED_KINDS = {"extract", "estimators", "adjust"}
+# Stage kinds with an executable implementation today (report lands in stage 5).
+_IMPLEMENTED_KINDS = {"extract", "estimators", "adjust", "analyses"}
 
 
 def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
@@ -145,14 +145,25 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
             )
             for warning in result.warnings:
                 print(f"civ-bench: adjust '{result.id}' WARN — {warning}", file=sys.stderr)
+        elif node.kind == "analyses":
+            from .analyses import run_analysis  # lazy: pulls matplotlib/statsmodels/Rscript
+
+            result = run_analysis(cfg, node.raw, catalog=catalog)
+            n_t, n_f = len(result.table_paths), len(result.figure_paths)
+            status = "empty (no artifacts)" if result.empty else f"{n_t} table(s), {n_f} figure(s)"
+            print(
+                f"civ-bench: analysis '{result.id}' ({result.module}) → "
+                f"{cfg.output.resolve(f'{cfg.output.root}/analyses/{result.id}')} ({status})"
+            )
+            if result.summary:
+                print(f"           {result.summary}")
 
     if skipped:
         kinds = ", ".join(sorted({k for _, k in skipped}))
         print(
             f"civ-bench: ran the implemented stages; skipped {len(skipped)} "
-            f"not-yet-implemented stage(s) [{kinds}] (analyses→stage 4, "
-            f"report→stage 5). Use --dry-run to inspect the "
-            f"full DAG, or --only on an estimator to run just that.",
+            f"not-yet-implemented stage(s) [{kinds}] (report→stage 5). "
+            f"Use --dry-run to inspect the full DAG, or --only on a stage to run just that.",
             file=sys.stderr,
         )
         return 3
@@ -213,11 +224,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     except NotImplementedError as exc:
         print(f"civ-bench: {exc}", file=sys.stderr)
         return 3
-    except Exception as exc:  # estimator / adjust / load failures — fail loud, not silent
+    except Exception as exc:  # estimator / adjust / analysis / load failures — fail loud
         from .adjust import AdjustError
+        from .analyses import AnalysisError
         from .estimators import EstimatorError
 
-        if isinstance(exc, (EstimatorError, AdjustError, FileNotFoundError, ValueError)):
+        if isinstance(exc, (EstimatorError, AdjustError, AnalysisError, FileNotFoundError, ValueError)):
             print(f"civ-bench: run error: {exc}", file=sys.stderr)
             return 2
         raise

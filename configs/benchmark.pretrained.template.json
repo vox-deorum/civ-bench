@@ -156,6 +156,20 @@
       "params": { "n_bins": 20, "metrics": ["brier_score", "log_loss"] }
     },
     {
+      "id": "cal_civ_effects",
+      "module": "calibration.civ_effects",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
+      "id": "cal_cell_baseline",
+      "module": "calibration.cell_baseline",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
       "id": "perf_score_ratio",
       "module": "performance.score_ratio",
       "enabled": true,
