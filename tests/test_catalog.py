@@ -57,6 +57,38 @@ def test_label_suffix_and_override():
     assert cat.compose_player_type("VPAI", "simple-strategist", "cond_suffix", 0) == "Vanilla"
 
 
+def test_label_wildcard_condition_key():
+    cat = Catalog(
+        {
+            "player_type_template": "{model}-{variant}{suffix}",
+            "vanilla_model_aliases": ["VPAI"],
+            "vanilla_label": "Vanilla",
+            "null_label": "Null",
+            "strategist_variant_map": {"simple-strategist": "Simple", "simple-strategist-briefed": "Briefed"},
+            "strategist_models": [{"id": "GPT-OSS-120B", "aliases": ["gpt-oss-120b"], "color": "#000"}],
+            "strategist_variants": {"Simple": {"suffix": "-Simple"}, "Briefed": {"suffix": "-Briefed"}},
+        },
+        {
+            "player_type_labels": {
+                "*-per-5": "-Per-5",                 # broad glob
+                "oss-*-per-5": "-OssPer5",           # narrower glob (more specific)
+                "oss-120b-standard-fixed-per-5": "Exact",  # exact key beats every glob
+            }
+        },
+    )
+    # exact condition key wins over any pattern (here a full override)
+    assert cat.compose_player_type("gpt-oss-120b", "simple-strategist", "oss-120b-standard-fixed-per-5", 2) == "Exact"
+    # most-specific pattern wins among matches (oss-*-per-5 over *-per-5)
+    assert cat.compose_player_type("gpt-oss-120b", "simple-strategist", "oss-200b-standard-fixed-per-5", 2) == "GPT-OSS-120B-Simple-OssPer5"
+    # only the broad glob matches → "-Per-5" suffix on both variants
+    assert cat.compose_player_type("gpt-oss-120b", "simple-strategist", "glm-standard-fixed-per-5", 2) == "GPT-OSS-120B-Simple-Per-5"
+    assert cat.compose_player_type("gpt-oss-120b", "simple-strategist-briefed", "glm-standard-fixed-per-5", 3) == "GPT-OSS-120B-Briefed-Per-5"
+    # no pattern matches → plain composed type
+    assert cat.compose_player_type("gpt-oss-120b", "simple-strategist", "2026-staff-standard", 2) == "GPT-OSS-120B-Simple"
+    # baselines skip the wildcard suffix so they pool across conditions
+    assert cat.compose_player_type("VPAI", "simple-strategist", "glm-standard-fixed-per-5", 0) == "Vanilla"
+
+
 def test_fallback_seat_map(catalog):
     # player_id 3 in 2026-staff-standard is Sonnet-4.5-Briefed (legacy seat map)
     assert catalog.fallback_player_type("2026-staff-standard", 3) == "Sonnet-4.5-Briefed"

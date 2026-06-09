@@ -17,6 +17,7 @@ predate the metadata.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 from pathlib import Path
 from typing import Optional
@@ -184,8 +185,12 @@ class Catalog:
         return self.vanilla_label
 
     def _lookup_label(self, condition: Optional[str], slot: Optional[int]) -> Optional[str]:
+        if condition is None:
+            return None
         labels = self.player_type_labels
         entry = labels.get(condition)
+        if entry is None:
+            entry = self._match_wildcard_label(condition, labels)
         if entry is None:
             return None
         if isinstance(entry, str):
@@ -195,6 +200,27 @@ class Catalog:
                 return entry[str(slot)]
             return entry.get("_default")
         return None
+
+    @staticmethod
+    def _match_wildcard_label(condition: str, labels: dict):
+        """Resolve a glob-pattern condition key (e.g. ``*-per-5``) for a condition.
+
+        Consulted only after an exact key miss, so a literal condition key always
+        wins. Among the wildcard keys (those containing ``*``) that match, the
+        **most specific** wins — the one with the most non-wildcard characters,
+        ties broken lexicographically — so a broad ``*`` never shadows a narrower
+        ``oss-*-per-5``. Returns the matched entry (a string or ``(slot)`` dict,
+        interpreted exactly like an exact-key entry) or ``None``.
+        """
+        matches = [
+            (key, value)
+            for key, value in labels.items()
+            if "*" in key and fnmatch.fnmatchcase(condition, key)
+        ]
+        if not matches:
+            return None
+        _, value = max(matches, key=lambda kv: (len(kv[0].replace("*", "")), kv[0]))
+        return value
 
     # ── alias normalization (ported) ────────────────────────────────────────
     @staticmethod
