@@ -27,6 +27,7 @@ from bench.extract import (
     run_extract,
 )
 from bench.extract.extract_games import export_game_data
+from bench.extract.extract_panel import _has_real_changes
 from bench.extract.utilities import UNCONTROLLED
 
 
@@ -36,7 +37,16 @@ def catalog(configs_dir) -> Catalog:
     return Catalog.from_paths(configs_dir / "models.json", configs_dir / "experiments.json")
 
 
-def _make_game_db(path: Path, metadata: dict, players=None, summaries=None, flavor_rows=None) -> None:
+def _make_game_db(
+    path: Path,
+    metadata: dict,
+    players=None,
+    summaries=None,
+    flavor_rows=None,
+    persona_rows=None,
+    research_rows=None,
+    policy_rows=None,
+) -> None:
     """Create a minimal game DB with a GameMetadata Key→Value table (+ optional rows).
 
     ``flavor_rows`` is a list of ``(ID, Key, Turn, Changes, GrandStrategy, Rationale,
@@ -65,9 +75,19 @@ def _make_game_db(path: Path, metadata: dict, players=None, summaries=None, flav
         if flavor_rows:
             cur.executemany("INSERT INTO FlavorChanges VALUES (?, ?, ?, ?, ?, ?, ?, ?)", flavor_rows)
         cur.execute("CREATE TABLE StrategyChanges (ID INTEGER, Key INTEGER, Turn INTEGER, GrandStrategy TEXT, Changes TEXT, Rationale TEXT)")
-        cur.execute("CREATE TABLE PersonaChanges (Key INTEGER, Changes TEXT)")
+        cur.execute(
+            "CREATE TABLE PersonaChanges "
+            "(ID INTEGER, Key INTEGER, Turn INTEGER, Version INTEGER, Changes TEXT, "
+            "Rationale TEXT, DiplomaticBalance INTEGER, Boldness INTEGER)"
+        )
+        if persona_rows:
+            cur.executemany("INSERT INTO PersonaChanges VALUES (?, ?, ?, ?, ?, ?, ?, ?)", persona_rows)
         cur.execute("CREATE TABLE ResearchChanges (Key INTEGER, Changes TEXT)")
+        if research_rows:
+            cur.executemany("INSERT INTO ResearchChanges VALUES (?, ?)", research_rows)
         cur.execute("CREATE TABLE PolicyChanges (Key INTEGER, Changes TEXT)")
+        if policy_rows:
+            cur.executemany("INSERT INTO PolicyChanges VALUES (?, ?)", policy_rows)
         cur.execute("CREATE TABLE GameEvents (Turn INTEGER, Type TEXT, Payload TEXT, Player0 INTEGER, Player1 INTEGER)")
 
     conn.commit()
@@ -364,6 +384,15 @@ def test_is_decision_changes_predicate():
     assert is_decision_changes(None) is False                      # carry-forward
 
 
+def test_has_real_changes_predicate():
+    assert _has_real_changes('["Rationale","Policy"]') is True
+    assert _has_real_changes('["Policy"]') is True
+    assert _has_real_changes('["Rationale"]') is False
+    assert _has_real_changes("[]") is False
+    assert _has_real_changes("") is False
+    assert _has_real_changes(None) is False
+
+
 def test_panel_decisions_count_includes_status_quo(tmp_path, catalog):
     runs = tmp_path / "runs"
     db = runs / "gemma-4-standard-fixed" / "g2_100.db"
@@ -399,3 +428,77 @@ def test_panel_decisions_count_includes_status_quo(tmp_path, catalog):
     row = list(csv.DictReader(panel_out.open(encoding="utf-8")))[0]
     assert row["decisions"] == "3"        # all three turns are decisions
     assert row["strategy_changes"] == "1"  # only the one with an actual flavor change
+
+
+def test_panel_persona_changes_ignore_null_strategist_reapply_loop(tmp_path, catalog):
+    runs = tmp_path / "runs"
+    db = runs / "null-standard-fixed" / "g3_100.db"
+    _make_game_db(
+        db,
+        metadata={
+            "gameId": "g3",
+            "model-0": "VPAI",
+            "strategist-0": "null-strategist",
+            "seatingMap": '{"0": 0}',
+            "configuredSyncRandSeed": "5",
+            "configuredMapRandSeed": "5",
+            "seatingRotation": "0",
+        },
+        players=[(0, "America", 1)],
+        summaries=[(1, 0, 10, 500, 1, "Pottery")],
+        persona_rows=[
+            (1, 0, 0, 1, '["DiplomaticBalance","Boldness"]', "Null agent baseline", 5, 5),
+            (2, 0, 1, 2, '["DiplomaticBalance"]', "Tweaked by In-Game AI (Null agent baseline)", 6, 5),
+            (3, 0, 1, 3, '["DiplomaticBalance","Rationale"]', "Null agent baseline", 5, 5),
+            (4, 0, 2, 4, '["DiplomaticBalance"]', "Tweaked by In-Game AI (Null agent baseline)", 6, 5),
+            (5, 0, 2, 5, '["DiplomaticBalance","Rationale"]', "Null agent baseline", 5, 5),
+        ],
+    )
+    panel_out = tmp_path / "panel_data.csv"
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["panel"]},
+        {"panel": str(panel_out)},
+    )
+    run_extract(cfg, catalog=catalog)
+
+    import csv
+    row = list(csv.DictReader(panel_out.open(encoding="utf-8")))[0]
+    assert row["player_type"] == "Null"
+    assert row["persona_changes"] == "1"
+
+
+def test_panel_persona_changes_count_distinct_strategist_authored_states(tmp_path, catalog):
+    runs = tmp_path / "runs"
+    db = runs / "gemma-4-standard-fixed" / "g4_100.db"
+    _make_game_db(
+        db,
+        metadata={
+            "gameId": "g4",
+            "model-0": "claude-sonnet-4-5",
+            "strategist-0": "simple-strategist-briefed",
+            "seatingMap": '{"0": 0}',
+            "configuredSyncRandSeed": "5",
+            "configuredMapRandSeed": "5",
+            "seatingRotation": "0",
+        },
+        players=[(0, "America", 1)],
+        summaries=[(1, 0, 10, 500, 1, "Pottery")],
+        persona_rows=[
+            (1, 0, 0, 1, '["DiplomaticBalance","Boldness"]', "Opening persona", 5, 5),
+            (2, 0, 1, 2, '["DiplomaticBalance"]', "Tweaked by In-Game AI (Opening persona)", 6, 5),
+            (3, 0, 1, 3, '["DiplomaticBalance","Rationale"]', "Opening persona", 5, 5),
+            (4, 0, 2, 4, '["Boldness"]', "More aggressive diplomacy", 5, 7),
+        ],
+    )
+    panel_out = tmp_path / "panel_data.csv"
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["panel"]},
+        {"panel": str(panel_out)},
+    )
+    run_extract(cfg, catalog=catalog)
+
+    import csv
+    row = list(csv.DictReader(panel_out.open(encoding="utf-8")))[0]
+    assert row["persona_changes"] == "2"

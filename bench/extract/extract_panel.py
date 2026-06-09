@@ -35,6 +35,20 @@ ALL_PLAYER_FIELDS = (
 # Identity fields composed at extract (benchmark.md §3.3), inserted per player.
 IDENTITY_FIELDS = ["player_type", "model", "strategist", "config_slot"]
 
+MUTABLE_KNOWLEDGE_METADATA_COLUMNS = {
+    "ID",
+    "Turn",
+    "Key",
+    "OwnerID",
+    "KnownByIDs",
+    "Payload",
+    "IsLatest",
+    "CreatedAt",
+    "Version",
+    "Changes",
+    "Rationale",
+}
+
 # Define field mappings for panel data structure
 PANEL_FIELD_MAPPINGS = {
     # Game-level fields
@@ -128,6 +142,83 @@ def extract_flavor_max(cursor, player_id, column_name, default=50):
     if first_changed_idx is None:
         return default
     return max(row[0] for row in rows[first_changed_idx:])
+
+
+def _has_real_changes(changes_json) -> bool:
+    """True when ``Changes`` contains at least one non-rationale field."""
+    if changes_json is None:
+        return False
+    if not isinstance(changes_json, str):
+        return False
+    changes_json = changes_json.strip()
+    if not changes_json:
+        return False
+
+    try:
+        changes = json.loads(changes_json)
+    except (json.JSONDecodeError, TypeError):
+        return changes_json not in ("[]", '["Rationale"]')
+
+    if not isinstance(changes, list):
+        return False
+    return any(change != "Rationale" for change in changes)
+
+
+def count_real_change_rows(cursor, table_name: str, player_id: int) -> int:
+    """Count rows whose ``Changes`` JSON records a real field mutation."""
+    cursor.execute(f"SELECT Changes FROM {table_name} WHERE Key = ?", (player_id,))
+    return sum(1 for (changes_json,) in cursor.fetchall() if _has_real_changes(changes_json))
+
+
+def _table_columns(cursor, table_name: str) -> list[str]:
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    return [row[1] for row in cursor.fetchall()]
+
+
+def count_strategist_persona_state_changes(cursor, player_id: int) -> int:
+    """Count changes in the strategist-authored persona state.
+
+    ``PersonaChanges`` also records in-game-AI refresh rows. Those can alternate
+    with a null strategist reapplying the same baseline and make raw DB mutations
+    look like hundreds of persona changes, so this compares only strategist rows.
+    """
+    columns = _table_columns(cursor, "PersonaChanges")
+    if not columns:
+        return 0
+
+    persona_columns = [c for c in columns if c not in MUTABLE_KNOWLEDGE_METADATA_COLUMNS]
+    if not persona_columns:
+        return count_real_change_rows(cursor, "PersonaChanges", player_id)
+
+    order_column = next((c for c in ("Version", "ID", "Turn") if c in columns), "rowid")
+    select_columns = list(persona_columns)
+    if "Rationale" in columns:
+        select_columns.append("Rationale")
+
+    cursor.execute(
+        f"""
+        SELECT {", ".join(select_columns)}
+        FROM PersonaChanges
+        WHERE Key = ?
+        ORDER BY {order_column}
+        """,
+        (player_id,),
+    )
+
+    count = 0
+    previous_state = None
+    for row in cursor.fetchall():
+        data = dict(zip(select_columns, row))
+        rationale = data.get("Rationale")
+        if isinstance(rationale, str) and rationale.startswith("Tweaked by In-Game AI"):
+            continue
+
+        state = tuple(data.get(column) for column in persona_columns)
+        if previous_state is None or state != previous_state:
+            count += 1
+            previous_state = state
+
+    return count
 
 
 def perform_strategy_sanity_checks(cursor, player_id, player_data, db_name, experiment_name):
@@ -285,20 +376,9 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
         if player_id in [2, 3]:
             perform_strategy_sanity_checks(cursor, player_id, player_data, db_name, experiment_name)
 
-        cursor.execute("""
-            SELECT COUNT(*) FROM PersonaChanges WHERE Key = ? AND Changes != '["Rationale"]'
-        """, (player_id,))
-        player_data["persona_changes"] = cursor.fetchone()[0] or 0
-
-        cursor.execute("""
-            SELECT COUNT(*) FROM ResearchChanges WHERE Key = ? AND Changes != '["Rationale"]'
-        """, (player_id,))
-        player_data["research_changes"] = cursor.fetchone()[0] or 0
-
-        cursor.execute("""
-            SELECT COUNT(*) FROM PolicyChanges WHERE Key = ? AND Changes != '["Rationale"]'
-        """, (player_id,))
-        player_data["policy_changes"] = cursor.fetchone()[0] or 0
+        player_data["persona_changes"] = count_strategist_persona_state_changes(cursor, player_id)
+        player_data["research_changes"] = count_real_change_rows(cursor, "ResearchChanges", player_id)
+        player_data["policy_changes"] = count_real_change_rows(cursor, "PolicyChanges", player_id)
 
         for field in POLICY_BRANCHES:
             player_data[field] = "N/A"
