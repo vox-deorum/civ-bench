@@ -58,6 +58,7 @@ def _mutations():
         "unknown_analysis_module": lambda c: c["analyses"][0].__setitem__("module", "ratings.fake"),
         "unknown_adjust_module": lambda c: c["adjust"][0].__setitem__("module", "nope"),
         "bad_strength_enum": lambda c: c["adjust"][0]["params"].__setitem__("block", "wild"),
+        "adjust_params_not_object": lambda c: c["adjust"][0].__setitem__("params", "bad"),
         "group_by_undefined": lambda c: c["analyses"][1]["params"].__setitem__("group_by", ["player_type", "nope"]),
         "bootstrap_n_zero": lambda c: c["analyses"][0]["params"].__setitem__("bootstrap", {"n": 0}),
         "unknown_model": lambda c: c["estimators"][0].__setitem__("model", "not_a_model"),

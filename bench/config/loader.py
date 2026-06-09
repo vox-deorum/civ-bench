@@ -466,7 +466,8 @@ def load_config(path: str | Path) -> RunConfig:
         experiment_ids = None
         if any(
             isinstance(a, dict)
-            and (a.get("params") or {}).get("baseline_experiment") is not None
+            and isinstance(a.get("params"), dict)
+            and a["params"].get("baseline_experiment") is not None
             for a in adjust_raw
         ):
             experiments_cat = _read_catalog(

@@ -562,10 +562,10 @@ def _coverage_warnings(
                 f"'{selected}' Vanilla baseline (extrapolated; report-only)."
             )
     # Comparison-pathway gaps: when explicit is selected, the implicit comparison
-    # may have cells with no Vanilla rows — surfaced, never fatal.
-    if baseline_experiment is not None and not cell_baseline.empty:
-        impl = cell_baseline[cell_baseline["pathway"] == "implicit"]
-        gaps = impl[~impl["has_vanilla_baseline"]]
+    # may have experiment cells with rows but no own Vanilla evidence. Such cells
+    # do not appear in cell_baseline at all, so detect them from the coverage grid.
+    if baseline_experiment is not None and not coverage.empty:
+        gaps = coverage[(coverage["n_rows"] > 0) & (coverage["n_vanilla"] == 0)]
         if not gaps.empty:
             out.append(
                 f"comparison pathway: {len(gaps)} implicit cell(s) lack a Vanilla "

@@ -150,8 +150,8 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
         kinds = ", ".join(sorted({k for _, k in skipped}))
         print(
             f"civ-bench: ran the implemented stages; skipped {len(skipped)} "
-            f"not-yet-implemented stage(s) [{kinds}] (adjust→stage 3, "
-            f"analyses→stage 4, report→stage 5). Use --dry-run to inspect the "
+            f"not-yet-implemented stage(s) [{kinds}] (analyses→stage 4, "
+            f"report→stage 5). Use --dry-run to inspect the "
             f"full DAG, or --only on an estimator to run just that.",
             file=sys.stderr,
         )

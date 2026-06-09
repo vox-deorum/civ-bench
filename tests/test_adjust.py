@@ -314,6 +314,27 @@ def test_explicit_pathway_recovers_uplift_and_reports_both(tmp_path, catalog):
     assert (expl["experiment"] == "vp-self").all()
 
 
+def test_explicit_pathway_warns_on_missing_implicit_comparison_cell(tmp_path, catalog):
+    # The selected explicit baseline covers every seat, so adjustment is defined.
+    # The controlled experiment has only rotation 0, so its LLM cell has rows but
+    # no own Vanilla row; that gap should be reported for implicit comparison.
+    baseline = [{
+        "experiment": "vp-self", "game_id": "vp-s1-r0", "seed": 1, "seating_rotation": 0,
+        "seats": [(pid, "Vanilla", "VPAI", CIV_BY_SEAT[pid],
+                   P_LEADER if pid == 4 else P_VANILLA, False) for pid in range(5)],
+    }]
+    ctrl = _seated_games("ctrl", seed=1, rotations=[0])
+    pp, pa, gp = _write(tmp_path, baseline + ctrl)
+    art = build_strength_panel(pp, pa, gp, _params(block="auto", baseline_experiment="vp-self"), catalog)
+
+    assert any("comparison pathway" in w for w in art.warnings)
+    ctrl_impl = art.cell_baseline[
+        (art.cell_baseline.pathway == "implicit")
+        & (art.cell_baseline.experiment == "ctrl")
+    ]
+    assert (1, 0) not in set(zip(ctrl_impl.seed, ctrl_impl.player_id))
+
+
 def test_implicit_only_run_has_no_explicit_rows(tmp_path, catalog):
     games = _seated_games("ctrl", seed=1, rotations=[0, 1, 2, 3])
     pp, pa, gp = _write(tmp_path, games)
