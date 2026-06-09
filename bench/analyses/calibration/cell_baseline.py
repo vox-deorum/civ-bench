@@ -13,7 +13,9 @@ cell is annotated with ``n_vanilla`` (the baseline's support), and missing cells
 
 The explicit pathway — the single shared baseline spanning the whole grid — is
 pinned as a top reference row separated by a rule, so each implicit condition reads
-against it directly. An implicit-only run (``baseline_experiment:null``) omits that
+against it directly. The explicit condition's *own* implicit row is dropped: it
+averages the same Vanilla cells as the explicit baseline, so it would just duplicate
+the reference row. An implicit-only run (``baseline_experiment:null``) omits that
 reference row. Returns an empty result (no figures) when there are no controlled
 rows (``cell_baseline.csv`` empty / absent).
 """
@@ -61,17 +63,20 @@ class CalibrationCellBaseline(Analysis):
             if fig is not None:
                 figures[f"cell_baseline_seed_{int(seed)}"] = fig
 
-        n_explicit = int((cb["pathway"] == "explicit").sum())
+        explicit_exps = set(cb.loc[cb["pathway"] == "explicit", "experiment"].unique())
+        # Implicit conditions actually rendered: the explicit condition's implicit row is
+        # dropped (it duplicates the explicit reference), so don't count it here either.
+        implicit_exps = set(cb.loc[cb["pathway"] == "implicit", "experiment"].unique()) - explicit_exps
         summary = (
             f"Cell-baseline heatmaps for {cb['seed'].nunique()} seed(s); "
-            f"{cb['experiment'].nunique()} condition(s), "
-            f"{'with' if n_explicit else 'without'} an explicit reference row."
+            f"{len(implicit_exps)} implicit condition(s), "
+            f"{'with' if explicit_exps else 'without'} an explicit reference row."
         )
         return AnalysisResult(
             tables={"cell_baseline": cb},
             figures=figures,
             summary=summary,
-            metadata={"n_seeds": int(cb["seed"].nunique()), "has_explicit": bool(n_explicit)},
+            metadata={"n_seeds": int(cb["seed"].nunique()), "has_explicit": bool(explicit_exps)},
         )
 
     def _load_coverage(self, adjust_dir: Path) -> Optional[pd.DataFrame]:
@@ -95,10 +100,16 @@ class CalibrationCellBaseline(Analysis):
         explicit = seed_cb[seed_cb["pathway"] == "explicit"]
         row_specs: list[tuple[str, str, pd.DataFrame]] = []
         rule_after = None
+        explicit_exp = None
         if not explicit.empty:
             row_specs.append((_EXPLICIT_ROW, "explicit", explicit))
             rule_after = 0
+            explicit_exp = explicit["experiment"].iloc[0]
         for exp in sorted(implicit["experiment"].unique()):
+            # The explicit condition's own implicit baseline IS the explicit baseline
+            # (same Vanilla cells, same average) — skip the duplicate row.
+            if exp == explicit_exp:
+                continue
             row_specs.append((exp, "implicit", implicit[implicit["experiment"] == exp]))
         if not row_specs:
             return None

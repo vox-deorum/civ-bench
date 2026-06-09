@@ -80,7 +80,7 @@ class ExploratoryModelTokenCosts(Analysis):
         summary_tbl = summary_tbl.sort_values("total_cost", ascending=False, na_position="last")
         summary_tbl = summary_tbl.reset_index(drop=True)
 
-        fig = self._plot(summary_tbl, currency)
+        fig = self._plot(summary_tbl, currency, catalog)
         total = summary_tbl["total_cost"].sum(skipna=True)
         summary = (
             f"Token costs for {len(summary_tbl)} model(s); total = "
@@ -92,8 +92,10 @@ class ExploratoryModelTokenCosts(Analysis):
             summary=summary, metadata={"currency": currency},
         )
 
-    def _plot(self, tbl: pd.DataFrame, currency: str):
+    def _plot(self, tbl: pd.DataFrame, currency: str, catalog):
         import matplotlib.pyplot as plt
+
+        from ...plotting.styles import get_player_color
 
         priced = tbl.dropna(subset=["total_cost"])
         if priced.empty:
@@ -103,7 +105,8 @@ class ExploratoryModelTokenCosts(Analysis):
         labels = priced[label_col] if label_col == "model" else (
             priced["player_type"].astype(str) + " / " + priced["model"].astype(str)
         )
-        ax.barh(labels[::-1], priced["total_cost"][::-1], color="#4C72B0")
+        colors = [get_player_color(catalog, m) for m in priced["model"]]
+        ax.barh(labels[::-1], priced["total_cost"][::-1], color=colors[::-1])
         ax.set_xlabel(f"Total cost ({currency.upper()})")
         ax.set_title("Estimated token cost by model", fontsize=12, fontweight="bold")
         ax.grid(True, axis="x", alpha=0.3)

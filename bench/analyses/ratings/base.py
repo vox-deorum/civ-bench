@@ -221,7 +221,10 @@ class RatingsAnalysis(Analysis):
         fig, ax = plt.subplots(figsize=(10, max(4, 0.42 * len(df) + 1.5)))
         for i, row in df.iterrows():
             name = str(row[identity_col])
-            color = get_player_color(ctx.catalog, name)
+            # Color by the underlying model: a composite identity (player_type-strategy)
+            # has no catalog color of its own, so key off its base player_type.
+            color_key = str(row["player_type"]) if "player_type" in df.columns else name
+            color = get_player_color(ctx.catalog, color_key)
             x = row["elo"]
             if has_ci and pd.notna(row.get("ci_lower")):
                 lo, hi = row["ci_lower"], row["ci_upper"]

@@ -293,6 +293,29 @@ def test_calibration_cell_baseline_controlled(env):
     assert not r.empty and r.figure_paths  # one heatmap per seed
 
 
+def test_cell_baseline_excludes_explicit_conditions_implicit_row():
+    from bench.analyses.calibration.cell_baseline import (
+        CalibrationCellBaseline, _EXPLICIT_ROW,
+    )
+
+    # One seed, two player cells; experiment "base" is the explicit baseline source,
+    # so it appears as both an explicit row and (redundantly) its own implicit row.
+    rows = []
+    for pathway, exp in (("explicit", "base"), ("implicit", "base"), ("implicit", "treat")):
+        for pid in (0, 1):
+            rows.append({"experiment": exp, "pathway": pathway, "seed": 7,
+                         "player_id": pid, "civilization": CIVS[pid],
+                         "cell_baseline": 0.3 + 0.1 * pid, "n_vanilla": 4})
+    seed_cb = pd.DataFrame(rows)
+
+    fig = CalibrationCellBaseline("cb")._plot_seed(seed_cb, None, 7, vlim=2.0)
+    labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
+    # The explicit reference is pinned; "treat" reads against it; "base" implicit is dropped.
+    assert _EXPLICIT_ROW in labels
+    assert "treat" in labels
+    assert "base" not in labels
+
+
 # ── performance ──────────────────────────────────────────────────────────────────
 def test_performance_score_ratio(env):
     r = env("performance.score_ratio", {"target": "score_ratio",
