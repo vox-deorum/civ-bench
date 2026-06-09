@@ -26,7 +26,8 @@ class CalibrationLossByProgress(Analysis):
         estimators = ctx.uses_estimators()
         if not estimators:
             raise AnalysisError(
-                f"calibration.loss_by_progress '{self.stage_id}': requires uses.estimators."
+                f"calibration.loss_by_progress '{self.stage_id}': requires at least one "
+                f"enabled estimator or uses.estimators override."
             )
         n_bins = int(self.params.get("n_bins", 10))
         metrics = list(self.params.get("metrics") or _DEFAULT_METRICS)

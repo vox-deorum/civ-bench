@@ -1,10 +1,10 @@
 """``prediction.evaluate`` — multi-metric scoring table per estimator.
 
 Ported from the comparison logic in ``predict/visualize_model_comparison.ipynb``
-+ ``models/compare_models.py``: for each estimator referenced via
-``uses.estimators``, load its ``predictions.csv`` and compute the configured
-metrics over every prediction row. One table row per model; columns are the
-metrics plus ``n_rows`` / ``n_games``.
++ ``models/compare_models.py``: for each resolved estimator (``uses.estimators``
+when supplied, otherwise every enabled estimator), load its ``predictions.csv``
+and compute the configured metrics over every prediction row. One table row per
+model; columns are the metrics plus ``n_rows`` / ``n_games``.
 """
 
 from __future__ import annotations
@@ -28,7 +28,8 @@ class PredictionEvaluate(Analysis):
         estimators = ctx.uses_estimators()
         if not estimators:
             raise AnalysisError(
-                f"prediction.evaluate '{self.stage_id}': requires uses.estimators."
+                f"prediction.evaluate '{self.stage_id}': requires at least one "
+                f"enabled estimator or uses.estimators override."
             )
         metrics = list(self.params.get("metrics") or DEFAULT_METRICS)
 

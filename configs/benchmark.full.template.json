@@ -174,14 +174,12 @@
       "id": "pred_metrics",
       "module": "prediction.evaluate",
       "enabled": true,
-      "uses": { "estimators": ["score", "attention", "attention_ref", "xgboost_cv"] },
       "params": { "metrics": ["roc_auc", "brier_score", "log_loss", "balanced_accuracy"] }
     },
     {
       "id": "pred_compare",
       "module": "prediction.compare",
       "enabled": true,
-      "uses": { "estimators": ["score", "attention", "attention_ref", "xgboost_cv"] },
       "params": {}
     },
     {
@@ -210,14 +208,12 @@
       "id": "cal_reliability",
       "module": "calibration.reliability",
       "enabled": true,
-      "uses": { "estimators": ["xgboost_cv"] },
       "params": { "n_bins": 10 }
     },
     {
       "id": "cal_loss_progress",
       "module": "calibration.loss_by_progress",
       "enabled": true,
-      "uses": { "estimators": ["score", "xgboost_cv"] },
       "filter": "late_game",
       "params": { "n_bins": 20, "metrics": ["brier_score", "log_loss"] }
     },
@@ -252,7 +248,6 @@
       "id": "perf_turn_predicted",
       "module": "performance.turn_predicted",
       "enabled": true,
-      "uses": { "estimators": ["attention"] },
       "params": { "aggregate": "mean", "by": "player_type" }
     },
     {

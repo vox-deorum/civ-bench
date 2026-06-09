@@ -10,7 +10,9 @@ is resolved and cached at config-load time. Edges come from three places
 2. **`needs` (explicit)** — extra ordering the harness cannot infer.
 3. **`uses` (referential)** — an estimator id or a table name in a stage's
    ``uses`` block creates an edge automatically (to the producing estimator /
-   adjust stage, or to extract for a canonical table).
+   adjust stage, or to extract for a canonical table). Estimator-consuming
+   analyses with omitted/empty ``uses.estimators`` depend on every enabled
+   estimator.
 
 Disabled stages (``enabled: false``) are dropped from the graph.
 """

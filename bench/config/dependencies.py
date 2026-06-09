@@ -50,6 +50,16 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
     for stage in cfg.analyses:
         for est in stage.uses_estimators:
             _check_estimator_ref(stage, est, estimator_ids, enabled_ids, "analysis")
+        if (
+            stage.enabled
+            and stage.module in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS
+            and not stage.uses_estimators
+            and not any(s.enabled for s in cfg.estimators)
+        ):
+            raise ConfigError(
+                f"analysis '{stage.id}' defaults to all enabled estimators, "
+                f"but this run has none."
+            )
         for tbl in stage.uses_tables:
             _check_table_ref(stage, tbl, table_keys, adjust_ids, enabled_adjust_ids)
         if stage.enabled and stage.module and stage.module.startswith(S.RATINGS_PREFIX):
@@ -168,7 +178,7 @@ def _build_enabled_nodes(cfg: RunConfig, table_keys: set[str]) -> dict[str, Reso
         if not stage.enabled:
             continue
         node = ResolvedNode(id=stage.id, kind="analyses", raw=stage.raw)
-        node.deps.update(stage.uses_estimators)
+        node.deps.update(_analysis_estimator_deps(stage, cfg))
         for tbl in stage.uses_tables:
             if tbl in enabled_adjust_ids:
                 node.deps.add(tbl)
@@ -183,6 +193,15 @@ def _build_enabled_nodes(cfg: RunConfig, table_keys: set[str]) -> dict[str, Reso
     report_node.deps.update(s.id for s in cfg.analyses if s.enabled)
     nodes[REPORT_ID] = report_node
     return nodes
+
+
+def _analysis_estimator_deps(stage: Stage, cfg: RunConfig) -> list[str]:
+    explicit = stage.uses_estimators
+    if explicit:
+        return explicit
+    if stage.module in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS:
+        return [s.id for s in cfg.estimators if s.enabled]
+    return []
 
 
 def _resolve_needs(needs: list[str], extract_enabled: bool) -> set[str]:

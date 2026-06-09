@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from bench.config import ConfigError, OutputConfig, load_config
+from bench.pipeline import build_dag
 
 
 def test_dev_config_loads(configs_dir):
@@ -39,6 +40,10 @@ def test_output_resolve_with_suffix():
 
 
 # ── malformed configs must fail loudly (§8) ─────────────────────────────────
+def _analysis(spec, stage_id):
+    return next(a for a in spec["analyses"] if a["id"] == stage_id)
+
+
 def _mutations():
     return {
         "unknown_top_key": lambda c: c.__setitem__("bogus", 1),
@@ -51,11 +56,18 @@ def _mutations():
             c["estimators"][2].__setitem__("enabled", False),
             c["estimators"][0].__setitem__("needs", ["xgboost"]),
         ),
-        # disabled-target reference via `uses`: pred_metrics uses the now-disabled score estimator
-        "uses_disabled_estimator": lambda c: c["estimators"][0].__setitem__("enabled", False),
-        "dangling_uses_estimator": lambda c: c["analyses"][4]["uses"]["estimators"].append("ghost"),
-        "uses_estimator_string": lambda c: c["analyses"][4]["uses"].__setitem__("estimators", "score"),
-        "needs_string": lambda c: c["analyses"][4].__setitem__("needs", "score"),
+        # Explicit uses still fail on disabled/unknown ids; omitted uses defaults to enabled estimators.
+        "uses_disabled_estimator": lambda c: (
+            c["estimators"][0].__setitem__("enabled", False),
+            _analysis(c, "pred_metrics").setdefault("uses", {}).__setitem__("estimators", ["score"]),
+        ),
+        "dangling_uses_estimator": lambda c: _analysis(c, "pred_metrics").setdefault("uses", {}).__setitem__(
+            "estimators", ["ghost"]
+        ),
+        "uses_estimator_string": lambda c: _analysis(c, "pred_metrics").setdefault("uses", {}).__setitem__(
+            "estimators", "score"
+        ),
+        "needs_string": lambda c: _analysis(c, "pred_metrics").__setitem__("needs", "score"),
         "report_formats_string": lambda c: c["report"].__setitem__("formats", "html"),
         "unknown_analysis_module": lambda c: c["analyses"][0].__setitem__("module", "ratings.fake"),
         "unknown_adjust_module": lambda c: c["adjust"][0].__setitem__("module", "nope"),
@@ -95,6 +107,27 @@ def test_estimator_needs_validated(dev_spec, write_spec):
     path = write_spec(dev_spec)
     with pytest.raises(ConfigError, match="needs unknown id 'ghost'"):
         load_config(path)
+
+
+def test_estimator_consuming_analyses_default_to_all_enabled(dev_spec, write_spec):
+    stage = _analysis(dev_spec, "pred_metrics")
+    stage.pop("uses", None)
+    path = write_spec(dev_spec)
+    cfg = load_config(path)
+    dag = build_dag(cfg)
+
+    enabled_estimators = {s.id for s in cfg.estimators if s.enabled}
+    assert dag.nodes["pred_metrics"].deps >= enabled_estimators
+
+
+def test_empty_analysis_estimator_uses_defaults_to_all_enabled(dev_spec, write_spec):
+    _analysis(dev_spec, "pred_metrics")["uses"] = {"estimators": []}
+    path = write_spec(dev_spec)
+    cfg = load_config(path)
+    dag = build_dag(cfg)
+
+    enabled_estimators = {s.id for s in cfg.estimators if s.enabled}
+    assert dag.nodes["pred_metrics"].deps >= enabled_estimators
 
 
 def test_cycle_detected_at_load(dev_spec, write_spec):

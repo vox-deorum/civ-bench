@@ -19,6 +19,7 @@ import pandas as pd
 
 from ..catalog import Catalog
 from ..config import RunConfig
+from ..config import schema as S
 from .errors import AnalysisError
 
 
@@ -174,7 +175,12 @@ class AnalysisContext:
         return pd.read_csv(path, usecols=usecols)
 
     def uses_estimators(self) -> list[str]:
-        return list((self.stage_raw.get("uses") or {}).get("estimators") or [])
+        explicit = list((self.stage_raw.get("uses") or {}).get("estimators") or [])
+        if explicit:
+            return explicit
+        if self.stage_raw.get("module") in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS:
+            return [s.id for s in self.config.estimators if s.enabled]
+        return []
 
     def uses_tables(self) -> list[str]:
         return list((self.stage_raw.get("uses") or {}).get("tables") or [])

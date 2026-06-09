@@ -250,7 +250,7 @@ def test_bad_n_bins_rejected(dev_spec, write_spec):
 
 # ── prediction ──────────────────────────────────────────────────────────────────
 def test_prediction_evaluate(env):
-    r = env("prediction.evaluate", {"metrics": ["roc_auc", "brier_score"]}, {"estimators": ["est"]})
+    r = env("prediction.evaluate", {"metrics": ["roc_auc", "brier_score"]})
     assert not r.empty and "metrics" in r.table_paths
     tbl = pd.read_csv(r.table_paths["metrics"])
     assert {"model", "roc_auc", "brier_score", "n_rows"} <= set(tbl.columns)
@@ -274,12 +274,12 @@ def test_prediction_compare_needs_two(env):
 
 # ── calibration ──────────────────────────────────────────────────────────────────
 def test_calibration_reliability(env):
-    r = env("calibration.reliability", {"n_bins": 5}, {"estimators": ["est"]})
+    r = env("calibration.reliability", {"n_bins": 5})
     assert "reliability" in r.table_paths and "ece" in r.table_paths
 
 
 def test_calibration_loss_by_progress(env):
-    r = env("calibration.loss_by_progress", {"n_bins": 4}, {"estimators": ["est"]})
+    r = env("calibration.loss_by_progress", {"n_bins": 4})
     assert "loss_by_progress" in r.table_paths
 
 
@@ -309,8 +309,10 @@ def test_performance_strength_panel(env):
 
 
 def test_performance_turn_predicted(env):
-    r = env("performance.turn_predicted", {"by": "player_type"}, {"estimators": ["est"]})
+    r = env("performance.turn_predicted", {"by": "player_type"})
     assert "by_identity" in r.table_paths and "over_progress" in r.table_paths
+    tbl = pd.read_csv(r.table_paths["by_identity"])
+    assert "model" in tbl.columns
 
 
 # ── exploratory ──────────────────────────────────────────────────────────────────

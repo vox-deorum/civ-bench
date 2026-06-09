@@ -53,7 +53,8 @@ class CalibrationReliability(Analysis):
         estimators = ctx.uses_estimators()
         if not estimators:
             raise AnalysisError(
-                f"calibration.reliability '{self.stage_id}': requires uses.estimators."
+                f"calibration.reliability '{self.stage_id}': requires at least one "
+                f"enabled estimator or uses.estimators override."
             )
         n_bins = int(self.params.get("n_bins", 10))
 

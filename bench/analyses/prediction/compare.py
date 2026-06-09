@@ -27,7 +27,7 @@ class PredictionCompare(Analysis):
         estimators = ctx.uses_estimators()
         if len(estimators) < 2:
             raise AnalysisError(
-                f"prediction.compare '{self.stage_id}': needs >= 2 uses.estimators "
+                f"prediction.compare '{self.stage_id}': needs >= 2 resolved estimators "
                 f"to compare (got {estimators})."
             )
 
