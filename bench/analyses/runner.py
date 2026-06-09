@@ -65,6 +65,7 @@ def run_analysis(
         stage_id=stage_id,
         stage_raw=stage_raw,
         out_dir=out_dir,
+        default_all_estimators=cls.default_all_estimators,
     )
 
     analysis = cls(stage_id, stage_raw.get("params"))

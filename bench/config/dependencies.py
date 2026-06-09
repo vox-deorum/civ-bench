@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import schema as S
+from .analysis_metadata import analysis_defaults_to_all_estimators
 from .errors import ConfigError
 from .models import RunConfig, Stage
 
@@ -52,7 +53,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_estimator_ref(stage, est, estimator_ids, enabled_ids, "analysis")
         if (
             stage.enabled
-            and stage.module in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS
+            and analysis_defaults_to_all_estimators(stage.module)
             and not stage.uses_estimators
             and not any(s.enabled for s in cfg.estimators)
         ):
@@ -199,7 +200,7 @@ def _analysis_estimator_deps(stage: Stage, cfg: RunConfig) -> list[str]:
     explicit = stage.uses_estimators
     if explicit:
         return explicit
-    if stage.module in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS:
+    if analysis_defaults_to_all_estimators(stage.module):
         return [s.id for s in cfg.estimators if s.enabled]
     return []
 

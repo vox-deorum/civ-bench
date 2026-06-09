@@ -28,7 +28,7 @@ Each stage has a stable **`id`**. Edges come from three places, all resolved int
 
 A cycle, an unknown `id`, or a reference to a disabled stage is a validation error. Disabled stages (`"enabled": false`) are dropped from the graph, and anything that *needed* one is a validation error. There is **no graceful degradation for missing dependencies**: if a stage needs `torch` / `xgboost` / `optuna` / R and it isn't installed, the run **fails loud** — install everything first (see [AGENTS.md](../AGENTS.md#dependencies) and `scripts/install`).
 
-The dependency graph is resolved once at config-load time and then reused by the dry-run printer and runner. Validation and execution therefore share the same interpretation of `needs`, `uses.estimators`, and `uses.tables`. For analysis modules that consume estimator predictions, omitted or empty `uses.estimators` means "all enabled estimators"; listing ids is an explicit subset override.
+The dependency graph is resolved once at config-load time and then reused by the dry-run printer and runner. Validation and execution therefore share the same interpretation of `needs`, `uses.estimators`, and `uses.tables`. For analysis modules that opt in to the all-estimator default, omitted or empty `uses.estimators` means "all enabled estimators"; listing ids is an explicit subset override.
 
 **Determinism.** The top-level `seed` is threaded into every stage that uses randomness (CV splits, torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byte-stable outputs.
 
@@ -391,7 +391,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 }
 ```
 
-- `uses.estimators` is how estimator-consuming modules get win-probabilities. For `prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, `performance.turn_predicted`, and `performance.permutation_importance`, omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
+- `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). The `ratings.*` family consumes the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator).
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
 
@@ -444,7 +444,7 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 
 #### `prediction.*` — score one or more estimators
 
-`prediction.*` is the *scoring* family: it answers "how good is the win predictor". By default these modules score every enabled estimator; add `uses.estimators` only when a stage should compare a subset. Calibration views live in their own family (`calibration.*`, below).
+`prediction.*` is the *scoring* family: it answers "how good is the win predictor". The implemented prediction modules opt in to scoring every enabled estimator by default; add `uses.estimators` only when a stage should compare a subset. Calibration views live in their own family (`calibration.*`, below).
 
 ```jsonc
 // prediction.evaluate — metrics table across estimators (ROC-AUC/Brier/log-loss/bal-acc)
@@ -479,7 +479,7 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 
 #### `calibration.*` — calibration of estimators
 
-Two single-purpose views of how well estimator probabilities are calibrated — one across the **probability** axis, one across the **game-progress** axis. Both consume every enabled estimator by default; add `uses.estimators` only to narrow the comparison.
+Two single-purpose views of how well estimator probabilities are calibrated — one across the **probability** axis, one across the **game-progress** axis. Both implemented calibration views opt in to consuming every enabled estimator by default; add `uses.estimators` only to narrow the comparison.
 
 ```jsonc
 // calibration.reliability — reliability diagram: observed win-rate vs predicted P(win) per bin
@@ -569,7 +569,7 @@ The report walks each produced `AnalysisResult` (tables + figures + summary). Wi
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
 2. **No unknown keys** at any level — typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `group_by`, extract `outputs`, report `formats`, etc.) must be JSON arrays of strings; a bare string is an error.
-3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. Omitted or empty `uses.estimators` on estimator-consuming analyses resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
+3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
 6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust` `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves in `catalogs.models` `prediction_models`.

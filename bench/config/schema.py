@@ -158,20 +158,6 @@ ANALYSIS_MODULES = {
 }
 RATINGS_PREFIX = "ratings."
 
-# Analysis modules that consume estimator predictions and should use every
-# enabled estimator when uses.estimators is omitted.
-ANALYSIS_DEFAULT_ALL_ESTIMATORS = {
-    "prediction.evaluate",
-    "prediction.compare",
-    "prediction.winner_trajectories",
-    "prediction.elo_comparison",
-    "prediction.context_slicing",
-    "calibration.reliability",
-    "calibration.loss_by_progress",
-    "performance.turn_predicted",
-    "performance.permutation_importance",
-}
-
 # ── per-module analysis param schemas (§6, validated in loader._validate_analysis) ──
 # Allowed param keys per core module. Cross-cutting `group_by`/`bootstrap` (ratings)
 # are validated separately. A module absent here accepts no params (empty schema).

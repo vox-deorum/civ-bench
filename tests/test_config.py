@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from bench.config import ConfigError, OutputConfig, load_config
+from bench.config.analysis_metadata import analysis_defaults_to_all_estimators
 from bench.pipeline import build_dag
 
 
@@ -128,6 +129,12 @@ def test_empty_analysis_estimator_uses_defaults_to_all_enabled(dev_spec, write_s
 
     enabled_estimators = {s.id for s in cfg.estimators if s.enabled}
     assert dag.nodes["pred_metrics"].deps >= enabled_estimators
+
+
+def test_analysis_default_all_estimator_metadata_lives_on_modules():
+    assert analysis_defaults_to_all_estimators("prediction.evaluate")
+    assert analysis_defaults_to_all_estimators("calibration.loss_by_progress")
+    assert not analysis_defaults_to_all_estimators("performance.score_ratio")
 
 
 def test_cycle_detected_at_load(dev_spec, write_spec):

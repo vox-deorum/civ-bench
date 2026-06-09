@@ -21,6 +21,7 @@ _DEFAULT_METRICS = ["brier_score", "log_loss"]
 
 class CalibrationLossByProgress(Analysis):
     module = "calibration.loss_by_progress"
+    default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         estimators = ctx.uses_estimators()

@@ -29,6 +29,7 @@ def _strength_table_id(ctx: AnalysisContext) -> str:
 
 class PerformanceTurnPredicted(Analysis):
     module = "performance.turn_predicted"
+    default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         estimators = ctx.uses_estimators()

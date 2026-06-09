@@ -22,6 +22,7 @@ from .metrics import filtered_prediction_rows
 
 class PredictionCompare(Analysis):
     module = "prediction.compare"
+    default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         estimators = ctx.uses_estimators()

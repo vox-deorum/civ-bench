@@ -19,7 +19,6 @@ import pandas as pd
 
 from ..catalog import Catalog
 from ..config import RunConfig
-from ..config import schema as S
 from .errors import AnalysisError
 
 
@@ -53,6 +52,7 @@ class Analysis(ABC):
     """
 
     module: str = ""
+    default_all_estimators: bool = False
 
     def __init__(self, stage_id: str, params: Optional[dict] = None) -> None:
         self.stage_id = stage_id
@@ -82,6 +82,7 @@ class AnalysisContext:
     stage_id: str
     stage_raw: dict
     out_dir: Path
+    default_all_estimators: bool = False
 
     @property
     def params(self) -> dict:
@@ -178,7 +179,7 @@ class AnalysisContext:
         explicit = list((self.stage_raw.get("uses") or {}).get("estimators") or [])
         if explicit:
             return explicit
-        if self.stage_raw.get("module") in S.ANALYSIS_DEFAULT_ALL_ESTIMATORS:
+        if self.default_all_estimators:
             return [s.id for s in self.config.estimators if s.enabled]
         return []
 

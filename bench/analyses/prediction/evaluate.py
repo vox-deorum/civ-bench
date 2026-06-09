@@ -23,6 +23,7 @@ from .metrics import (
 
 class PredictionEvaluate(Analysis):
     module = "prediction.evaluate"
+    default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         estimators = ctx.uses_estimators()
