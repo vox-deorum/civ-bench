@@ -283,6 +283,21 @@ def test_calibration_loss_by_progress(env):
     assert "loss_by_progress" in r.table_paths
 
 
+def test_calibration_loss_by_progress_keeps_turn_progress_one(env):
+    pred_path = env.cfg.estimators[0].raw["save_predictions"]
+    pred = pd.read_csv(pred_path)
+    final = pred.copy()
+    final["turn"] = final["max_turn"]
+    final["turn_progress"] = 1.0
+    pd.concat([pred, final], ignore_index=True).to_csv(pred_path, index=False)
+
+    r = env("calibration.loss_by_progress", {"n_bins": 4})
+    tbl = pd.read_csv(r.table_paths["loss_by_progress"])
+    last = tbl[tbl["turn_progress_bin"] == "0.75-1.00"]
+    assert not last.empty
+    assert int(last["n_samples"].sum()) == 144
+
+
 def test_calibration_civ_effects(env):
     r = env("calibration.civ_effects", {}, {"tables": ["strength"]})
     assert not r.empty and "civ_effects" in r.table_paths
@@ -405,6 +420,35 @@ def test_bootstrap_resample_and_readjust(env):
                           env.catalog)
     assert "adjusted_strength" in readj.columns
     assert np.isfinite(readj["adjusted_strength"]).all()
+
+
+def test_bootstrap_explicit_baseline_uses_fixed_reference(env):
+    from bench.analyses.ratings import bootstrap as boot
+    from bench.stats.transforms import inv_logit
+
+    panel = pd.DataFrame([{
+        "experiment": "ctrl",
+        "game_id": "g1",
+        "player_id": 0,
+        "player_type": "TestLLM-Simple",
+        "model": "TestLLM",
+        "civilization": "Rome",
+        "seed": 1,
+        "controlled": True,
+        "logit_strength": 2.0,
+        "relative_strength": 0.25,
+        "adjusted_strength": 0.25,
+        "adjust_method": "cell",
+    }])
+
+    out = boot.readjust(
+        panel,
+        {"civ_adjust": "none", "baseline_experiment": "vp-self"},
+        env.catalog,
+        fixed_cell_baseline={(1, 0): 1.5},
+    )
+
+    assert out.loc[0, "adjusted_strength"] == pytest.approx(inv_logit(0.5))
 
 
 def test_ratings_with_bootstrap_player_type(env, monkeypatch):

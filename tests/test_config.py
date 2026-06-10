@@ -40,6 +40,12 @@ def test_output_resolve_with_suffix():
     assert out.resolve("/abs/elsewhere.csv") == "/abs/elsewhere.csv"
 
 
+def test_output_resolve_with_trailing_slash_root():
+    out = OutputConfig(root="reports/", suffix="-dev")
+    assert out.resolved_root == "reports-dev"
+    assert out.resolve("reports/adjust/p.csv") == "reports-dev/adjust/p.csv"
+
+
 # ── malformed configs must fail loudly (§8) ─────────────────────────────────
 def _analysis(spec, stage_id):
     return next(a for a in spec["analyses"] if a["id"] == stage_id)
@@ -85,6 +91,12 @@ def _mutations():
         "turn_range_min_gt_max": lambda c: c["filters"].__setitem__("late_game", {"turn_range": [300, 100]}),
         # stage 1: data.extract scalar + data.tables path types fail loud
         "extract_enabled_not_bool": lambda c: c["data"]["extract"].__setitem__("enabled", "yes"),
+        "estimator_enabled_not_bool": lambda c: c["estimators"][0].__setitem__("enabled", "nope"),
+        "adjust_enabled_not_bool": lambda c: c["adjust"][0].__setitem__("enabled", "nope"),
+        "analysis_enabled_not_bool": lambda c: c["analyses"][0].__setitem__("enabled", "nope"),
+        "report_include_disabled_not_bool": lambda c: c["report"].__setitem__("include_disabled", "nope"),
+        "report_sections_not_list": lambda c: c["report"].__setitem__("sections", "bt_main"),
+        "report_out_dir_not_string": lambda c: c["report"].__setitem__("out_dir", 7),
         "extract_max_dbs_zero": lambda c: c["data"]["extract"].__setitem__("max_dbs", 0),
         "tables_path_not_string": lambda c: c["data"]["tables"].__setitem__("turns", 7),
         "stage_filter_widens_global": lambda c: (
@@ -108,6 +120,35 @@ def test_relative_to_none_and_null_load(dev_spec, write_spec, value):
     dev_spec["adjust"][0]["params"]["relative_to"] = value
     cfg = load_config(write_spec(dev_spec))
     assert cfg is not None
+
+
+def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spec):
+    dev_spec["data"]["extract"]["enabled"] = "FALSE"
+    dev_spec["estimators"][0]["enabled"] = "TrUe"
+    dev_spec["adjust"][0]["enabled"] = "TRUE"
+    dev_spec["adjust"][0]["params"]["enforce_winner"] = "false"
+    dev_spec["analyses"][0]["enabled"] = "tRuE"
+    dev_spec["analyses"][0]["params"]["weighted"] = "FALSE"
+    dev_spec["analyses"][0]["params"]["only_llm"] = "True"
+    dev_spec["analyses"][0]["params"]["bootstrap"] = {
+        "n": 2,
+        "stratified": "FALSE",
+    }
+    dev_spec["data"]["filter"] = {"only_llm": "FaLsE"}
+    dev_spec["report"]["include_disabled"] = "FALSE"
+
+    cfg = load_config(write_spec(dev_spec))
+
+    assert cfg.extract_enabled is False
+    assert cfg.estimators[0].enabled is True
+    assert cfg.adjust[0].enabled is True
+    assert cfg.adjust[0].raw["params"]["enforce_winner"] is False
+    assert cfg.analyses[0].enabled is True
+    assert cfg.analyses[0].raw["params"]["weighted"] is False
+    assert cfg.analyses[0].raw["params"]["only_llm"] is True
+    assert cfg.analyses[0].raw["params"]["bootstrap"]["stratified"] is False
+    assert cfg.data["filter"]["only_llm"] is False
+    assert cfg.report["include_disabled"] is False
 
 
 def test_estimator_needs_validated(dev_spec, write_spec):

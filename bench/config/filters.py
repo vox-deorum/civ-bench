@@ -12,6 +12,7 @@ from typing import Any
 
 from . import schema as S
 from .errors import ConfigError
+from .validation import coerce_bool
 
 
 def _check_filter_keys(obj: dict, where: str) -> None:
@@ -26,6 +27,9 @@ def validate_filter_object(obj: dict, where: str) -> None:
     if not isinstance(obj, dict):
         raise ConfigError(f"{where}: expected an object, got {type(obj).__name__}.")
     _check_filter_keys(obj, where)
+
+    if "only_llm" in obj:
+        obj["only_llm"] = coerce_bool(obj["only_llm"], f"{where}.only_llm")
 
     tr = obj.get("turn_range")
     if tr is not None:

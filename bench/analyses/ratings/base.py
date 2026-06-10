@@ -337,18 +337,56 @@ class RatingsAnalysis(Analysis):
         stratified = bool(bootstrap.get("stratified", True))
         table_id = self._strength_table_id(ctx)
         adjust_params = self._strength_params(ctx, table_id)
+        fixed_cell_baseline = self._fixed_explicit_cell_baseline(ctx, table_id, panel, adjust_params)
         calculator = self._frozen_calculator(panel, reference)
         point = ratings[[identity_col, "elo"]].copy()
         summary = boot.run_bootstrap(
             panel, point, calculator, group_col=identity_col, n=n, seed=ctx.config.seed,
             ci_level=ci_level, stratified=stratified, adjust_params=adjust_params,
             catalog=ctx.catalog, refit_strength=True,
+            fixed_cell_baseline=fixed_cell_baseline,
         )
         merged = ratings.merge(
             summary[[identity_col, "ci_lower", "ci_upper", "boot_se_elo", "n_valid"]],
             on=identity_col, how="left",
         )
         return merged, summary
+
+    def _fixed_explicit_cell_baseline(self, ctx, table_id: str, panel: pd.DataFrame, adjust_params: dict):
+        """Fixed explicit start-cell baseline for bootstrap readjustment.
+
+        Explicit baselines are designated reference grids and are held constant
+        across bootstrap replicates. Read the persisted adjust trail so rating
+        filters such as only_llm do not accidentally remove the reference rows.
+        """
+        if adjust_params.get("baseline_experiment") is None:
+            return None
+        has_cell_rows = (
+            "adjust_method" in panel.columns
+            and (panel["adjust_method"] == "cell").any()
+        )
+        path = ctx.adjust_dir(table_id) / "cell_baseline.csv"
+        if not path.exists():
+            if has_cell_rows:
+                raise AnalysisError(
+                    f"ratings '{self.stage_id}': bootstrap needs the explicit "
+                    f"cell baseline trail at '{path}'. Re-run the adjust stage."
+                )
+            return {}
+        cb = pd.read_csv(path)
+        explicit = cb[cb.get("pathway") == "explicit"] if "pathway" in cb.columns else pd.DataFrame()
+        if explicit.empty:
+            if has_cell_rows:
+                raise AnalysisError(
+                    f"ratings '{self.stage_id}': bootstrap found no explicit "
+                    f"baseline rows in '{path}'. Re-run adjust with a valid "
+                    f"baseline_experiment."
+                )
+            return {}
+        return {
+            (int(row.seed), int(row.player_id)): float(row.cell_baseline)
+            for row in explicit.itertuples(index=False)
+        }
 
     # ── summary + plot ───────────────────────────────────────────────────────────
     def _summary(self, ratings: pd.DataFrame, identity_col: str) -> str:

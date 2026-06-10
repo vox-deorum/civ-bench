@@ -40,6 +40,7 @@ class CalibrationLossByProgress(Analysis):
             df = filtered_prediction_rows(ctx, ctx.load_predictions(est)).copy()
             df["bin"] = pd.cut(df["turn_progress"], bins=edges, labels=labels,
                                right=False, include_lowest=True)
+            df.loc[df["turn_progress"] >= edges[-1], "bin"] = labels[-1]
             for label, grp in df.groupby("bin", observed=True):
                 if len(grp) < 2:
                     continue

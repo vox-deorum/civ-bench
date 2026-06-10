@@ -8,10 +8,12 @@ collects per-identity Elo. Percentile CIs + bootstrap SE are reported around the
 full-sample point estimate.
 
 Concretely (benchmark.md / stage3 §5.1): rows the panel marks ``adjust_method ==
-"civ"`` get the civ-OLS refit per replicate; ``"cell"`` rows get their per-cell
-Vanilla baseline recomputed from the resampled panel (falling back to civ/relative
-if the resampled cell has no Vanilla evidence); ``"relative"`` rows pass through.
-A quantity therefore moves the CIs exactly when it is recomputed from the sample.
+"civ"`` get the civ-OLS refit per replicate; implicit ``"cell"`` rows get their
+per-cell Vanilla baseline recomputed from the resampled panel (falling back to
+civ/relative if the resampled cell has no Vanilla evidence); explicit
+``baseline_experiment`` rows use the fixed reference map from ``cell_baseline.csv``.
+``"relative"`` rows pass through. A quantity therefore moves the CIs exactly when
+it is recomputed from the sample.
 """
 
 from __future__ import annotations
@@ -75,7 +77,12 @@ def _vanilla_mask(df: pd.DataFrame, catalog: Catalog) -> pd.Series:
     return mask
 
 
-def readjust(panel: pd.DataFrame, params: dict, catalog: Catalog) -> pd.DataFrame:
+def readjust(
+    panel: pd.DataFrame,
+    params: dict,
+    catalog: Catalog,
+    fixed_cell_baseline: Optional[dict] = None,
+) -> pd.DataFrame:
     """Recompute ``adjusted_strength`` on a resampled panel, refitting the
     re-estimated quantities (civ OLS / cell baseline) from the resample.
 
@@ -94,15 +101,15 @@ def readjust(panel: pd.DataFrame, params: dict, catalog: Catalog) -> pd.DataFram
     if civ_adjust == "ols_logit":
         civ_effects = _fit_civ_effects(df, catalog)
 
-    # Per-cell Vanilla baseline from the resample (logit-scale mean of Vanilla rows).
-    vmask = _vanilla_mask(df, catalog) & df.get("controlled", pd.Series(False, index=df.index))
-    vdf = df[vmask]
     if baseline_experiment is not None:
-        cell_base = vdf[vdf["experiment"] == baseline_experiment].groupby(
-            ["seed", "player_id"]
-        )["logit_strength"].mean().to_dict()
+        # Explicit baseline: fixed designated reference panel, not re-estimated
+        # from each bootstrap sample.
+        cell_base = fixed_cell_baseline or {}
         cell_key = lambda r: (r["seed"], r["player_id"])  # noqa: E731
     else:
+        # Implicit baseline: re-estimated per experiment from the resampled panel.
+        vmask = _vanilla_mask(df, catalog) & df.get("controlled", pd.Series(False, index=df.index))
+        vdf = df[vmask]
         cell_base = vdf.groupby(["experiment", "seed", "player_id"])["logit_strength"].mean().to_dict()
         cell_key = lambda r: (r["experiment"], r["seed"], r["player_id"])  # noqa: E731
 
@@ -159,6 +166,7 @@ def run_bootstrap(
     adjust_params: Optional[dict] = None,
     catalog: Optional[Catalog] = None,
     refit_strength: bool = True,
+    fixed_cell_baseline: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Run ``n`` replicates and return the point estimate joined with percentile CIs.
 
@@ -172,7 +180,10 @@ def run_bootstrap(
         rng = np.random.default_rng(np.random.SeedSequence([seed, rep]))
         resampled = resample_games(panel, rng, stratified=stratified)
         if refit_strength and adjust_params is not None and catalog is not None:
-            resampled = readjust(resampled, adjust_params, catalog)
+            resampled = readjust(
+                resampled, adjust_params, catalog,
+                fixed_cell_baseline=fixed_cell_baseline,
+            )
         try:
             rating = calculator(resampled)
         except Exception:

@@ -32,7 +32,7 @@ class OutputConfig:
 
     @property
     def resolved_root(self) -> str:
-        return f"{self.root}{self.suffix}"
+        return f"{self.root.rstrip('/')}{self.suffix}"
 
     def resolve(self, path: Optional[str]) -> Optional[str]:
         """Re-root an authored save-path under the resolved output root.

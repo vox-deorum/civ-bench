@@ -21,6 +21,7 @@ from .filters import (
     validate_filter_object,
 )
 from .models import OutputConfig, RunConfig, Stage
+from .validation import coerce_bool
 from . import schema as S
 
 
@@ -114,7 +115,7 @@ def _validate_data(data: dict, presets: dict) -> dict:
                 )
         for key in ("enabled", "prune_missing", "force_rebuild"):
             if key in extract:
-                _check_type(extract[key], (bool,), f"data.extract.{key}")
+                extract[key] = coerce_bool(extract[key], f"data.extract.{key}")
         if "runs_dir" in extract:
             _check_type(extract["runs_dir"], (str,), "data.extract.runs_dir")
         max_dbs = extract.get("max_dbs")
@@ -171,6 +172,10 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
         if has_tune:
             _require_mapping(entry["tune"], f"{where}.tune")
             _check_keys(entry["tune"], S.TUNE_KEYS, f"{where}.tune")
+            if "enabled" in entry["tune"]:
+                entry["tune"]["enabled"] = coerce_bool(
+                    entry["tune"]["enabled"], f"{where}.tune.enabled"
+                )
     else:  # pretrained
         if has_train or has_tune:
             raise ConfigError(
@@ -193,6 +198,9 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
         for key in ("include", "exclude"):
             if key in features:
                 _check_string_list(features[key], f"{where}.features.{key}")
+
+    if "enabled" in entry:
+        entry["enabled"] = coerce_bool(entry["enabled"], f"{where}.enabled")
 
     return Stage(id=sid, kind="estimators", enabled=entry.get("enabled", True), raw=entry)
 
@@ -236,7 +244,9 @@ def _validate_strength_params(params: dict, where: str) -> None:
                 f"{where}.params.turn_progress_min: must be numeric in [0, 1]."
             )
     if "enforce_winner" in params:
-        _check_type(params["enforce_winner"], (bool,), f"{where}.params.enforce_winner")
+        params["enforce_winner"] = coerce_bool(
+            params["enforce_winner"], f"{where}.params.enforce_winner"
+        )
     # `baseline_experiment` (§5.1): null ⇒ implicit per-experiment path; a value names the
     # explicit baseline source. Experiment ids can be inferred from extracted data, so this is
     # only type-checked here rather than validated against the legacy experiments catalog.
@@ -279,6 +289,9 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
             _require_mapping(params, f"{where}.params")
             _validate_strength_params(params, where)
 
+    if "enabled" in entry:
+        entry["enabled"] = coerce_bool(entry["enabled"], f"{where}.enabled")
+
     return Stage(id=sid, kind="adjust", enabled=entry.get("enabled", True), raw=entry)
 
 
@@ -319,6 +332,9 @@ def _validate_analysis(
             _validate_group_by(params.get("group_by"), groupings, where)
             _validate_bootstrap(params.get("bootstrap"), where)
 
+    if "enabled" in entry:
+        entry["enabled"] = coerce_bool(entry["enabled"], f"{where}.enabled")
+
     return Stage(id=sid, kind="analyses", enabled=entry.get("enabled", True), raw=entry)
 
 
@@ -354,7 +370,7 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
             raise ConfigError(f"{where}.params.ci_level: must be a number in (0, 1).")
     for key in ("weighted", "only_llm", "validate_ols", "by_strategist"):
         if key in params:
-            _check_type(params[key], (bool,), f"{where}.params.{key}")
+            params[key] = coerce_bool(params[key], f"{where}.params.{key}")
 
 
 def _validate_group_by(group_by: Any, groupings: dict, where: str) -> None:
@@ -381,6 +397,16 @@ def _validate_bootstrap(bootstrap: Any, where: str) -> None:
         raise ConfigError(
             f"{where}.params.bootstrap.n: required integer >= 1 (got {n!r})."
         )
+    if "stratified" in bootstrap:
+        bootstrap["stratified"] = coerce_bool(
+            bootstrap["stratified"], f"{where}.params.bootstrap.stratified"
+        )
+    if "ci_level" in bootstrap:
+        v = bootstrap["ci_level"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1:
+            raise ConfigError(
+                f"{where}.params.bootstrap.ci_level: must be a number in (0, 1)."
+            )
 
 
 # ── groupings (§3.2) ────────────────────────────────────────────────────────
@@ -418,6 +444,19 @@ def _validate_groupings(groupings: dict) -> None:
 def _validate_report(report: dict) -> None:
     _require_mapping(report, "report")
     _check_keys(report, S.REPORT_KEYS, "report")
+    if "template" in report:
+        _check_type(report["template"], (str,), "report.template")
+    if "out_dir" in report:
+        _check_type(report["out_dir"], (str,), "report.out_dir")
+    if "title" in report and report["title"] is not None:
+        _check_type(report["title"], (str,), "report.title")
+    if "include_disabled" in report:
+        report["include_disabled"] = coerce_bool(
+            report["include_disabled"], "report.include_disabled"
+        )
+    sections = report.get("sections")
+    if sections is not None:
+        _check_string_list(sections, "report.sections")
     formats = report.get("formats")
     if formats is not None:
         formats = _check_string_list(formats, "report.formats")
