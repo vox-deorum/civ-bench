@@ -451,6 +451,45 @@ def test_bootstrap_explicit_baseline_uses_fixed_reference(env):
     assert out.loc[0, "adjusted_strength"] == pytest.approx(inv_logit(0.5))
 
 
+def test_bootstrap_implicit_baseline_is_fixed_not_recomputed(env):
+    # Option C: implicit cell baselines are held fixed (keyed experiment, seed,
+    # player_id) from the persisted trail, not recomputed from the resample.
+    from bench.analyses.ratings import bootstrap as boot
+    from bench.stats.transforms import inv_logit
+
+    panel = pd.DataFrame([{
+        "experiment": "ctrl",
+        "game_id": "g1",
+        "player_id": 0,
+        "player_type": "TestLLM-Simple",
+        "model": "TestLLM",
+        "civilization": "Rome",
+        "seed": 1,
+        "controlled": True,
+        "logit_strength": 2.0,
+        "relative_strength": 0.25,
+        "adjusted_strength": 0.25,
+        "adjust_method": "cell",
+    }])
+
+    out = boot.readjust(
+        panel,
+        {"civ_adjust": "none", "baseline_experiment": None},
+        env.catalog,
+        fixed_cell_baseline={("ctrl", 1, 0): 1.5},
+    )
+    assert out.loc[0, "adjusted_strength"] == pytest.approx(inv_logit(0.5))
+
+    # A cell with no fixed baseline falls back (civ:none ⇒ relative), never crashes.
+    out2 = boot.readjust(
+        panel,
+        {"civ_adjust": "none", "baseline_experiment": None},
+        env.catalog,
+        fixed_cell_baseline={},
+    )
+    assert out2.loc[0, "adjusted_strength"] == pytest.approx(0.25)
+
+
 def test_ratings_with_bootstrap_player_type(env, monkeypatch):
     monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", _fake_bt)
     r = env("ratings.bradley_terry",

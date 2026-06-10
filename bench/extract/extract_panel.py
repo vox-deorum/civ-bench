@@ -67,7 +67,7 @@ PANEL_FIELD_MAPPINGS = {
     "player_type": None,  # Orthodox identity composed at extract (§3.3)
     "model": None,  # Raw model-{id} metadata the player_type was composed from
     "strategist": None,  # Raw strategist-{id} metadata
-    "config_slot": None,  # Controlled-seating config slot (player_id if uncontrolled)
+    "config_slot": None,  # Controlled-seating config slot (-1 for non-treatment seats)
     "civilization": None,  # Player's civilization name
     "score": None,
     "score_rank": None,
@@ -481,7 +481,10 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None):
             row["player_type"] = identity.get("player_type")
             row["model"] = identity.get("model", "N/A")
             row["strategist"] = identity.get("strategist", "N/A")
-            row["config_slot"] = identity.get("config_slot", player_id)
+            # Non-treatment seats get the -1 sentinel, never the player_id — the
+            # identity always carries config_slot, so this default only guards a
+            # truly identity-less row (and must still not resurrect seat=player_id).
+            row["config_slot"] = identity.get("config_slot", -1)
 
             player_data = extract_player_data(
                 cursor, player_id, player_info_cache, highest_score,

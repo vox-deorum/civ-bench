@@ -45,9 +45,14 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
         for est in stage.uses_estimators:
             _check_estimator_ref(stage, est, estimator_ids, enabled_ids, "adjust")
 
-    has_strength_table = any(
-        s.enabled and s.raw.get("module") == "strength" for s in cfg.adjust
-    )
+    # Strength tables are named by the *id* of any enabled strength-module
+    # adjust stage (the id doubles as the table name — benchmark.md §5), not
+    # the literal string "strength". A ratings analysis must reference one of
+    # these ids via uses.tables.
+    strength_table_ids = {
+        s.id for s in cfg.adjust
+        if s.enabled and s.raw.get("module") == "strength"
+    }
     for stage in cfg.analyses:
         for est in stage.uses_estimators:
             _check_estimator_ref(stage, est, estimator_ids, enabled_ids, "analysis")
@@ -64,7 +69,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
         for tbl in stage.uses_tables:
             _check_table_ref(stage, tbl, table_keys, adjust_ids, enabled_adjust_ids)
         if stage.enabled and stage.module and stage.module.startswith(S.RATINGS_PREFIX):
-            _check_ratings_strength_ref(stage, has_strength_table)
+            _check_ratings_strength_ref(stage, strength_table_ids)
 
     nodes = _build_enabled_nodes(cfg, table_keys)
     order = _topo_sort(nodes)
@@ -133,16 +138,17 @@ def _check_table_ref(
     )
 
 
-def _check_ratings_strength_ref(stage: Stage, has_strength_table: bool) -> None:
-    if "strength" not in stage.uses_tables:
-        raise ConfigError(
-            f"ratings analysis '{stage.id}' must reference a strength table "
-            f"via uses.tables (it rates adjusted_strength, not panel_data)."
-        )
-    if not has_strength_table:
+def _check_ratings_strength_ref(stage: Stage, strength_table_ids: set[str]) -> None:
+    if not strength_table_ids:
         raise ConfigError(
             f"ratings analysis '{stage.id}' requires an enabled adjust "
-            f"'strength' stage to produce the strength table; none found."
+            f"strength-module stage to produce a strength table; none found."
+        )
+    if not strength_table_ids.intersection(stage.uses_tables):
+        raise ConfigError(
+            f"ratings analysis '{stage.id}' must reference a strength table "
+            f"via uses.tables (one of {sorted(strength_table_ids)}); it rates "
+            f"adjusted_strength, not panel_data."
         )
 
 

@@ -8,12 +8,16 @@ collects per-identity Elo. Percentile CIs + bootstrap SE are reported around the
 full-sample point estimate.
 
 Concretely (benchmark.md / stage3 §5.1): rows the panel marks ``adjust_method ==
-"civ"`` get the civ-OLS refit per replicate; implicit ``"cell"`` rows get their
-per-cell Vanilla baseline recomputed from the resampled panel (falling back to
-civ/relative if the resampled cell has no Vanilla evidence); explicit
-``baseline_experiment`` rows use the fixed reference map from ``cell_baseline.csv``.
-``"relative"`` rows pass through. A quantity therefore moves the CIs exactly when
-it is recomputed from the sample.
+"civ"`` get the civ-OLS refit per replicate (it is re-estimated from the sample).
+``"cell"`` rows — both implicit and explicit ``baseline_experiment`` — use the
+**fixed** per-cell baseline persisted in ``cell_baseline.csv`` by the adjust stage
+(computed once from the full, unfiltered panel). The cell baseline is held
+constant across replicates rather than recomputed from each resample: recomputing
+it from the rating-filtered resample loses the Vanilla evidence the point estimate
+used (``only_llm``/``min_games`` drop reference rows) and silently diverges from
+the point estimate. ``"relative"`` rows pass through. Holding it fixed keeps every
+replicate scaled exactly like the point estimate, at the cost of not propagating
+the (often small-``n``) baseline's own noise into the CIs.
 """
 
 from __future__ import annotations
@@ -70,25 +74,21 @@ def resample_games(panel: pd.DataFrame, rng: np.random.Generator, stratified: bo
     return out.sort_values("game_id", kind="stable").reset_index(drop=True)
 
 
-def _vanilla_mask(df: pd.DataFrame, catalog: Catalog) -> pd.Series:
-    mask = df["player_type"] == catalog.vanilla_label
-    if "model" in df.columns:
-        mask = mask & df["model"].apply(catalog.is_vanilla_model)
-    return mask
-
-
 def readjust(
     panel: pd.DataFrame,
     params: dict,
     catalog: Catalog,
     fixed_cell_baseline: Optional[dict] = None,
 ) -> pd.DataFrame:
-    """Recompute ``adjusted_strength`` on a resampled panel, refitting the
-    re-estimated quantities (civ OLS / cell baseline) from the resample.
+    """Recompute ``adjusted_strength`` on a resampled panel.
 
-    Requires the panel's persisted ``logit_strength`` + ``adjust_method`` columns.
-    Rows whose original method cannot be reproduced on the resample fall back to the
-    next available path (cell → civ → relative).
+    The civ OLS is re-fit from the resample (it is re-estimated from the sample);
+    the per-cell baseline is **fixed** — taken from ``fixed_cell_baseline`` (the
+    adjust stage's persisted full-panel trail), not recomputed from the resample —
+    so replicates stay scaled exactly like the point estimate (option C). Requires
+    the panel's persisted ``logit_strength`` + ``adjust_method`` columns. A
+    ``"cell"`` row whose fixed baseline is absent falls back to civ/relative.
+    Raises if a requested civ-OLS refit fails (the caller skips the replicate).
     """
     df = panel.copy()
     if "adjust_method" not in df.columns or "logit_strength" not in df.columns:
@@ -101,16 +101,12 @@ def readjust(
     if civ_adjust == "ols_logit":
         civ_effects = _fit_civ_effects(df, catalog)
 
+    # Fixed per-cell baseline (option C): explicit keys on (seed, player_id),
+    # implicit on (experiment, seed, player_id). Held constant across replicates.
+    cell_base = fixed_cell_baseline or {}
     if baseline_experiment is not None:
-        # Explicit baseline: fixed designated reference panel, not re-estimated
-        # from each bootstrap sample.
-        cell_base = fixed_cell_baseline or {}
         cell_key = lambda r: (r["seed"], r["player_id"])  # noqa: E731
     else:
-        # Implicit baseline: re-estimated per experiment from the resampled panel.
-        vmask = _vanilla_mask(df, catalog) & df.get("controlled", pd.Series(False, index=df.index))
-        vdf = df[vmask]
-        cell_base = vdf.groupby(["experiment", "seed", "player_id"])["logit_strength"].mean().to_dict()
         cell_key = lambda r: (r["experiment"], r["seed"], r["player_id"])  # noqa: E731
 
     adjusted = np.empty(len(df))
@@ -128,6 +124,14 @@ def readjust(
         else:
             adjusted[pos] = row.get("relative_strength", inv_logit(logit[pos]))
     df["adjusted_strength"] = adjusted
+
+    # Re-apply the strength stage's optional final re-normalization so replicates
+    # are scaled identically to the point estimate (was previously skipped).
+    if params.get("post_cell_normalize") == "relative_to_leader" and "controlled" in df.columns:
+        mask = df["controlled"].astype(bool)
+        if mask.any():
+            gmax = df.loc[mask].groupby("game_id")["adjusted_strength"].transform("max")
+            df.loc[mask, "adjusted_strength"] = df.loc[mask, "adjusted_strength"] / gmax
     return df
 
 
@@ -139,10 +143,9 @@ def _fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> dict[str, float]:
         "logit_strength ~ C(civilization, Sum) "
         f'+ C(player_type, Treatment(reference="{vanilla}"))'
     )
-    try:
-        fit = ols(formula, data=df).fit()
-    except Exception:
-        return {}
+    # Let a fit failure propagate: run_bootstrap drops the whole replicate rather
+    # than silently applying zero civ adjustment (which would bias the CIs).
+    fit = ols(formula, data=df).fit()
     effects: dict[str, float] = {}
     for var in fit.params.index:
         if "C(civilization, Sum)[S." in var:
@@ -173,18 +176,19 @@ def run_bootstrap(
     ``calculator(resampled_panel) -> rating_df`` performs the rating fit (margin
     frozen by the caller for BT). ``refit_strength`` re-runs the strength
     adjustment per replicate (recommended); set False to bootstrap the frozen
-    ``adjusted_strength`` directly.
+    ``adjusted_strength`` directly. A replicate whose readjust or rating fit
+    raises is dropped (not counted toward the CI).
     """
     rows = []
     for rep in range(n):
         rng = np.random.default_rng(np.random.SeedSequence([seed, rep]))
         resampled = resample_games(panel, rng, stratified=stratified)
-        if refit_strength and adjust_params is not None and catalog is not None:
-            resampled = readjust(
-                resampled, adjust_params, catalog,
-                fixed_cell_baseline=fixed_cell_baseline,
-            )
         try:
+            if refit_strength and adjust_params is not None and catalog is not None:
+                resampled = readjust(
+                    resampled, adjust_params, catalog,
+                    fixed_cell_baseline=fixed_cell_baseline,
+                )
             rating = calculator(resampled)
         except Exception:
             continue

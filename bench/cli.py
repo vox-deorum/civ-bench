@@ -174,7 +174,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
         kinds = ", ".join(sorted({k for _, k in skipped}))
         print(
             f"civ-bench: ran the implemented stages; skipped {len(skipped)} "
-            f"not-yet-implemented stage(s) [{kinds}] (report→stage 5). "
+            f"unimplemented stage(s) [{kinds}]. "
             f"Use --dry-run to inspect the full DAG, or --only on a stage to run just that.",
             file=sys.stderr,
         )

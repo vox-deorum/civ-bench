@@ -31,6 +31,13 @@ def validate_filter_object(obj: dict, where: str) -> None:
     if "only_llm" in obj:
         obj["only_llm"] = coerce_bool(obj["only_llm"], f"{where}.only_llm")
 
+    if "min_games" in obj and obj["min_games"] is not None:
+        mg = obj["min_games"]
+        if isinstance(mg, bool) or not isinstance(mg, int) or mg < 0:
+            raise ConfigError(
+                f"{where}.min_games: expected a non-negative integer, got {mg!r}."
+            )
+
     tr = obj.get("turn_range")
     if tr is not None:
         if not isinstance(tr, (list, tuple)) or len(tr) != 2:
@@ -38,6 +45,13 @@ def validate_filter_object(obj: dict, where: str) -> None:
                 f"{where}.turn_range: expected [min, max] (either bound nullable)."
             )
         lo, hi = tr
+        for label, bound in (("min", lo), ("max", hi)):
+            # Reject non-numeric bounds here so the comparison below can't raise a
+            # raw TypeError (bools are ints in Python but not valid turn bounds).
+            if bound is not None and (isinstance(bound, bool) or not isinstance(bound, (int, float))):
+                raise ConfigError(
+                    f"{where}.turn_range: {label} bound must be a number or null, got {bound!r}."
+                )
         if lo is not None and hi is not None and lo > hi:
             raise ConfigError(
                 f"{where}.turn_range: min ({lo}) must be <= max ({hi})."

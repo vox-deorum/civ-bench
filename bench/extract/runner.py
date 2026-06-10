@@ -77,19 +77,26 @@ def run_extract(
     db_files = sorted(db_files)
     print(f"Found {len(db_files)} database files with {len(available_game_ids)} unique games")
 
+    selected_db_files = db_files
+    capped = max_dbs is not None and max_dbs < len(db_files)
+    if max_dbs is not None:
+        selected_db_files = db_files[: max_dbs]
+        print(f"Limiting extraction to {len(selected_db_files)} database(s) via max_dbs={max_dbs}")
+
     # Skip-if-newer: every output exists and is newer than every source DB.
-    if not force_rebuild and not prune_only and outputs_are_fresh(list(output_paths.values()), db_files):
+    # The mtime check can only attest "outputs written after the DBs", not
+    # "outputs cover every DB", so it is unsafe whenever max_dbs caps the run
+    # below the available DB count — those outputs are a subset and skipping
+    # would strand the remaining games permanently. Only trust the skip when
+    # the run would process every discovered DB.
+    if not force_rebuild and not prune_only and not capped \
+            and outputs_are_fresh(list(output_paths.values()), db_files):
         return ExtractResult(
             skipped=True,
             reason="all outputs exist and are newer than the source DBs "
                    "(pass force_rebuild to override).",
             output_paths=output_paths,
         )
-
-    selected_db_files = db_files
-    if max_dbs is not None:
-        selected_db_files = db_files[: max_dbs]
-        print(f"Limiting extraction to {len(selected_db_files)} database(s) via max_dbs={max_dbs}")
 
     catalog = catalog or Catalog.from_run_config(cfg)
 

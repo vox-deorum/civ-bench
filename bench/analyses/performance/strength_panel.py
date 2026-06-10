@@ -3,7 +3,10 @@
 Consumes the adjust stage's ``strength`` table and reports, per identity (``by``,
 default ``player_type``), the mean of ``metric`` (default ``adjusted_strength``)
 with its per-identity ``n_games`` and a nonparametric bootstrap CI, flagging
-identities below ``min_games_preliminary`` (default 5) as **preliminary**.
+identities below ``min_games_preliminary`` as **preliminary**. When that param is
+omitted, the threshold is inherited from the enabled ``ratings.*`` stages'
+``min_games`` (the rating-cutoff this run actually uses; max across them when
+several exist), falling back to 5 when no ratings stage supplies one.
 
 This module also **owns** the controlled-design cell-coverage report: it renders
 ``cell_coverage.csv`` (which ``(seed, player_id)`` cells of the entirety each
@@ -23,6 +26,22 @@ from ..errors import AnalysisError
 from .turn_predicted import _strength_table_id
 
 
+def _ratings_min_games_default(ctx: AnalysisContext) -> int:
+    """Inherit the preliminary threshold from the run's ratings cutoff.
+
+    Use the max ``min_games`` across enabled ``ratings.*`` analyses (the cutoff
+    this run actually rates against); fall back to 5 when none supplies a
+    positive cutoff, so the preliminary flag always carries a meaningful floor.
+    """
+    cutoffs = [
+        int((s.raw.get("params") or {}).get("min_games", 0) or 0)
+        for s in ctx.config.analyses
+        if s.enabled and s.module and s.module.startswith("ratings.")
+    ]
+    best = max(cutoffs) if cutoffs else 0
+    return best if best > 0 else 5
+
+
 def _bootstrap_ci(values: np.ndarray, n: int, ci_level: float, rng: np.random.Generator):
     if len(values) < 2 or n < 1:
         return float("nan"), float("nan")
@@ -38,7 +57,9 @@ class PerformanceStrengthPanel(Analysis):
         table_id = _strength_table_id(ctx)
         metric = self.params.get("metric", "adjusted_strength")
         by = self.params.get("by", "player_type")
-        min_games_prelim = int(self.params.get("min_games_preliminary", 5))
+        min_games_prelim = int(self.params.get(
+            "min_games_preliminary", _ratings_min_games_default(ctx)
+        ))
         boot_n = int(self.params.get("bootstrap_n", 1000))
         ci_level = float(self.params.get("ci_level", 0.95))
 

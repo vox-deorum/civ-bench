@@ -89,6 +89,8 @@ def _mutations():
         "duplicate_ids": lambda c: c["analyses"][1].__setitem__("id", "bt_main"),
         "reserved_id": lambda c: c["analyses"][0].__setitem__("id", "extract"),
         "turn_range_min_gt_max": lambda c: c["filters"].__setitem__("late_game", {"turn_range": [300, 100]}),
+        "turn_range_bad_type": lambda c: c["filters"].__setitem__("late_game", {"turn_range": [100, "x"]}),
+        "min_games_bad_type": lambda c: c["filters"].__setitem__("late_game", {"min_games": "lots"}),
         # stage 1: data.extract scalar + data.tables path types fail loud
         "extract_enabled_not_bool": lambda c: c["data"]["extract"].__setitem__("enabled", "yes"),
         "estimator_enabled_not_bool": lambda c: c["estimators"][0].__setitem__("enabled", "nope"),
@@ -193,6 +195,35 @@ def test_cycle_detected_at_load(dev_spec, write_spec):
     dev_spec["analyses"][2]["needs"] = ["bt_main"]
     path = write_spec(dev_spec)
     with pytest.raises(ConfigError, match="cycle"):
+        load_config(path)
+
+
+def test_strength_table_id_need_not_be_literally_strength(dev_spec, write_spec):
+    # The strength stage id doubles as the table name (benchmark.md §5); a
+    # ratings analysis must reference *that id*, not the literal "strength".
+    strength = next(s for s in dev_spec["adjust"] if s.get("module") == "strength")
+    old_id = strength["id"]
+    strength["id"] = "strength_main"
+    for a in dev_spec["analyses"]:
+        tables = a.get("uses", {}).get("tables")
+        if tables and old_id in tables:
+            a["uses"]["tables"] = ["strength_main" if t == old_id else t for t in tables]
+
+    cfg = load_config(write_spec(dev_spec))
+    dag = build_dag(cfg)
+    assert "strength_main" in dag.nodes
+    # every enabled ratings analysis now depends on the renamed strength stage
+    for a in cfg.analyses:
+        if a.enabled and (a.module or "").startswith("ratings."):
+            assert "strength_main" in dag.nodes[a.id].deps
+
+
+def test_ratings_referencing_wrong_table_id_still_fails(dev_spec, write_spec):
+    # Renaming the strength stage without updating the ratings reference must fail.
+    strength = next(s for s in dev_spec["adjust"] if s.get("module") == "strength")
+    strength["id"] = "strength_main"
+    path = write_spec(dev_spec)
+    with pytest.raises(ConfigError):
         load_config(path)
 
 

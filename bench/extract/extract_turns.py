@@ -131,7 +131,10 @@ def _fetch_flavor_events(cursor, major_players):
         grand_strategy = row[2 + len(FLAVOR_COLUMNS)]
         rationale = row[3 + len(FLAVOR_COLUMNS)]
         changes_json = row[4 + len(FLAVOR_COLUMNS)]
-        is_changed = 0 if changes_json in ("[]", '["Rationale"]') else 1
+        # An actual flavor-number change. NULL/empty rows are not changes (and
+        # are not decisions either) — keeping them out of is_changed ensures
+        # is_changed=1 always implies is_decision=1 (a change is a decision).
+        is_changed = 0 if changes_json in (None, "", "[]", '["Rationale"]') else 1
 
         key = (player_id, turn)
         existing = latest.get(key)

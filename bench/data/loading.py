@@ -41,8 +41,10 @@ def _apply_player_type_mapping(
     catalog: Optional[Catalog] = None,
     skip_mapping: bool = False,
 ) -> pd.DataFrame:
-    # Orthodox path: player_type already composed at extract — keep it as-is.
-    if "player_type" in df.columns and not skip_mapping:
+    # Orthodox path: player_type already composed at extract is authoritative and
+    # is never overwritten — skip_mapping only governs whether the *fallback* seat
+    # map is applied when player_type is absent (it must not clobber a real one).
+    if "player_type" in df.columns:
         return df
 
     df = df.copy()
@@ -140,7 +142,12 @@ def apply_filter_spec(
     if excluded:
         out = out[~out[cond_col].isin(_as_list(excluded))]
 
-    if catalog is not None and resolved.get("only_llm"):
+    if resolved.get("only_llm"):
+        if catalog is None:
+            raise ValueError(
+                "filter only_llm=true requires a catalog to identify the non-LLM "
+                "baseline seats/experiments, but none was provided."
+            )
         if "player_type" in out.columns:
             baselines = {catalog.vanilla_label, catalog.null_label}
             out = out[~out["player_type"].isin(baselines)]

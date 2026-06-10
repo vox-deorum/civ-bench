@@ -17,7 +17,7 @@
 
 ## Config wiring (`report`)
 
-`template` (registry name under `bench/reports/`; default `default`), `out_dir` (authored under the base output root and re-rooted by `output.suffix` §2.1; the run writes `<root><suffix>/<name>/`), `formats` (`md`/`html` implemented; `pdf` is schema-reserved and errors loudly at render time), `sections` (null = every enabled analysis in canonical-family order, members in dependency order; or an ordered id list, whose order — including across families — is preserved), `title` (null = derive from `name`), `include_disabled:false`.
+`template` (registry name under `bench/reports/`; default `default`), `out_dir` (authored under the base output root and re-rooted by `output.suffix` §2.1; the run writes `<root><suffix>/<name>/`), `formats` (`md`/`html` implemented; `pdf` is schema-reserved and errors loudly at render time), `sections` (null = every enabled analysis in canonical-family order, members in dependency order; or an ordered id list), `title` (null = derive from `name`), `include_disabled:false`. **Section ordering is grouped by family:** the `default` template buckets sections into the five family chapters (families ordered by first appearance in the resolved list), and an explicit `sections` list is honored **within** each family block — it does *not* interleave a section between two other families' chapters (a list like `[pred_a, explore_x, pred_b]` renders `pred_a, pred_b` under Prediction, then `explore_x` under Exploratory). A repeated id is kept once (warned).
 
 ## Done
 
@@ -27,4 +27,6 @@
 
 - ✅ The report contains a section for every enabled core analysis, grouped into families (members in dependency order).
 - ✅ `report` re-render (`civ-bench report --config …`) reproduces the document **byte-identically** from existing artifacts (deterministic: no timestamps).
-- ✅ Section ordering: `sections:null` ⇒ canonical family order; an explicit `sections` list ⇒ authored order. Missing manifest / unknown section id / `pdf` format / unknown template all fail loud.
+- ✅ Section ordering: `sections:null` ⇒ canonical family order; an explicit `sections` list ⇒ authored order **within each family chapter** (families ordered by first appearance; cross-family interleaving is not preserved — sections are regrouped into their family block). Missing manifest / unknown section id / `pdf` format / unknown template all fail loud; a duplicate section id renders once.
+- ✅ Anchors are namespaced + de-duplicated (`family-*` / `section-*`), so a family title and a section id that slug to the same string no longer collide; the markdown emits explicit `<a id>` anchors that the TOC links target.
+- ✅ Markdown tables escape `|` in cell values and render NaN as empty (matching the HTML `na_rep=""`), and `assets/` is rebuilt from scratch each render so a removed artifact leaves no orphan in the self-contained tree.

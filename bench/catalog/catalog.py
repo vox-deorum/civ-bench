@@ -234,6 +234,14 @@ class Catalog:
         if not normalized:
             return "N/A"
         lowered = normalized.lower()
+        # Exact alias match wins outright, so a short alias (e.g. "minimax")
+        # can never shadow a longer model spelling that contains it
+        # ("minimax-m2.7") when both are registered.
+        for candidate, model_id in self._model_alias_candidates:
+            if candidate == lowered:
+                return model_id
+        # Otherwise the most specific (longest) substring alias wins;
+        # _model_alias_candidates is sorted longest-first at build time.
         for candidate, model_id in self._model_alias_candidates:
             if candidate and candidate in lowered:
                 return model_id
@@ -258,6 +266,10 @@ class Catalog:
             for candidate in [model["id"], *model.get("aliases", [])]:
                 if candidate:
                     out.append((candidate.lower(), model["id"]))
+        # Sort longest-first so substring matching in canonicalize_model_name
+        # prefers the most specific alias (a short alias never shadows a longer
+        # spelling that contains it). Ties keep config order for determinism.
+        out.sort(key=lambda pair: len(pair[0]), reverse=True)
         return out
 
     def get_variant_config(self, name: Optional[str]) -> Optional[dict]:

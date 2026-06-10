@@ -337,7 +337,7 @@ class RatingsAnalysis(Analysis):
         stratified = bool(bootstrap.get("stratified", True))
         table_id = self._strength_table_id(ctx)
         adjust_params = self._strength_params(ctx, table_id)
-        fixed_cell_baseline = self._fixed_explicit_cell_baseline(ctx, table_id, panel, adjust_params)
+        fixed_cell_baseline = self._fixed_cell_baseline(ctx, table_id, panel, adjust_params)
         calculator = self._frozen_calculator(panel, reference)
         point = ratings[[identity_col, "elo"]].copy()
         summary = boot.run_bootstrap(
@@ -352,15 +352,19 @@ class RatingsAnalysis(Analysis):
         )
         return merged, summary
 
-    def _fixed_explicit_cell_baseline(self, ctx, table_id: str, panel: pd.DataFrame, adjust_params: dict):
-        """Fixed explicit start-cell baseline for bootstrap readjustment.
+    def _fixed_cell_baseline(self, ctx, table_id: str, panel: pd.DataFrame, adjust_params: dict):
+        """Fixed per-cell baseline for bootstrap readjustment (option C).
 
-        Explicit baselines are designated reference grids and are held constant
-        across bootstrap replicates. Read the persisted adjust trail so rating
-        filters such as only_llm do not accidentally remove the reference rows.
+        Both pathways hold the per-cell baseline constant across replicates,
+        reading it from the adjust stage's persisted ``cell_baseline.csv`` trail
+        (computed once from the full, unfiltered panel) rather than recomputing
+        it from each rating-filtered resample — so the replicate baseline always
+        matches the point estimate and rating filters (only_llm/min_games) cannot
+        drop the reference rows. Explicit baselines key on ``(seed, player_id)``;
+        implicit baselines key on ``(experiment, seed, player_id)``.
         """
-        if adjust_params.get("baseline_experiment") is None:
-            return None
+        explicit = adjust_params.get("baseline_experiment") is not None
+        pathway = "explicit" if explicit else "implicit"
         has_cell_rows = (
             "adjust_method" in panel.columns
             and (panel["adjust_method"] == "cell").any()
@@ -369,23 +373,27 @@ class RatingsAnalysis(Analysis):
         if not path.exists():
             if has_cell_rows:
                 raise AnalysisError(
-                    f"ratings '{self.stage_id}': bootstrap needs the explicit "
-                    f"cell baseline trail at '{path}'. Re-run the adjust stage."
+                    f"ratings '{self.stage_id}': bootstrap needs the cell "
+                    f"baseline trail at '{path}'. Re-run the adjust stage."
                 )
             return {}
         cb = pd.read_csv(path)
-        explicit = cb[cb.get("pathway") == "explicit"] if "pathway" in cb.columns else pd.DataFrame()
-        if explicit.empty:
+        rows = cb[cb.get("pathway") == pathway] if "pathway" in cb.columns else pd.DataFrame()
+        if rows.empty:
             if has_cell_rows:
                 raise AnalysisError(
-                    f"ratings '{self.stage_id}': bootstrap found no explicit "
-                    f"baseline rows in '{path}'. Re-run adjust with a valid "
-                    f"baseline_experiment."
+                    f"ratings '{self.stage_id}': bootstrap found no {pathway} "
+                    f"baseline rows in '{path}'. Re-run the adjust stage."
                 )
             return {}
+        if explicit:
+            return {
+                (int(row.seed), int(row.player_id)): float(row.cell_baseline)
+                for row in rows.itertuples(index=False)
+            }
         return {
-            (int(row.seed), int(row.player_id)): float(row.cell_baseline)
-            for row in explicit.itertuples(index=False)
+            (str(row.experiment), int(row.seed), int(row.player_id)): float(row.cell_baseline)
+            for row in rows.itertuples(index=False)
         }
 
     # ── summary + plot ───────────────────────────────────────────────────────────
