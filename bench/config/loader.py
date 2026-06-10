@@ -195,8 +195,11 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
     if features is not None:
         _require_mapping(features, f"{where}.features")
         _check_keys(features, S.FEATURES_KEYS, f"{where}.features")
+        # `include: null` (and `exclude: null`) mean "unset" — fall back to the
+        # model's coded DEFAULT_FEATURES (benchmark.md §4.5). Only a present,
+        # non-null value must be a string list.
         for key in ("include", "exclude"):
-            if key in features:
+            if features.get(key) is not None:
                 _check_string_list(features[key], f"{where}.features.{key}")
 
     if "enabled" in entry:

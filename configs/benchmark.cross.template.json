@@ -1,0 +1,234 @@
+{
+  "name": "staff-standard-2026-cross",
+  "description": "TEMPLATE (tracked example — copy to a local, gitignored configs/benchmark*.json to run). The CROSS variant of benchmark.template.json: estimators train on the NON-LLM seats only (train.train_subset:\"non_llm\" = Vanilla/Null) and predict on everyone, the held-out generalization setup. output.suffix:\"-cross\" redirects the whole run to reports-cross/ so it coexists with the normal run on disk. Everything else (adjust + analyses + report) is identical to benchmark.template.json — the cross variant is config, not code (benchmark.md §2.1, §4.4).",
+  "seed": 42,
+
+  "output": {
+    "root": "reports",
+    "suffix": "-cross"
+  },
+
+  "filters": {
+    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5 },
+    "llm_only": { "only_llm": true, "min_games": 5 },
+    "late_game": { "turn_range": [200, null] }
+  },
+
+  "groupings": {
+    "strategy": {
+      "kind": "argmax",
+      "columns": ["domination_ratio", "culture_ratio", "diplomatic_ratio", "science_ratio"],
+      "labels": ["Domination", "Culture", "Diplomatic", "Science"]
+    }
+  },
+
+  "data": {
+    "extract": {
+      "enabled": true,
+      "runs_dir": "runs/",
+      "outputs": ["turns", "panel", "games", "tokens"],
+      "max_dbs": null,
+      "prune_missing": false,
+      "force_rebuild": false
+    },
+    "tables": {
+      "turns": "runs/turn_data.csv",
+      "panel": "runs/panel_data.csv",
+      "games": "runs/game_data.csv",
+      "tokens": "runs/model_token_usage.csv"
+    },
+    "filter": "staff_recent"
+  },
+
+  "estimators": [
+    {
+      "id": "score",
+      "model": "score",
+      "fit": "train",
+      "predict": "in_sample",
+      "enabled": true,
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/score/predictions.csv",
+      "train": {
+        "train_subset": "non_llm",
+        "resample": "none",
+        "save_model": "reports/estimators/score/"
+      }
+    },
+    {
+      "id": "attention",
+      "model": "attention_mlp",
+      "fit": "train",
+      "predict": "in_sample",
+      "enabled": true,
+      "features": {
+        "include": null,
+        "exclude": ["civ_*"]
+      },
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/attention/predictions.csv",
+      "tune": {
+        "enabled": true,
+        "engine": "optuna",
+        "search": "hyperparameters",
+        "n_trials": 200,
+        "objective": "brier_score",
+        "n_splits": 5,
+        "resample": "none",
+        "n_jobs": 1,
+        "storage": "reports/estimators/attention/tuning.db",
+        "save_params": "reports/estimators/attention/best_params.json",
+        "load_params": null
+      },
+      "train": {
+        "train_subset": "non_llm",
+        "resample": "none",
+        "save_model": "reports/estimators/attention/"
+      }
+    },
+    {
+      "id": "xgboost_cv",
+      "model": "xgboost",
+      "fit": "train",
+      "predict": "cross_val",
+      "enabled": true,
+      "save_predictions": "reports/estimators/xgboost_cv/oof_predictions.csv",
+      "train": {
+        "train_subset": "non_llm",
+        "resample": "none",
+        "n_splits": 5,
+        "save_importance": true
+      }
+    }
+  ],
+
+  "adjust": [
+    {
+      "id": "strength",
+      "module": "strength",
+      "enabled": true,
+      "uses": { "estimators": ["attention"] },
+      "save": "reports/adjust/player_strength_panel.csv",
+      "params": {
+        "turn_progress_min": 0.2,
+        "weight": "turn_progress",
+        "relative_to": "game_leader",
+        "enforce_winner": true,
+        "civ_adjust": "ols_logit",
+        "block": "auto",
+        "post_cell_normalize": "none"
+      }
+    }
+  ],
+
+  "analyses": [
+    {
+      "id": "bt_main",
+      "module": "ratings.bradley_terry",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+    },
+    {
+      "id": "bt_strategy",
+      "module": "ratings.bradley_terry",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "group_by": ["player_type", "strategy"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+    },
+    {
+      "id": "pl_main",
+      "module": "ratings.plackett_luce",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+    },
+    {
+      "id": "pl_strategy",
+      "module": "ratings.plackett_luce",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "group_by": ["player_type", "strategy"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+    },
+    {
+      "id": "matchups",
+      "module": "ratings.matchups",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "mode": "mean", "validate_ols": true }
+    },
+    {
+      "id": "pred_metrics",
+      "module": "prediction.evaluate",
+      "enabled": true,
+      "params": { "metrics": ["roc_auc", "brier_score", "log_loss", "balanced_accuracy"] }
+    },
+    {
+      "id": "pred_compare",
+      "module": "prediction.compare",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "cal_reliability",
+      "module": "calibration.reliability",
+      "enabled": true,
+      "params": { "n_bins": 10 }
+    },
+    {
+      "id": "cal_loss_progress",
+      "module": "calibration.loss_by_progress",
+      "enabled": true,
+      "params": { "n_bins": 20, "metrics": ["brier_score", "log_loss"] }
+    },
+    {
+      "id": "cal_civ_effects",
+      "module": "calibration.civ_effects",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
+      "id": "cal_cell_baseline",
+      "module": "calibration.cell_baseline",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
+      "id": "perf_score_ratio",
+      "module": "performance.score_ratio",
+      "enabled": true,
+      "params": { "target": "score_ratio", "predictors": ["player_type", "civilization"] }
+    },
+    {
+      "id": "perf_strength",
+      "module": "performance.strength_panel",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": { "metric": "adjusted_strength", "by": "player_type" }
+    },
+    {
+      "id": "perf_turn_predicted",
+      "module": "performance.turn_predicted",
+      "enabled": true,
+      "params": { "aggregate": "mean", "by": "player_type" }
+    },
+    {
+      "id": "explore_token_costs",
+      "module": "exploratory.model_token_costs",
+      "enabled": true,
+      "uses": { "tables": ["tokens"] },
+      "params": { "currency": "usd" }
+    }
+  ],
+
+  "report": {
+    "template": "default",
+    "out_dir": "reports/",
+    "formats": ["md", "html"],
+    "sections": null,
+    "title": null,
+    "include_disabled": false
+  }
+}

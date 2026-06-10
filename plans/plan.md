@@ -73,7 +73,7 @@ The shipped default `configs/benchmark.template.json` is the **lean core** (~10 
 
 ## Status
 
-**Stages 0–5 are built & validated** (the full load-only pipeline runs end-to-end); **stage 6 (train/tune + cross variant) is the remaining work.** The installable `bench/` package + `pyproject.toml` exist alongside the build plan ([AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), the example `configs/*.template.json`, the `scripts/install*`, and the staged [plans/](stages.md)).
+**Stages 0–6 are built & validated** — the full pipeline runs end-to-end with both load-only (`fit:"pretrained"`) and train/tune (`fit:"train"` + Optuna `tune`) estimators, plus the **cross variant** (`benchmark.cross.template.json` → `reports-cross/`). The installable `bench/` package + `pyproject.toml` exist alongside the build plan ([AGENTS.md](../AGENTS.md), [configs/benchmark.md](../configs/benchmark.md), the example `configs/*.template.json`, the `scripts/install*`, and the staged [plans/](stages.md)).
 
 **Build order — load-only first.** We bring up the pipeline using **pre-trained estimators loaded from copied model dirs** (zero training), then implement training/tuning last. The authoritative ordering lives in [stages.md](stages.md); in brief:
 
@@ -83,4 +83,4 @@ The shipped default `configs/benchmark.template.json` is the **lean core** (~10 
 3. ✅ **adjust** — the `strength` panel. ([stage3.md](stage3.md))
 4. ✅ **analyses** — the core modules. ([stage4.md](stage4.md))
 5. ✅ **report** — full pipeline end-to-end with no training; renders `md`+`html` under `<root><suffix>/<name>/`, re-rendered byte-identically by `civ-bench report`. ([stage5.md](stage5.md))
-6. **train / tune** — implement `fit:"train"`+`tune`; bring up the train-based `benchmark.template.json` and the **cross variant** (estimator trained on non-LLM seats → `reports-cross/`, configurable suffix §2.1). ([stage6.md](stage6.md))
+6. ✅ **train / tune** — `fit:"train"`+`tune` implemented (`bench/estimators/training.py` + `tuning.py`); the train-based `benchmark.template.json` and the **cross variant** (`benchmark.cross.template.json`, non-LLM training → `reports-cross/`, configurable suffix §2.1) both run. ([stage6.md](stage6.md))

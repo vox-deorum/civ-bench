@@ -15,11 +15,13 @@ from .errors import EstimatorError
 from .features import build_feature_frame, needs_variant_columns, prepare_features
 from .registry import MODEL_REGISTRY, get_model, list_models, load_model, register_model
 from .runner import EstimatorResult, run_estimator
+from .training import TrainResult, run_cross_val, run_full_train
 
 __all__ = [
     "EstimatorError",
     "EstimatorResult",
     "MODEL_REGISTRY",
+    "TrainResult",
     "build_feature_frame",
     "get_model",
     "list_models",
@@ -27,5 +29,7 @@ __all__ = [
     "needs_variant_columns",
     "prepare_features",
     "register_model",
+    "run_cross_val",
     "run_estimator",
+    "run_full_train",
 ]

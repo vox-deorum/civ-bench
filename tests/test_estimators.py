@@ -245,32 +245,229 @@ def test_predict_subset_empty_raises(turns_csv, score_model_dir, tmp_path, write
         run_estimator(cfg, cfg.estimators[0].raw)
 
 
-# ── train / tune deferred to stage 6 ─────────────────────────────────────────
-def test_fit_train_raises_not_implemented(turns_csv, score_model_dir, tmp_path, write_spec):
-    save_pred = tmp_path / "predictions.csv"
-    cfg = load_config(write_spec(_spec(turns_csv, score_model_dir, save_pred)))
-    stage_raw = {
-        "id": "x", "model": "score", "fit": "train",
-        "train": {"train_subset": "all"},
-    }
-    with pytest.raises(NotImplementedError):
-        run_estimator(cfg, stage_raw)
-
-
-def test_tune_block_raises_not_implemented(turns_csv, score_model_dir, tmp_path, write_spec):
-    save_pred = tmp_path / "predictions.csv"
-    cfg = load_config(write_spec(_spec(turns_csv, score_model_dir, save_pred)))
-    stage_raw = {
-        "id": "x", "model": "score", "fit": "pretrained",
-        "tune": {"enabled": True},
-        "pretrained": {"model_dir": str(score_model_dir)},
-    }
-    with pytest.raises(NotImplementedError):
-        run_estimator(cfg, stage_raw)
-
-
 def test_missing_model_dir_fails_loudly(turns_csv, tmp_path, write_spec):
     save_pred = tmp_path / "predictions.csv"
     cfg = load_config(write_spec(_spec(turns_csv, tmp_path / "nope", save_pred)))
     with pytest.raises(FileNotFoundError):
         run_estimator(cfg, cfg.estimators[0].raw)
+
+
+# ── train / tune (stage 6) ───────────────────────────────────────────────────
+def _train_spec(turns_csv, save_predictions, *, model="score", predict="in_sample",
+                predict_subset="all", train=None, tune=None, params=None):
+    estimator = {
+        "id": model, "model": model, "fit": "train", "predict": predict,
+        "enabled": True, "predict_subset": predict_subset,
+        "save_predictions": str(save_predictions),
+        "train": train if train is not None else {"train_subset": "all", "resample": "none"},
+    }
+    if tune is not None:
+        estimator["tune"] = tune
+    if params is not None:
+        estimator["params"] = params
+    return {
+        "name": "test-train", "seed": 42,
+        "output": {"root": "reports", "suffix": ""},
+        "data": {
+            "extract": {"enabled": False},
+            "tables": {
+                "turns": str(turns_csv),
+                "panel": "runs/panel_data.csv",
+                "games": "runs/game_data.csv",
+                "tokens": "runs/model_token_usage.csv",
+            },
+        },
+        "estimators": [estimator],
+        "analyses": [{
+            "id": "pred_metrics", "module": "prediction.evaluate",
+            "enabled": True, "uses": {"estimators": [model]},
+            "params": {"metrics": ["roc_auc"]},
+        }],
+        "report": {"template": "default", "out_dir": "reports/", "formats": ["md"]},
+    }
+
+
+def test_train_in_sample_writes_and_saves_model(turns_csv, tmp_path, write_spec):
+    save_pred = tmp_path / "predictions.csv"
+    save_model = tmp_path / "score_model_out"
+    spec = _train_spec(
+        turns_csv, save_pred,
+        train={"train_subset": "all", "resample": "none", "save_model": str(save_model)},
+        params={"exponent": 3.0},
+    )
+    cfg = load_config(write_spec(spec))
+    result = run_estimator(cfg, cfg.estimators[0].raw)
+
+    out = pd.read_csv(save_pred)
+    assert list(out.columns) == [
+        "experiment", "game_id", "player_id", "civilization",
+        "turn", "max_turn", "is_winner", "predicted_win_probability", "turn_progress",
+    ]
+    # A fitted model dir was saved and is reloadable.
+    assert (save_model / "metadata.json").exists()
+    assert result.model_dir == str(save_model)
+    reloaded = load_model(save_model)
+    assert isinstance(reloaded, ScorePredictor)
+    assert reloaded.exponent == 3.0
+
+
+def test_train_score_reproduces_pretrained_inference(turns_csv, tmp_path, write_spec):
+    """Stage-6 verification (miniature): a fresh in-sample train of the deterministic
+    score model reproduces a pretrained load of the same model within tolerance."""
+    # Pretrained reference at exponent 3.0.
+    ref_model = ScorePredictor(exponent=3.0)
+    ref_model.selected_features_ = ["score_ratio"]
+    ref_dir = tmp_path / "ref_score"
+    ref_model.save(str(ref_dir))
+    ref_pred = tmp_path / "ref_pred.csv"
+    cfg_ref = load_config(write_spec(_spec(turns_csv, ref_dir, ref_pred)))
+    run_estimator(cfg_ref, cfg_ref.estimators[0].raw)
+    ref = pd.read_csv(ref_pred)["predicted_win_probability"].to_numpy()
+
+    # Fresh in-sample train at the same exponent.
+    train_pred = tmp_path / "train_pred.csv"
+    cfg_train = load_config(write_spec(
+        _train_spec(turns_csv, train_pred, params={"exponent": 3.0})
+    ))
+    run_estimator(cfg_train, cfg_train.estimators[0].raw)
+    got = pd.read_csv(train_pred)["predicted_win_probability"].to_numpy()
+
+    assert np.allclose(got, ref, atol=1e-12)
+
+
+def test_train_is_byte_stable(turns_csv, tmp_path, write_spec):
+    """Re-running an identical train config is byte-stable (determinism via seed)."""
+    a = tmp_path / "a.csv"
+    b = tmp_path / "b.csv"
+    cfg_a = load_config(write_spec(_train_spec(turns_csv, a, params={"exponent": 2.5})))
+    run_estimator(cfg_a, cfg_a.estimators[0].raw)
+    cfg_b = load_config(write_spec(_train_spec(turns_csv, b, params={"exponent": 2.5})))
+    run_estimator(cfg_b, cfg_b.estimators[0].raw)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_train_subset_narrows_training(turns_csv, tmp_path, write_spec):
+    """train_subset trains on a subset but predict_subset='all' predicts everyone."""
+    save_pred = tmp_path / "predictions.csv"
+    spec = _train_spec(
+        turns_csv, save_pred,
+        train={"train_subset": {"experiments": ["exp-vanilla"]}, "resample": "none"},
+        predict_subset="all",
+    )
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    out = pd.read_csv(save_pred)
+    # Predictions cover BOTH experiments even though training used only one.
+    assert set(out["experiment"]) == {"exp-llm", "exp-vanilla"}
+
+
+def test_train_subset_empty_raises(turns_csv, tmp_path, write_spec):
+    spec = _train_spec(
+        turns_csv, tmp_path / "p.csv",
+        train={"train_subset": {"experiments": ["no-such-exp"]}, "resample": "none"},
+    )
+    cfg = load_config(write_spec(spec))
+    with pytest.raises(EstimatorError):
+        run_estimator(cfg, cfg.estimators[0].raw)
+
+
+def test_cross_val_oof_covers_all_rows_and_importance(tmp_path, write_spec):
+    # A larger fixture so each of the 3 folds has training games + held-out games.
+    big_csv = tmp_path / "big_turns.csv"
+    _make_turns_df(n_games=6, n_players=4, n_turns=6).to_csv(big_csv, index=False)
+
+    save_pred = tmp_path / "oof.csv"
+    spec = _train_spec(
+        turns_csv=big_csv, save_predictions=save_pred,
+        model="xgboost", predict="cross_val",
+        train={"train_subset": "all", "resample": "none", "n_splits": 3,
+               "save_importance": True},
+        params={"calibrate": False, "n_estimators": 5, "max_depth": 2},
+    )
+    cfg = load_config(write_spec(spec))
+    result = run_estimator(cfg, cfg.estimators[0].raw)
+
+    out = pd.read_csv(save_pred)
+    full = build_feature_frame(str(big_csv), use_variants=False, filter_zero_score=False)
+    # Every row appears exactly once in the OOF predictions (held-out per game).
+    assert len(out) == len(full)
+    assert out["predicted_win_probability"].between(0.0, 1.0).all()
+    # Feature importance was aggregated and written next to the predictions.
+    assert result.importance_path is not None
+    imp = pd.read_csv(result.importance_path)
+    assert "feature" in imp.columns and len(imp) > 0
+
+
+def test_tune_load_params_skips_search(turns_csv, tmp_path, write_spec):
+    """load_params reuses a saved best_params.json instead of running a search."""
+    best_params = tmp_path / "best_params.json"
+    best_params.write_text(json.dumps({"model": "score", "best_params": {"exponent": 2.0}}))
+
+    save_pred = tmp_path / "tuned.csv"
+    spec = _train_spec(
+        turns_csv, save_pred,
+        tune={"enabled": True, "engine": "optuna", "search": "hyperparameters",
+              "load_params": str(best_params)},
+    )
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    got = pd.read_csv(save_pred)["predicted_win_probability"].to_numpy()
+
+    # Reference: pretrained score at exponent 2.0 (what load_params should yield).
+    ref_model = ScorePredictor(exponent=2.0)
+    ref_model.selected_features_ = ["score_ratio"]
+    ref_dir = tmp_path / "ref2"
+    ref_model.save(str(ref_dir))
+    ref_pred = tmp_path / "ref2.csv"
+    cfg_ref = load_config(write_spec(_spec(turns_csv, ref_dir, ref_pred)))
+    run_estimator(cfg_ref, cfg_ref.estimators[0].raw)
+    ref = pd.read_csv(ref_pred)["predicted_win_probability"].to_numpy()
+
+    assert np.allclose(got, ref, atol=1e-12)
+
+
+def test_tune_search_runs_and_saves_params(tmp_path, write_spec):
+    """A fresh Optuna search runs, writes best_params.json, and feeds training."""
+    big_csv = tmp_path / "big_turns.csv"
+    _make_turns_df(n_games=6, n_players=4, n_turns=6).to_csv(big_csv, index=False)
+
+    best_params = tmp_path / "best_params.json"
+    save_pred = tmp_path / "tuned.csv"
+    spec = _train_spec(
+        turns_csv=big_csv, save_predictions=save_pred,
+        tune={"enabled": True, "engine": "optuna", "search": "hyperparameters",
+              "n_trials": 4, "objective": "brier_score", "n_splits": 3,
+              "save_params": str(best_params), "load_params": None},
+    )
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+
+    assert best_params.exists()
+    payload = json.loads(best_params.read_text())
+    assert payload["model"] == "score" and "exponent" in payload["best_params"]
+    out = pd.read_csv(save_pred)
+    assert out["predicted_win_probability"].between(0.0, 1.0).all()
+
+
+def test_explicit_params_override_load_params(turns_csv, tmp_path, write_spec):
+    """Hyperparameter precedence: explicit params beat load_params (§4.3)."""
+    best_params = tmp_path / "best_params.json"
+    best_params.write_text(json.dumps({"best_params": {"exponent": 2.0}}))
+    save_pred = tmp_path / "p.csv"
+    spec = _train_spec(
+        turns_csv, save_pred,
+        tune={"enabled": True, "search": "hyperparameters", "load_params": str(best_params)},
+        params={"exponent": 5.0},
+    )
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+
+    save_model = tmp_path / "m"
+    spec2 = _train_spec(
+        turns_csv, tmp_path / "p2.csv",
+        train={"train_subset": "all", "resample": "none", "save_model": str(save_model)},
+        params={"exponent": 5.0},
+    )
+    cfg2 = load_config(write_spec(spec2))
+    run_estimator(cfg2, cfg2.estimators[0].raw)
+    assert load_model(save_model).exponent == 5.0

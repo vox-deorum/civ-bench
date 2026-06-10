@@ -26,6 +26,26 @@ def test_pretrained_template_loads(configs_dir):
     assert cfg.extract_enabled is False
 
 
+def test_default_train_template_loads(configs_dir):
+    """The default (train-based) template validates — incl. features.include: null."""
+    cfg = load_config(configs_dir / "benchmark.template.json")
+    assert cfg.output.resolved_root == "reports"
+    fits = {e.id: e.raw["fit"] for e in cfg.estimators}
+    assert fits == {"score": "train", "attention": "train", "xgboost_cv": "train"}
+    # attention carries features.include: null (use coded DEFAULT_FEATURES) + a tune block.
+    attention = next(e for e in cfg.estimators if e.id == "attention")
+    assert attention.raw["features"]["include"] is None
+    assert attention.raw["tune"]["enabled"] is True
+
+
+def test_cross_template_redirects_and_trains_non_llm(configs_dir):
+    """The cross variant: suffix → reports-cross/ and every estimator trains non_llm."""
+    cfg = load_config(configs_dir / "benchmark.cross.template.json")
+    assert cfg.output.resolved_root == "reports-cross"
+    subsets = {e.id: e.raw["train"]["train_subset"] for e in cfg.estimators}
+    assert subsets == {"score": "non_llm", "attention": "non_llm", "xgboost_cv": "non_llm"}
+
+
 # ── output root resolution (§2.1) ───────────────────────────────────────────
 def test_output_resolve_default_passthrough():
     out = OutputConfig(root="reports", suffix="")
