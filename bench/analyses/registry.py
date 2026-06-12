@@ -28,13 +28,19 @@ from .performance import (
     PerformanceTurnPredicted,
 )
 from .prediction import PredictionCompare, PredictionEvaluate
-from .ratings import RatingsBradleyTerry, RatingsMatchups, RatingsPlackettLuce
+from .ratings import (
+    RatingsBradleyTerry,
+    RatingsMatchups,
+    RatingsOutcomeMatchups,
+    RatingsPlackettLuce,
+)
 
 ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     # ratings.*
     "ratings.bradley_terry": RatingsBradleyTerry,
     "ratings.plackett_luce": RatingsPlackettLuce,
     "ratings.matchups": RatingsMatchups,
+    "ratings.outcome_matchups": RatingsOutcomeMatchups,
     # prediction.*
     "prediction.evaluate": PredictionEvaluate,
     "prediction.compare": PredictionCompare,

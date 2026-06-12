@@ -92,14 +92,28 @@ class PerformanceStrengthPanel(Analysis):
         tables = {"by_identity": summary_tbl}
         coverage = self._load_coverage(ctx, table_id)
         if coverage is not None:
+            tables["cell_coverage_summary"] = self._coverage_summary(coverage)
             tables["cell_coverage"] = coverage
 
         fig = self._plot(summary_tbl, by, metric, ctx)
         n_prelim = int(summary_tbl["preliminary"].sum())
+        coverage_note = "."
+        if coverage is not None:
+            missing = int(coverage["missing"].fillna(False).astype(bool).sum())
+            no_baseline = int(
+                (
+                    (coverage["n_rows"].fillna(0) > 0)
+                    & (coverage["n_vanilla"].fillna(0) == 0)
+                ).sum()
+            )
+            coverage_note = (
+                f"; cell-coverage report has {len(coverage)} cells, "
+                f"{missing} missing, {no_baseline} without Vanilla baseline."
+            )
         summary = (
             f"{len(summary_tbl)} identities by {metric}; {n_prelim} preliminary "
             f"(< {min_games_prelim} games)"
-            + (f"; cell-coverage report has {len(coverage)} cells." if coverage is not None else ".")
+            + coverage_note
         )
         return AnalysisResult(
             tables=tables, figures={"strength": fig} if fig is not None else {},
@@ -112,6 +126,27 @@ class PerformanceStrengthPanel(Analysis):
             return None
         cov = pd.read_csv(path)
         return cov if not cov.empty else None
+
+    @staticmethod
+    def _coverage_summary(cov: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for experiment, grp in cov.groupby("experiment", sort=True):
+            missing = grp["missing"].fillna(False).astype(bool)
+            n_rows = grp["n_rows"].fillna(0)
+            n_vanilla = grp["n_vanilla"].fillna(0)
+            has_baseline = grp["has_baseline"].fillna(False).astype(bool)
+            n_cells = int(len(grp))
+            present_cells = int((~missing).sum())
+            rows.append({
+                "experiment": experiment,
+                "n_cells": n_cells,
+                "present_cells": present_cells,
+                "missing_cells": int(missing.sum()),
+                "baseline_cells": int(has_baseline.sum()),
+                "no_vanilla_baseline_cells": int(((n_rows > 0) & (n_vanilla == 0)).sum()),
+                "coverage_pct": round(present_cells / n_cells, 4) if n_cells else float("nan"),
+            })
+        return pd.DataFrame(rows)
 
     def _plot(self, tbl: pd.DataFrame, by: str, metric: str, ctx: AnalysisContext):
         import matplotlib.pyplot as plt

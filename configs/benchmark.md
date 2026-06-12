@@ -18,7 +18,7 @@ A run is a **directed acyclic graph of stages** in five kinds, executed in depen
 extract ──▶ estimators ──▶ adjust ──▶ analyses ──▶ report
 ```
 
-`adjust` is the bridge between raw predictions and the rating models: it turns an estimator's per-turn win-probabilities into a per-player-game **strength panel** (`adjusted_strength`) and registers it as a named table that `ratings.*` (and some `performance.*`) analyses consume (§5). It is optional — a run with no estimators or ratings simply omits it.
+`adjust` is the bridge between raw predictions and the strength-based rating models: it turns an estimator's per-turn win-probabilities into a per-player-game **strength panel** (`adjusted_strength`) and registers it as a named table that fitted ratings, strength matchups, and some `performance.*` analyses consume (§5). It is optional — a run with no estimators or strength-based ratings simply omits it.
 
 Each stage has a stable **`id`**. Edges come from three places, all resolved into one topological sort before anything runs:
 
@@ -61,7 +61,7 @@ The dependency graph is resolved once at config-load time and then reused by the
 }
 ```
 
-Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a ratings-free run; conversely, any `ratings.*` analysis needs an `adjust` stage to supply the `strength` table it rates.
+Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate.
 
 **`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this run-spec file** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
 
@@ -394,16 +394,16 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 ```
 
 - `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
-- `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). The `ratings.*` family consumes the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator).
+- `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
 
 ### 6.2 Module params catalog
 
 Every registry name `civ-bench` will ship, with its key params. Unlisted params fall back to coded defaults; unknown params are validation errors.
 
-#### `ratings.*` — consume the `strength` table from an `adjust` stage (§5)
+#### `ratings.*` — fitted ratings, strength matchups, and observed matchups
 
-Every `ratings.*` analysis rates `adjusted_strength`, so each one references an `adjust` stage's table via `uses.tables: ["strength"]` (shown once below; the same `uses` applies to all). They do **not** read `panel_data` directly, and they depend transitively on the estimator that fed the `adjust` stage.
+The fitted ratings (`bradley_terry`, `plackett_luce`) and strength matchup view rate `adjusted_strength`, so they reference an `adjust` stage's table via `uses.tables: ["strength"]` and depend transitively on the estimator that fed the `adjust` stage. The observed outcome matchup view reads the canonical `panel` table directly because it reports actual `is_winner` rates and score-ratio margins.
 
 Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `plackett_luce`):
 
@@ -429,10 +429,15 @@ Diplomatic, Science), and annotations include Elo, SE, and game support.
   "params": { "group_by": ["player_type"],          // ["player_type","strategy"] → same heatmap view
               "ref": "Vanilla", "min_games": 5, "bootstrap": null } }
 
-// ratings.matchups — empirical head-to-head matrices + OLS validation
+// ratings.matchups — adjusted-strength head-to-head matrices + OLS validation
 { "module": "ratings.matchups",
   "uses": { "tables": ["strength"] },
-  "params": { "mode": "mean", "validate_ols": true } }
+  "params": { "mode": "both", "validate_ols": true } }  // mean | winrate | both
+
+// ratings.outcome_matchups — observed win rates + score_ratio margins
+{ "module": "ratings.outcome_matchups",
+  "uses": { "tables": ["panel"] },
+  "params": { "include_score_ratio": true } }
 ```
 
 **Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
@@ -585,7 +590,7 @@ The report walks each produced `AnalysisResult` (tables + figures + summary) and
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
 6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust` `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves in `catalogs.models` `prediction_models`.
-7. **Adjust wiring**: each `adjust` stage must declare exactly one estimator in `uses.estimators`. A `uses.tables` name must resolve to either a `data.tables` key or an enabled `adjust` stage `id`; any `ratings.*` analysis must reference a `strength` table (no `adjust` stage ⇒ a `ratings.*` analysis is a validation error, since there is nothing to rate).
+7. **Adjust wiring**: each `adjust` stage must declare exactly one estimator in `uses.estimators`. A `uses.tables` name must resolve to either a `data.tables` key or an enabled `adjust` stage `id`; strength-based ratings (`ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`) must reference a `strength` table (no `adjust` stage ⇒ a validation error, since there is nothing to rate).
 8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; list filters merge left-to-right; a stage `filter` may not select experiments/players/turns excluded by the resolved global `data.filter` or lower constraints like `only_llm`/`min_games`; a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable).
 9. **Grouping resolution**: in a `ratings.*` `group_by`, every dimension past the base (`group_by[0]`, typically `player_type`) must name a grouping defined in top-level `groupings` (§3.2); referencing an undefined grouping is an error. Each grouping's `kind` must be implemented (currently only `argmax`); an `argmax` grouping's `labels`, when present, must be positional with `columns`.
 10. **Bootstrap**: a `ratings.*` `bootstrap`, when not null, requires an integer `n >= 1`; its resampling is seeded from the top-level `seed` (determinism — same config ⇒ same CIs).

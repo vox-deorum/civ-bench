@@ -157,11 +157,18 @@
       "params": { "group_by": ["player_type", "strategy"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
     },
     {
-      "id": "matchups",
+      "id": "matchup_strength",
       "module": "ratings.matchups",
       "enabled": true,
       "uses": { "tables": ["strength"] },
-      "params": { "mode": "mean", "validate_ols": true }
+      "params": { "mode": "both", "validate_ols": true }
+    },
+    {
+      "id": "matchup_winrates",
+      "module": "ratings.outcome_matchups",
+      "enabled": true,
+      "uses": { "tables": ["panel"] },
+      "params": { "include_score_ratio": true }
     },
     {
       "id": "ratings_ablation_bt",

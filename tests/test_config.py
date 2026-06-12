@@ -15,9 +15,9 @@ def test_dev_config_loads(configs_dir):
     assert cfg.seed == 42
     assert cfg.output.resolved_root == "reports-dev"
     assert len(cfg.estimators) == 3
-    # 12 original core analyses + PL strategy ratings + the two controlled-design
-    # calibration views (calibration.civ_effects, calibration.cell_baseline).
-    assert len(cfg.analyses) == 15
+    # 12 original core analyses + PL strategy ratings + observed matchup winrates
+    # + the two controlled-design calibration views.
+    assert len(cfg.analyses) == 16
 
 
 def test_pretrained_template_loads(configs_dir):
@@ -156,6 +156,7 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
         "n": 2,
         "stratified": "FALSE",
     }
+    _analysis(dev_spec, "matchup_winrates")["params"]["include_score_ratio"] = "FALSE"
     dev_spec["data"]["filter"] = {"only_llm": "FaLsE"}
     dev_spec["report"]["include_disabled"] = "FALSE"
 
@@ -169,6 +170,8 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
     assert cfg.analyses[0].raw["params"]["weighted"] is False
     assert cfg.analyses[0].raw["params"]["only_llm"] is True
     assert cfg.analyses[0].raw["params"]["bootstrap"]["stratified"] is False
+    winrates = next(a for a in cfg.analyses if a.id == "matchup_winrates")
+    assert winrates.raw["params"]["include_score_ratio"] is False
     assert cfg.data["filter"]["only_llm"] is False
     assert cfg.report["include_disabled"] is False
 
@@ -232,9 +235,11 @@ def test_strength_table_id_need_not_be_literally_strength(dev_spec, write_spec):
     cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
     assert "strength_main" in dag.nodes
-    # every enabled ratings analysis now depends on the renamed strength stage
+    # every enabled strength-based rating analysis now depends on the renamed stage
     for a in cfg.analyses:
-        if a.enabled and (a.module or "").startswith("ratings."):
+        if a.enabled and a.module in {
+            "ratings.bradley_terry", "ratings.plackett_luce", "ratings.matchups",
+        }:
             assert "strength_main" in dag.nodes[a.id].deps
 
 

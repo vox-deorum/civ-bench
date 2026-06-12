@@ -153,6 +153,53 @@ class AnalysisContext:
             )
         return pd.read_csv(path)
 
+    def strength_provenance(self, table_id: Optional[str] = None, panel: Optional[pd.DataFrame] = None) -> dict:
+        """Compact provenance for analyses consuming a strength adjust table."""
+        if table_id is None:
+            table_id = next(
+                (t for t in self.uses_tables() if self._adjust_stage(t) is not None),
+                "strength",
+            )
+        stage = self._adjust_stage(table_id)
+        if stage is None:
+            return {"strength_table": table_id}
+
+        params = dict(stage.raw.get("params") or {})
+        estimators = list((stage.raw.get("uses") or {}).get("estimators") or [])
+        estimator_id = estimators[0] if estimators else None
+        estimator = next((s for s in self.config.estimators if s.id == estimator_id), None)
+        estimator_raw = estimator.raw if estimator is not None else {}
+
+        raw_block = params.get("block", "auto")
+        effective_block = raw_block
+        if raw_block == "auto" and panel is not None and "controlled" in panel.columns:
+            effective_block = "start_cell" if bool(panel["controlled"].fillna(False).any()) else "none"
+        block_label = (
+            f"{raw_block}/{effective_block}" if effective_block != raw_block else str(raw_block)
+        )
+
+        out = {
+            "strength_table": table_id,
+            "adjust_stage": stage.id,
+            "strength_estimator": estimator_id,
+            "estimator_model": estimator_raw.get("model"),
+            "estimator_fit": estimator_raw.get("fit"),
+            "estimator_predict": estimator_raw.get("predict", "in_sample") if estimator_raw else None,
+            "adjust_block": block_label,
+        }
+        for key in (
+            "turn_progress_min",
+            "weight",
+            "relative_to",
+            "enforce_winner",
+            "civ_adjust",
+            "baseline_experiment",
+            "post_cell_normalize",
+        ):
+            if key in params and params[key] is not None:
+                out[f"adjust_{key}"] = params[key]
+        return {k: v for k, v in out.items() if v is not None}
+
     # ── estimator predictions ──────────────────────────────────────────────────
     def predictions_path(self, estimator_id: str) -> str:
         stage = next((s for s in self.config.estimators if s.id == estimator_id), None)

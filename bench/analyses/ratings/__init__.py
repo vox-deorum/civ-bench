@@ -10,6 +10,12 @@ from __future__ import annotations
 
 from .bradley_terry import RatingsBradleyTerry
 from .matchups import RatingsMatchups
+from .outcome_matchups import RatingsOutcomeMatchups
 from .plackett_luce import RatingsPlackettLuce
 
-__all__ = ["RatingsBradleyTerry", "RatingsMatchups", "RatingsPlackettLuce"]
+__all__ = [
+    "RatingsBradleyTerry",
+    "RatingsMatchups",
+    "RatingsOutcomeMatchups",
+    "RatingsPlackettLuce",
+]

@@ -188,3 +188,28 @@ def test_render_markdown_and_html_from_document(report_env):
     html = render_html(doc)
     assert "# T" in md and "## Prediction" in md and "### s" in md
     assert "<h1>T</h1>" in html and "<strong>there</strong>" in html
+
+
+def test_report_renders_rating_provenance_metadata(report_env):
+    from bench.reports.model import ReportDocument, FamilyGroup, Section
+
+    section = Section(
+        id="bt_main",
+        module="ratings.bradley_terry",
+        summary="9 identities rated.",
+        metadata={
+            "group_by": ["player_type"],
+            "strength_estimator": "attention",
+            "estimator_model": "attention_mlp",
+            "adjust_block": "auto/start_cell",
+        },
+    )
+    doc = ReportDocument(
+        title="T", run_name="r", seed=1, config_path="c.json", output_root="reports",
+        groups=[FamilyGroup(key="ratings", title="Ratings", sections=[section])],
+    )
+    md = render_markdown(doc)
+    html = render_html(doc)
+    assert "strength_estimator: attention" in md
+    assert "estimator_model: attention_mlp" in md
+    assert "adjust_block: auto/start_cell" in html

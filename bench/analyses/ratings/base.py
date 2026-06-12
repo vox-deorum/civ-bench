@@ -118,6 +118,8 @@ class RatingsAnalysis(Analysis):
         bootstrap = self.params.get("bootstrap")
 
         panel = self._load_and_filter(ctx, reference)
+        table_id = self._strength_table_id(ctx)
+        metadata = {"group_by": group_by, **ctx.strength_provenance(table_id, panel)}
 
         if not extra_dims:
             ratings = self._calculate(panel, reference)
@@ -125,10 +127,10 @@ class RatingsAnalysis(Analysis):
             ratings, boot_summary = self._maybe_bootstrap(
                 ctx, panel, ratings, reference, bootstrap, "player_type"
             )
-            fig = self._forest(ratings, ctx, "player_type")
+            fig = self._forest(ratings, ctx, "player_type", metadata)
             tables = {"ratings": ratings}
             return AnalysisResult(tables=tables, figures={"ratings": fig} if fig is not None else {},
-                                  summary=summary, metadata={"group_by": group_by})
+                                  summary=summary, metadata=metadata)
 
         if bootstrap is not None:
             raise AnalysisError(
@@ -139,14 +141,14 @@ class RatingsAnalysis(Analysis):
         general = self._calculate(panel, reference)
         general = self._attach_game_counts(general, panel, "player_type")
         ratings = self._strategy_ratings(ctx, panel, extra_dims, reference)
-        fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference)
+        fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference, metadata)
         summary = (
             f"Per-{'/'.join(group_by)} ratings: {len(ratings)} composite identities "
             f"across {ratings['strategy'].nunique() if 'strategy' in ratings else len(extra_dims)} group(s)."
         )
         return AnalysisResult(tables={"ratings": ratings},
                               figures={"ratings": fig} if fig is not None else {},
-                              summary=summary, metadata={"group_by": group_by})
+                              summary=summary, metadata=metadata)
 
     # ── strategy (multi-dim) path ────────────────────────────────────────────────
     def _strategy_ratings(self, ctx, panel, extra_dims, reference) -> pd.DataFrame:
@@ -198,6 +200,7 @@ class RatingsAnalysis(Analysis):
         ctx: AnalysisContext,
         dim: str,
         reference: str,
+        metadata: dict,
     ):
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -313,7 +316,8 @@ class RatingsAnalysis(Analysis):
         ax.set_ylabel("")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
         plt.setp(ax.get_yticklabels(), rotation=0, fontsize=9)
-        fig.tight_layout()
+        self._add_provenance_note(fig, metadata)
+        fig.tight_layout(rect=(0, 0.04, 1, 1))
         return fig
 
     @staticmethod
@@ -405,7 +409,7 @@ class RatingsAnalysis(Analysis):
             f"(Elo {top['elo']:.0f}); spread {rng:.0f} pts."
         )
 
-    def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, identity_col: str):
+    def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, identity_col: str, metadata: dict):
         import matplotlib.pyplot as plt
 
         from ...plotting.styles import get_player_color
@@ -439,5 +443,28 @@ class RatingsAnalysis(Analysis):
         ax.set_title(f"{self.module} ratings", fontsize=12, fontweight="bold")
         ax.legend(fontsize=9, loc="lower right")
         ax.grid(True, axis="x", alpha=0.3)
-        fig.tight_layout()
+        self._add_provenance_note(fig, metadata)
+        fig.tight_layout(rect=(0, 0.04, 1, 1))
         return fig
+
+    @staticmethod
+    def _add_provenance_note(fig, metadata: dict) -> None:
+        est = metadata.get("strength_estimator")
+        model = metadata.get("estimator_model")
+        fit = metadata.get("estimator_fit")
+        predict = metadata.get("estimator_predict")
+        block = metadata.get("adjust_block")
+        if not est and not block:
+            return
+        bits = []
+        if est:
+            model_part = f" ({model}" if model else ""
+            if fit or predict:
+                fp = "/".join(str(v) for v in (fit, predict) if v)
+                model_part += f", {fp}" if model_part else f" ({fp}"
+            model_part += ")" if model_part else ""
+            bits.append(f"strength estimator: {est}{model_part}")
+        if block:
+            bits.append(f"adjust block: {block}")
+        fig.text(0.01, 0.01, "; ".join(bits), ha="left", va="bottom",
+                 fontsize=8, color="#666666")

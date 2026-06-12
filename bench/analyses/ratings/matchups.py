@@ -1,11 +1,12 @@
 """``ratings.matchups`` — empirical head-to-head matrices + OLS validation.
 
 Ported from ``ratings/matchups.py``: for every pair of player types that met in a
-game, report either the win rate ``P(A stronger than B)`` (``mode:"winrate"``) or
-the mean strength difference ``mean(A − B)`` (``mode:"mean"``, default), with a
-per-cell significance test (ANOVA / one-sample t-test). With ``validate_ols`` it
-also fits ``adjusted_strength ~ C(player_type, Treatment(ref))`` and surfaces the
-per-type deviation effects as a cross-check on the matrix ordering.
+game, report the win rate ``P(A stronger than B)`` (``mode:"winrate"``), the mean
+strength difference ``mean(A - B)`` (``mode:"mean"``), or both
+(``mode:"both"``, default), with per-cell significance tests. With
+``validate_ols`` it also fits ``adjusted_strength ~ C(player_type, Treatment(ref))``
+and surfaces the per-type deviation effects as a cross-check on the matrix
+ordering.
 """
 
 from __future__ import annotations
@@ -97,10 +98,10 @@ class RatingsMatchups(Analysis):
     module = "ratings.matchups"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        mode = self.params.get("mode", "mean")
-        if mode not in ("mean", "winrate"):
+        mode = self.params.get("mode", "both")
+        if mode not in ("mean", "winrate", "both"):
             raise AnalysisError(
-                f"ratings.matchups '{self.stage_id}': mode must be 'mean' or 'winrate'."
+                f"ratings.matchups '{self.stage_id}': mode must be 'mean', 'winrate', or 'both'."
             )
         table_id = next((t for t in ctx.uses_tables()
                          if t == "strength" or any(s.id == t for s in ctx.config.adjust)), "strength")
@@ -111,25 +112,48 @@ class RatingsMatchups(Analysis):
                 f"with '{_STRENGTH_COL}'."
             )
 
-        if mode == "winrate":
-            matrix, count, pval = create_matchup_matrix(panel)
-            center, vmin, vmax, label, cmap = 0.5, 0.0, 1.0, "P(row stronger than col)", "RdBu_r"
-        else:
-            matrix, count, pval = create_mean_matchup_matrix(panel)
-            center, vmin, vmax, label, cmap = 0.0, None, None, "mean(row − col) strength", "RdBu_r"
+        metadata = {"mode": mode, **ctx.strength_provenance(table_id, panel)}
+        tables = {}
+        figures = {}
+        count_for_summary = None
 
-        tables = {
-            "matchup": matrix.reset_index(names="player_type"),
-            "counts": count.reset_index(names="player_type"),
-            "pvalues": pval.reset_index(names="player_type"),
-        }
-        figures = {"matchup": self._plot(matrix, center, vmin, vmax, label, cmap, mode)}
+        if mode in ("mean", "both"):
+            mean, count, pval = create_mean_matchup_matrix(panel)
+            count_for_summary = count
+            table_name = "matchup" if mode == "mean" else "strength_mean"
+            pval_name = "pvalues" if mode == "mean" else "pvalues_mean"
+            figure_name = "matchup" if mode == "mean" else "strength_mean"
+            tables[table_name] = mean.reset_index(names="player_type")
+            tables[pval_name] = pval.reset_index(names="player_type")
+            figures[figure_name] = self._plot(
+                mean, 0.0, None, None, "mean(row - col) adjusted strength",
+                "RdBu_r", "strength mean", metadata,
+            )
+
+        if mode in ("winrate", "both"):
+            winrate, count, pval = create_matchup_matrix(panel)
+            count_for_summary = count if count_for_summary is None else count_for_summary
+            table_name = "matchup" if mode == "winrate" else "strength_winrate"
+            pval_name = "pvalues" if mode == "winrate" else "pvalues_winrate"
+            figure_name = "matchup" if mode == "winrate" else "strength_winrate"
+            tables[table_name] = winrate.reset_index(names="player_type")
+            tables[pval_name] = pval.reset_index(names="player_type")
+            figures[figure_name] = self._plot(
+                winrate, 0.5, 0.0, 1.0, "P(row stronger than col)",
+                "RdBu_r", "strength win rate", metadata, percent=True, counts=count,
+            )
+
+        if count_for_summary is not None:
+            tables["counts"] = count_for_summary.reset_index(names="player_type")
 
         if bool(self.params.get("validate_ols", False)):
             tables["ols_validation"] = self._ols_validation(panel, ctx.catalog.vanilla_label)
 
-        summary = f"Matchup matrix ({mode}) over {len(matrix)} player types, {panel['game_id'].nunique()} games."
-        return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata={"mode": mode})
+        summary = (
+            f"Strength matchup matrix ({mode}) over "
+            f"{panel['player_type'].nunique()} player types, {panel['game_id'].nunique()} games."
+        )
+        return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
     def _ols_validation(self, panel: pd.DataFrame, vanilla: str) -> pd.DataFrame:
         from ...plotting.coefficients import deviation_coefficients
@@ -139,16 +163,46 @@ class RatingsMatchups(Analysis):
         result = fit_regression(formula, panel, outcome_col=_STRENGTH_COL)
         return deviation_coefficients(result.fit, vanilla)
 
-    def _plot(self, matrix, center, vmin, vmax, label, cmap, mode):
+    def _plot(self, matrix, center, vmin, vmax, label, cmap, mode, metadata, percent=False, counts=None):
         import matplotlib.pyplot as plt
         import seaborn as sns
 
         n = len(matrix)
         fig, ax = plt.subplots(figsize=(max(6, 0.7 * n + 3), max(5, 0.6 * n + 2)))
-        sns.heatmap(matrix, annot=True, fmt=".2f", cmap=cmap, center=center,
+        annot = True
+        fmt = ".2f"
+        if percent:
+            annot = matrix.copy().astype(object)
+            for row in matrix.index:
+                for col in matrix.columns:
+                    value = matrix.loc[row, col]
+                    if pd.isna(value):
+                        annot.loc[row, col] = ""
+                        continue
+                    n_txt = ""
+                    if counts is not None and pd.notna(counts.loc[row, col]):
+                        n_txt = f"\nn={int(counts.loc[row, col])}"
+                    annot.loc[row, col] = f"{100 * value:.0f}%{n_txt}"
+            fmt = ""
+        sns.heatmap(matrix, annot=annot, fmt=fmt, cmap=cmap, center=center,
                     vmin=vmin, vmax=vmax, square=True, linewidths=0.3, linecolor="lightgray",
                     cbar_kws={"label": label}, annot_kws={"fontsize": 7}, ax=ax)
         ax.set_title(f"Head-to-head matchups ({mode})", fontsize=12, fontweight="bold")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-        fig.tight_layout()
+        self._add_provenance_note(fig, metadata)
+        fig.tight_layout(rect=(0, 0.04, 1, 1))
         return fig
+
+    @staticmethod
+    def _add_provenance_note(fig, metadata: dict) -> None:
+        est = metadata.get("strength_estimator")
+        model = metadata.get("estimator_model")
+        block = metadata.get("adjust_block")
+        bits = []
+        if est:
+            bits.append(f"strength estimator: {est}" + (f" ({model})" if model else ""))
+        if block:
+            bits.append(f"adjust block: {block}")
+        if bits:
+            fig.text(0.01, 0.01, "; ".join(bits), ha="left", va="bottom",
+                     fontsize=8, color="#666666")

@@ -133,6 +133,7 @@ ANALYSIS_MODULES = {
     "ratings.bradley_terry",
     "ratings.plackett_luce",
     "ratings.matchups",
+    "ratings.outcome_matchups",
     "ratings.ablation_bt",
     "ratings.vanilla_slot_effect",
     # prediction.*
@@ -158,6 +159,11 @@ ANALYSIS_MODULES = {
     "exploratory.strategy_profiles",
 }
 RATINGS_PREFIX = "ratings."
+STRENGTH_RATING_MODULES = {
+    "ratings.bradley_terry",
+    "ratings.plackett_luce",
+    "ratings.matchups",
+}
 
 # ── per-module analysis param schemas (§6, validated in loader._validate_analysis) ──
 # Allowed param keys per core module. Cross-cutting `group_by`/`bootstrap` (ratings)
@@ -166,6 +172,7 @@ ANALYSIS_PARAM_KEYS = {
     "ratings.bradley_terry": {"group_by", "bootstrap", "weighted", "ref", "min_games", "only_llm"},
     "ratings.plackett_luce": {"group_by", "bootstrap", "ref", "min_games", "only_llm"},
     "ratings.matchups": {"mode", "validate_ols"},
+    "ratings.outcome_matchups": {"include_score_ratio"},
     "prediction.evaluate": {"metrics"},
     "prediction.compare": set(),
     "calibration.reliability": {"n_bins"},
@@ -181,7 +188,7 @@ ANALYSIS_PARAM_KEYS = {
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}
-MATCHUPS_MODE = {"mean", "winrate"}
+MATCHUPS_MODE = {"mean", "winrate", "both"}
 TURN_PREDICTED_AGGREGATE = {"mean", "median"}
 
 # ── report (§7) ────────────────────────────────────────────────────────────

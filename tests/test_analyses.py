@@ -174,6 +174,7 @@ def env(tmp_path, write_spec, dev_spec):
 def test_registry_has_all_core_modules():
     expected = {
         "ratings.bradley_terry", "ratings.plackett_luce", "ratings.matchups",
+        "ratings.outcome_matchups",
         "prediction.evaluate", "prediction.compare",
         "calibration.reliability", "calibration.loss_by_progress",
         "calibration.civ_effects", "calibration.cell_baseline",
@@ -236,6 +237,20 @@ def test_bad_metric_rejected(dev_spec, write_spec):
 def test_bad_matchups_mode_rejected(dev_spec, write_spec):
     with pytest.raises(ConfigError, match="mode"):
         _validate(dev_spec, write_spec, "ratings.matchups", {"mode": "weird"})
+
+
+def test_matchups_mode_both_allowed(dev_spec, write_spec):
+    cfg = _validate(dev_spec, write_spec, "ratings.matchups", {"mode": "both"})
+    assert cfg.analyses[0].raw["params"]["mode"] == "both"
+
+
+def test_outcome_matchups_config_accepts_panel(dev_spec, write_spec):
+    dev_spec["analyses"] = [{
+        "id": "outcomes", "module": "ratings.outcome_matchups", "enabled": True,
+        "uses": {"tables": ["panel"]}, "params": {"include_score_ratio": "true"},
+    }]
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.analyses[0].raw["params"]["include_score_ratio"] is True
 
 
 def test_bad_aggregate_rejected(dev_spec, write_spec):
@@ -343,7 +358,33 @@ def test_performance_strength_panel(env):
             "bootstrap_n": 50}, {"tables": ["strength"]})
     tbl = pd.read_csv(r.table_paths["by_identity"])
     assert {"player_type", "mean", "n_games", "ci_lower", "ci_upper", "preliminary"} <= set(tbl.columns)
+    assert "cell_coverage_summary" in r.table_paths
     assert "cell_coverage" in r.table_paths  # controlled run surfaces the coverage report
+    coverage = pd.read_csv(r.table_paths["cell_coverage_summary"])
+    assert {"missing_cells", "no_vanilla_baseline_cells", "coverage_pct"} <= set(coverage.columns)
+
+
+def test_strength_panel_coverage_summary_counts_gaps():
+    from bench.analyses.performance.strength_panel import PerformanceStrengthPanel
+
+    cov = pd.DataFrame([
+        {"experiment": "ctrl", "seed": 1, "player_id": 0, "n_rows": 4,
+         "n_vanilla": 2, "has_baseline": True, "missing": False},
+        {"experiment": "ctrl", "seed": 1, "player_id": 1, "n_rows": 3,
+         "n_vanilla": 0, "has_baseline": False, "missing": False},
+        {"experiment": "ctrl", "seed": 1, "player_id": 2, "n_rows": 0,
+         "n_vanilla": 0, "has_baseline": False, "missing": True},
+    ])
+
+    summary = PerformanceStrengthPanel._coverage_summary(cov)
+
+    row = summary.iloc[0]
+    assert row["n_cells"] == 3
+    assert row["present_cells"] == 2
+    assert row["missing_cells"] == 1
+    assert row["baseline_cells"] == 1
+    assert row["no_vanilla_baseline_cells"] == 1
+    assert row["coverage_pct"] == pytest.approx(2 / 3, abs=0.0001)
 
 
 def test_performance_turn_predicted(env):
@@ -404,8 +445,34 @@ def test_ratings_bootstrap_blocked_with_strategy(env, monkeypatch):
 
 
 def test_ratings_matchups_no_r(env):
-    r = env("ratings.matchups", {"mode": "mean", "validate_ols": True}, {"tables": ["strength"]})
-    assert "matchup" in r.table_paths and "ols_validation" in r.table_paths
+    r = env("ratings.matchups", {"mode": "both", "validate_ols": True}, {"tables": ["strength"]})
+    assert {"strength_mean", "strength_winrate", "counts", "ols_validation"} <= set(r.table_paths)
+    assert r.metadata["strength_estimator"] == "est"
+
+
+def test_outcome_matchups_outputs(env):
+    r = env("ratings.outcome_matchups", {"include_score_ratio": True}, {"tables": ["panel"]})
+    assert {"win_rate", "score_ratio_margin", "counts"} <= set(r.table_paths)
+    win = pd.read_csv(r.table_paths["win_rate"])
+    margin = pd.read_csv(r.table_paths["score_ratio_margin"])
+    assert set(PLAYER_TYPES) <= set(win["player_type"])
+    assert set(PLAYER_TYPES) <= set(margin["player_type"])
+
+
+def test_outcome_matchups_dedupes_repeated_opponent_type():
+    from bench.analyses.ratings.outcome_matchups import create_outcome_matchup_matrices
+
+    panel = pd.DataFrame([
+        {"game_id": "g1", "player_id": 0, "player_type": "A", "is_winner": 1, "score_ratio": 1.0},
+        {"game_id": "g1", "player_id": 1, "player_type": "B", "is_winner": 0, "score_ratio": 0.4},
+        {"game_id": "g1", "player_id": 2, "player_type": "B", "is_winner": 0, "score_ratio": 0.6},
+    ])
+    win, margin, counts = create_outcome_matchup_matrices(panel)
+
+    assert counts.loc["A", "B"] == 1
+    assert win.loc["A", "B"] == pytest.approx(1.0)
+    assert margin.loc["A", "B"] == pytest.approx(0.5)
+    assert counts.loc["B", "A"] == 2
 
 
 # ── bootstrap internals (no R) ────────────────────────────────────────────────────

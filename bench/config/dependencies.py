@@ -68,7 +68,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             )
         for tbl in stage.uses_tables:
             _check_table_ref(stage, tbl, table_keys, adjust_ids, enabled_adjust_ids)
-        if stage.enabled and stage.module and stage.module.startswith(S.RATINGS_PREFIX):
+        if stage.enabled and stage.module in S.STRENGTH_RATING_MODULES:
             _check_ratings_strength_ref(stage, strength_table_ids)
 
     nodes = _build_enabled_nodes(cfg, table_keys)
@@ -141,12 +141,12 @@ def _check_table_ref(
 def _check_ratings_strength_ref(stage: Stage, strength_table_ids: set[str]) -> None:
     if not strength_table_ids:
         raise ConfigError(
-            f"ratings analysis '{stage.id}' requires an enabled adjust "
+            f"strength-based ratings analysis '{stage.id}' requires an enabled adjust "
             f"strength-module stage to produce a strength table; none found."
         )
     if not strength_table_ids.intersection(stage.uses_tables):
         raise ConfigError(
-            f"ratings analysis '{stage.id}' must reference a strength table "
+            f"strength-based ratings analysis '{stage.id}' must reference a strength table "
             f"via uses.tables (one of {sorted(strength_table_ids)}); it rates "
             f"adjusted_strength, not panel_data."
         )
