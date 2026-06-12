@@ -26,6 +26,23 @@ from ..errors import AnalysisError
 from .turn_predicted import _strength_table_id
 
 
+COMPLETENESS_COLUMNS = [
+    "experiment", "required_games", "present_games", "missing_games",
+    "completeness_pct", "repeated_slots", "repeat_warning",
+]
+REPEATED_GAMES_COLUMNS = [
+    "experiment", "seed", "seating_rotation", "n_games", "game_ids",
+    "keep_candidate_game_id", "extra_game_ids",
+]
+COMPLETENESS_GAPS_COLUMNS = [
+    "experiment", "seed", "missing_rotations", "n_missing",
+]
+CELL_REPEAT_ISSUES_COLUMNS = [
+    "experiment", "seed", "expected_games_per_cell", "observed_counts",
+    "affected_player_ids",
+]
+
+
 def _ratings_min_games_default(ctx: AnalysisContext) -> int:
     """Inherit the preliminary threshold from the run's ratings cutoff.
 
@@ -48,6 +65,177 @@ def _bootstrap_ci(values: np.ndarray, n: int, ci_level: float, rng: np.random.Ge
     means = values[rng.integers(0, len(values), size=(n, len(values)))].mean(axis=1)
     alpha = (1.0 - ci_level) / 2.0
     return float(np.quantile(means, alpha)), float(np.quantile(means, 1.0 - alpha))
+
+
+def _truthy(series: pd.Series) -> pd.Series:
+    if series.dtype == bool:
+        return series.fillna(False)
+    return series.astype(str).str.lower().isin({"true", "1", "yes"})
+
+
+def _controlled_panel(panel: pd.DataFrame) -> pd.DataFrame:
+    required = {"experiment", "game_id", "seed", "seating_rotation", "player_id"}
+    if not required <= set(panel.columns):
+        return pd.DataFrame(columns=list(panel.columns))
+    if "controlled" in panel.columns:
+        mask = _truthy(panel["controlled"])
+    else:
+        mask = (panel["seed"].fillna(-1).astype(int) != -1) & (
+            panel["seating_rotation"].fillna(-1).astype(int) != -1
+        )
+    out = panel[mask].copy()
+    if out.empty:
+        return out
+    out["seed"] = out["seed"].astype(int)
+    out["seating_rotation"] = out["seating_rotation"].astype(int)
+    out["player_id"] = out["player_id"].astype(int)
+    out["game_id"] = out["game_id"].astype(str)
+    out["experiment"] = out["experiment"].astype(str)
+    return out
+
+
+def _game_sort_frame(games: pd.DataFrame | None) -> pd.DataFrame:
+    if games is None or games.empty or "game_id" not in games.columns:
+        return pd.DataFrame(columns=["game_id", "_timestamp_num", "_timestamp_str"])
+    cols = ["game_id"] + (["timestamp"] if "timestamp" in games.columns else [])
+    out = games[cols].drop_duplicates("game_id").copy()
+    out["game_id"] = out["game_id"].astype(str)
+    if "timestamp" in out.columns:
+        out["_timestamp_num"] = pd.to_numeric(out["timestamp"], errors="coerce")
+        out["_timestamp_str"] = out["timestamp"].astype(str)
+    else:
+        out["_timestamp_num"] = np.nan
+        out["_timestamp_str"] = ""
+    return out[["game_id", "_timestamp_num", "_timestamp_str"]]
+
+
+def _ordered_game_ids(ids: list[str], games: pd.DataFrame | None) -> list[str]:
+    base = pd.DataFrame({"game_id": sorted(set(map(str, ids)))})
+    if base.empty:
+        return []
+    order = base.merge(_game_sort_frame(games), on="game_id", how="left")
+    order["_timestamp_missing"] = order["_timestamp_num"].isna()
+    order["_timestamp_str"] = order["_timestamp_str"].fillna("")
+    order = order.sort_values(
+        ["_timestamp_missing", "_timestamp_num", "_timestamp_str", "game_id"],
+        kind="mergesort",
+    )
+    return order["game_id"].tolist()
+
+
+def _reference_slots(controlled: pd.DataFrame, baseline_experiment: str | None) -> list[tuple[int, int]]:
+    ref = controlled
+    if baseline_experiment is not None:
+        explicit = controlled[controlled["experiment"] == str(baseline_experiment)]
+        if not explicit.empty:
+            ref = explicit
+    seeds = sorted(ref["seed"].dropna().astype(int).unique())
+    rotations = sorted(ref["seating_rotation"].dropna().astype(int).unique())
+    return [(int(seed), int(rot)) for seed in seeds for rot in rotations]
+
+
+def build_experiment_completeness(
+    panel: pd.DataFrame,
+    games: pd.DataFrame | None = None,
+    baseline_experiment: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Compact controlled-design game completeness diagnostics.
+
+    The summary counts distinct games, while completeness is based on occupied
+    seed/rotation slots so repeated game ids in one slot cannot mask gaps.
+    """
+    controlled = _controlled_panel(panel)
+    if controlled.empty:
+        return {}
+
+    reference_slots = _reference_slots(controlled, baseline_experiment)
+    if not reference_slots:
+        return {}
+    reference_set = set(reference_slots)
+    expected_per_cell = len({rot for _, rot in reference_slots})
+
+    summary_rows: list[dict] = []
+    repeated_rows: list[dict] = []
+    gap_rows: list[dict] = []
+    cell_issue_rows: list[dict] = []
+
+    for experiment, exp_df in controlled.groupby("experiment", sort=True):
+        slot_groups = exp_df.groupby(["seed", "seating_rotation"], sort=True)["game_id"]
+        present_slots: set[tuple[int, int]] = set()
+        repeated_slots = 0
+        for (seed, rot), ids in slot_groups:
+            key = (int(seed), int(rot))
+            present_slots.add(key)
+            ordered = _ordered_game_ids(ids.dropna().astype(str).unique().tolist(), games)
+            if len(ordered) > 1:
+                repeated_slots += 1
+                repeated_rows.append({
+                    "experiment": experiment,
+                    "seed": int(seed),
+                    "seating_rotation": int(rot),
+                    "n_games": int(len(ordered)),
+                    "game_ids": ",".join(ordered),
+                    "keep_candidate_game_id": ordered[0],
+                    "extra_game_ids": ",".join(ordered[1:]),
+                })
+
+        missing_by_seed: dict[int, list[int]] = {}
+        for seed, rot in sorted(reference_set - present_slots):
+            missing_by_seed.setdefault(int(seed), []).append(int(rot))
+        for seed, rotations in sorted(missing_by_seed.items()):
+            gap_rows.append({
+                "experiment": experiment,
+                "seed": seed,
+                "missing_rotations": ",".join(str(r) for r in sorted(rotations)),
+                "n_missing": int(len(rotations)),
+            })
+
+        cell_counts = (
+            exp_df.groupby(["seed", "player_id"], sort=True)["game_id"]
+            .nunique()
+            .reset_index(name="n_games")
+        )
+        for seed, seed_counts in cell_counts.groupby("seed", sort=True):
+            bad = seed_counts[seed_counts["n_games"] != expected_per_cell]
+            if bad.empty:
+                continue
+            observed = ", ".join(
+                f"{int(r.player_id)}:{int(r.n_games)}"
+                for r in bad.itertuples(index=False)
+            )
+            cell_issue_rows.append({
+                "experiment": experiment,
+                "seed": int(seed),
+                "expected_games_per_cell": int(expected_per_cell),
+                "observed_counts": observed,
+                "affected_player_ids": ",".join(str(int(v)) for v in bad["player_id"]),
+            })
+
+        required = int(len(reference_slots))
+        present_games = int(exp_df["game_id"].nunique())
+        missing_games = int(len(reference_set - present_slots))
+        repeat_warning = bool(repeated_slots or not cell_counts.empty and (
+            cell_counts["n_games"] != expected_per_cell
+        ).any())
+        summary_rows.append({
+            "experiment": experiment,
+            "required_games": required,
+            "present_games": present_games,
+            "missing_games": missing_games,
+            "completeness_pct": round((required - missing_games) / required, 4)
+            if required else float("nan"),
+            "repeated_slots": int(repeated_slots),
+            "repeat_warning": repeat_warning,
+        })
+
+    return {
+        "experiment_completeness": pd.DataFrame(summary_rows, columns=COMPLETENESS_COLUMNS),
+        "repeated_games": pd.DataFrame(repeated_rows, columns=REPEATED_GAMES_COLUMNS),
+        "experiment_completeness_gaps": pd.DataFrame(
+            gap_rows, columns=COMPLETENESS_GAPS_COLUMNS
+        ),
+        "cell_repeat_issues": pd.DataFrame(cell_issue_rows, columns=CELL_REPEAT_ISSUES_COLUMNS),
+    }
 
 
 class PerformanceStrengthPanel(Analysis):
@@ -94,10 +282,18 @@ class PerformanceStrengthPanel(Analysis):
         if coverage is not None:
             tables["cell_coverage_summary"] = self._coverage_summary(coverage)
             tables["cell_coverage"] = coverage
+        games = self._load_games(ctx)
+        baseline_experiment = ctx.strength_provenance(table_id, panel).get(
+            "adjust_baseline_experiment"
+        )
+        completeness = build_experiment_completeness(panel, games, baseline_experiment)
+        for name, table in completeness.items():
+            if name in {"experiment_completeness", "repeated_games"} or not table.empty:
+                tables[name] = table
 
         fig = self._plot(summary_tbl, by, metric, ctx)
         n_prelim = int(summary_tbl["preliminary"].sum())
-        coverage_note = "."
+        report_notes = []
         if coverage is not None:
             missing = int(coverage["missing"].fillna(False).astype(bool).sum())
             no_baseline = int(
@@ -106,15 +302,28 @@ class PerformanceStrengthPanel(Analysis):
                     & (coverage["n_vanilla"].fillna(0) == 0)
                 ).sum()
             )
-            coverage_note = (
-                f"; cell-coverage report has {len(coverage)} cells, "
-                f"{missing} missing, {no_baseline} without Vanilla baseline."
+            report_notes.append(
+                f"cell-coverage report has {len(coverage)} cells, "
+                f"{missing} missing, {no_baseline} without Vanilla baseline"
+            )
+        if "experiment_completeness" in tables:
+            comp = tables["experiment_completeness"]
+            required_games = int(comp["required_games"].sum())
+            present_games = int(comp["present_games"].sum())
+            missing_games = int(comp["missing_games"].sum())
+            repeated_slots = int(comp["repeated_slots"].sum())
+            report_notes.append(
+                f"experiment completeness has {present_games}/{required_games} "
+                f"games present, {missing_games} missing slots, "
+                f"{repeated_slots} repeated slots"
             )
         summary = (
             f"{len(summary_tbl)} identities by {metric}; {n_prelim} preliminary "
             f"(< {min_games_prelim} games)"
-            + coverage_note
         )
+        if report_notes:
+            summary += "; " + "; ".join(report_notes)
+        summary += "."
         return AnalysisResult(
             tables=tables, figures={"strength": fig} if fig is not None else {},
             summary=summary, metadata={"by": by, "metric": metric},
@@ -126,6 +335,12 @@ class PerformanceStrengthPanel(Analysis):
             return None
         cov = pd.read_csv(path)
         return cov if not cov.empty else None
+
+    def _load_games(self, ctx: AnalysisContext):
+        try:
+            return ctx.load_table("games")
+        except AnalysisError:
+            return None
 
     @staticmethod
     def _coverage_summary(cov: pd.DataFrame) -> pd.DataFrame:
