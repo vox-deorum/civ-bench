@@ -8,8 +8,9 @@ columns are that seed's ``(seed, player_id)`` cells, each labelled with the
 seat-bound ``civilization``. Cell colour = ``cell_baseline`` on the logit scale,
 with shared robust symmetric limits across the per-seed facets (percentile-clipped
 so the enforced-winner sentinel ``logit(1-eps) ≈ 11.51`` does not saturate); each
-cell is annotated with ``n_vanilla`` (the baseline's support), and missing cells
-(``cell_coverage.missing`` / ``n_vanilla == 0``) are hatched.
+cell is annotated with ``n_vanilla`` (the baseline's support) and baseline win
+rate when available, and missing cells (``cell_coverage.missing`` /
+``n_vanilla == 0``) are hatched.
 
 The explicit pathway — the single shared baseline spanning the whole grid — is
 pinned as a top reference row separated by a rule, so each implicit condition reads
@@ -133,7 +134,7 @@ class CalibrationCellBaseline(Analysis):
                     mask[i, j] = True
                     continue
                 values[i, j] = r.cell_baseline
-                annot[i, j] = f"{r.cell_baseline:.2f}\nn={int(r.n_vanilla)}"
+                annot[i, j] = self._cell_annotation(r)
                 if abs(float(r.cell_baseline) - _SENTINEL) <= _SENTINEL_TOL:
                     sentinel[i, j] = True
 
@@ -151,6 +152,14 @@ class CalibrationCellBaseline(Analysis):
             rule_after_row=rule_after,
         )
         return fig
+
+    @staticmethod
+    def _cell_annotation(row) -> str:
+        lines = [f"{row.cell_baseline:.2f}", f"n={int(row.n_vanilla)}"]
+        win_rate = getattr(row, "win_rate", np.nan)
+        if pd.notna(win_rate):
+            lines.append(f"win={float(win_rate):.0%}")
+        return "\n".join(lines)
 
     @staticmethod
     def _coverage_missing(coverage: pd.DataFrame, rows: pd.DataFrame, seed: int, pid: int) -> bool:

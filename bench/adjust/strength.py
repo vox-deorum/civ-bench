@@ -57,7 +57,7 @@ PANEL_COLUMNS = [
 CIV_EFFECTS_COLUMNS = ["civilization", "civ_effect", "n_rows"]
 CELL_BASELINE_COLUMNS = [
     "experiment", "pathway", "seed", "player_id", "civilization",
-    "cell_baseline", "n_vanilla", "n_games", "n_models",
+    "cell_baseline", "n_vanilla", "win_rate", "n_games", "n_models",
     "has_vanilla_baseline", "vanilla_connected",
 ]
 CELL_COVERAGE_COLUMNS = [
@@ -307,6 +307,7 @@ def _cell_baseline_row(
         "civilization": _seat_civ(cell_rows if len(cell_rows) else vanilla_grp),
         "cell_baseline": float(vanilla_grp["logit_strength"].mean()),
         "n_vanilla": int(len(vanilla_grp)),
+        "win_rate": float(vanilla_grp["is_winner"].mean()),
         "n_games": int(cell_rows["game_id"].nunique()) if len(cell_rows) else int(vanilla_grp["game_id"].nunique()),
         "n_models": int(cell_rows["config_slot"].nunique()) if len(cell_rows) else int(vanilla_grp["config_slot"].nunique()),
         "has_vanilla_baseline": bool(len(vanilla_grp) >= 1),

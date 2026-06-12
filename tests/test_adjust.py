@@ -394,9 +394,10 @@ def test_implicit_only_run_has_no_explicit_rows(tmp_path, catalog):
     assert set(art.cell_baseline["pathway"].unique()) == {"implicit"}
     assert list(art.cell_baseline.columns) == [
         "experiment", "pathway", "seed", "player_id", "civilization",
-        "cell_baseline", "n_vanilla", "n_games", "n_models",
+        "cell_baseline", "n_vanilla", "win_rate", "n_games", "n_models",
         "has_vanilla_baseline", "vanilla_connected",
     ]
+    assert art.cell_baseline["win_rate"].between(0.0, 1.0).all()
 
 
 def test_coverage_truly_missing_cell(tmp_path, catalog):

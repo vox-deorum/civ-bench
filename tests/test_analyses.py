@@ -106,21 +106,22 @@ def _write_audit_trails(adj_dir, controlled, strength_df):
                 cb_rows.append({"experiment": exp, "pathway": "implicit", "seed": seed,
                                 "player_id": pid, "civilization": grp["civilization"].iloc[0],
                                 "cell_baseline": float(vg["logit_strength"].mean()),
-                                "n_vanilla": len(vg), "n_games": grp["game_id"].nunique(),
+                                "n_vanilla": len(vg), "win_rate": float(vg["is_winner"].mean()),
+                                "n_games": grp["game_id"].nunique(),
                                 "n_models": 1, "has_vanilla_baseline": True, "vanilla_connected": True})
             cov_rows.append({"experiment": exp, "seed": seed, "player_id": pid,
                              "civilization": grp["civilization"].iloc[0], "in_entirety": True,
                              "n_rows": len(grp), "n_vanilla": len(vg),
                              "has_baseline": not vg.empty, "missing": False})
         pd.DataFrame(cb_rows, columns=["experiment", "pathway", "seed", "player_id", "civilization",
-                                       "cell_baseline", "n_vanilla", "n_games", "n_models",
+                                       "cell_baseline", "n_vanilla", "win_rate", "n_games", "n_models",
                                        "has_vanilla_baseline", "vanilla_connected"]).to_csv(
             f"{adj_dir}/cell_baseline.csv", index=False)
         pd.DataFrame(cov_rows).to_csv(f"{adj_dir}/cell_coverage.csv", index=False)
     else:
         for fn, cols in (("cell_baseline.csv",
                           ["experiment", "pathway", "seed", "player_id", "civilization",
-                           "cell_baseline", "n_vanilla", "n_games", "n_models",
+                           "cell_baseline", "n_vanilla", "win_rate", "n_games", "n_models",
                            "has_vanilla_baseline", "vanilla_connected"]),
                          ("cell_coverage.csv",
                           ["experiment", "seed", "player_id", "civilization", "in_entirety",
@@ -335,7 +336,8 @@ def test_cell_baseline_excludes_explicit_conditions_implicit_row():
         for pid in (0, 1):
             rows.append({"experiment": exp, "pathway": pathway, "seed": 7,
                          "player_id": pid, "civilization": CIVS[pid],
-                         "cell_baseline": 0.3 + 0.1 * pid, "n_vanilla": 4})
+                         "cell_baseline": 0.3 + 0.1 * pid, "n_vanilla": 4,
+                         "win_rate": 0.25 * (pid + 1)})
     seed_cb = pd.DataFrame(rows)
 
     fig = CalibrationCellBaseline("cb")._plot_seed(seed_cb, None, 7, vlim=2.0)
@@ -344,6 +346,8 @@ def test_cell_baseline_excludes_explicit_conditions_implicit_row():
     assert _EXPLICIT_ROW in labels
     assert "treat" in labels
     assert "base" not in labels
+    annotations = [t.get_text() for t in fig.axes[0].texts]
+    assert any("win=25%" in text for text in annotations)
 
 
 # ── performance ──────────────────────────────────────────────────────────────────
