@@ -28,7 +28,7 @@ from .turn_predicted import _strength_table_id
 
 COMPLETENESS_COLUMNS = [
     "experiment", "required_games", "present_games", "missing_games",
-    "completeness_pct", "repeated_slots", "repeat_warning",
+    "completeness_pct", "repeated_slots", "warning",
 ]
 REPEATED_GAMES_COLUMNS = [
     "experiment", "seed", "seating_rotation", "n_games", "game_ids",
@@ -214,9 +214,18 @@ def build_experiment_completeness(
         required = int(len(reference_slots))
         present_games = int(exp_df["game_id"].nunique())
         missing_games = int(len(reference_set - present_slots))
-        repeat_warning = bool(repeated_slots or not cell_counts.empty and (
+        cell_repeat_issue = bool(not cell_counts.empty and (
             cell_counts["n_games"] != expected_per_cell
         ).any())
+        warnings = []
+        if missing_games:
+            warnings.append(f"{missing_games} missing slot(s)")
+        if repeated_slots:
+            warnings.append(f"{repeated_slots} repeated slot(s)")
+        if cell_repeat_issue:
+            warnings.append(
+                f"cell repeat counts differ from expected {expected_per_cell}"
+            )
         summary_rows.append({
             "experiment": experiment,
             "required_games": required,
@@ -225,7 +234,7 @@ def build_experiment_completeness(
             "completeness_pct": round((required - missing_games) / required, 4)
             if required else float("nan"),
             "repeated_slots": int(repeated_slots),
-            "repeat_warning": repeat_warning,
+            "warning": "; ".join(warnings) if warnings else "ok",
         })
 
     return {
@@ -282,15 +291,6 @@ class PerformanceStrengthPanel(Analysis):
         if coverage is not None:
             tables["cell_coverage_summary"] = self._coverage_summary(coverage)
             tables["cell_coverage"] = coverage
-        games = self._load_games(ctx)
-        baseline_experiment = ctx.strength_provenance(table_id, panel).get(
-            "adjust_baseline_experiment"
-        )
-        completeness = build_experiment_completeness(panel, games, baseline_experiment)
-        for name, table in completeness.items():
-            if name in {"experiment_completeness", "repeated_games"} or not table.empty:
-                tables[name] = table
-
         fig = self._plot(summary_tbl, by, metric, ctx)
         n_prelim = int(summary_tbl["preliminary"].sum())
         report_notes = []
@@ -305,17 +305,6 @@ class PerformanceStrengthPanel(Analysis):
             report_notes.append(
                 f"cell-coverage report has {len(coverage)} cells, "
                 f"{missing} missing, {no_baseline} without Vanilla baseline"
-            )
-        if "experiment_completeness" in tables:
-            comp = tables["experiment_completeness"]
-            required_games = int(comp["required_games"].sum())
-            present_games = int(comp["present_games"].sum())
-            missing_games = int(comp["missing_games"].sum())
-            repeated_slots = int(comp["repeated_slots"].sum())
-            report_notes.append(
-                f"experiment completeness has {present_games}/{required_games} "
-                f"games present, {missing_games} missing slots, "
-                f"{repeated_slots} repeated slots"
             )
         summary = (
             f"{len(summary_tbl)} identities by {metric}; {n_prelim} preliminary "
@@ -335,12 +324,6 @@ class PerformanceStrengthPanel(Analysis):
             return None
         cov = pd.read_csv(path)
         return cov if not cov.empty else None
-
-    def _load_games(self, ctx: AnalysisContext):
-        try:
-            return ctx.load_table("games")
-        except AnalysisError:
-            return None
 
     @staticmethod
     def _coverage_summary(cov: pd.DataFrame) -> pd.DataFrame:

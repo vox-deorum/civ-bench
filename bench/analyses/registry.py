@@ -23,6 +23,7 @@ from .calibration import (
 from .errors import AnalysisError
 from .exploratory import ExploratoryModelTokenCosts
 from .performance import (
+    PerformanceExperimentCompleteness,
     PerformanceScoreRatio,
     PerformanceStrengthPanel,
     PerformanceTurnPredicted,
@@ -50,6 +51,7 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "calibration.civ_effects": CalibrationCivEffects,
     "calibration.cell_baseline": CalibrationCellBaseline,
     # performance.*
+    "performance.experiment_completeness": PerformanceExperimentCompleteness,
     "performance.score_ratio": PerformanceScoreRatio,
     "performance.strength_panel": PerformanceStrengthPanel,
     "performance.turn_predicted": PerformanceTurnPredicted,

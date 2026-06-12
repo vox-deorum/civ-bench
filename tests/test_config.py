@@ -16,8 +16,8 @@ def test_dev_config_loads(configs_dir):
     assert cfg.output.resolved_root == "reports-dev"
     assert len(cfg.estimators) == 3
     # 12 original core analyses + PL strategy ratings + observed matchup winrates
-    # + the two controlled-design calibration views.
-    assert len(cfg.analyses) == 16
+    # + two controlled-design calibration views + experiment completeness.
+    assert len(cfg.analyses) == 17
 
 
 def test_pretrained_template_loads(configs_dir):

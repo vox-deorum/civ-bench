@@ -193,6 +193,13 @@
       "params": { "metric": "adjusted_strength", "by": "player_type" }
     },
     {
+      "id": "perf_experiment_completeness",
+      "module": "performance.experiment_completeness",
+      "enabled": true,
+      "uses": { "tables": ["strength"] },
+      "params": {}
+    },
+    {
       "id": "perf_turn_predicted",
       "module": "performance.turn_predicted",
       "enabled": true,

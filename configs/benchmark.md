@@ -367,7 +367,7 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
   - `cell_baseline.csv` — the **VPAI seating×seed effect** from the controlled (`block`) path: `experiment, pathway, seed, player_id, civilization, cell_baseline, n_vanilla, win_rate, n_games, n_models, has_vanilla_baseline, vanilla_connected`. It carries every pathway that actually ran (`pathway ∈ {explicit, implicit}`); a default `baseline_experiment:null` run normally contains only implicit rows. When both explicit and implicit exist for a condition/cell, the report compares `implicit - explicit` on the logit scale.
   - `cell_coverage.csv` — the **controlled-design cell coverage report**: for each controlled experiment, which `(seed, player_id)` cells of the **entirety** reference grid it is missing. Columns: `experiment, seed, player_id, civilization, in_entirety, n_rows, n_vanilla, has_baseline, missing` (`missing = true` ⇒ the experiment has no rows for that cell). The "entirety" is the full baseline cell set — the `baseline_experiment`'s cells when set (a pure VP self-play spans every seat across every seed/rotation), else the union of `(seed, player_id)` cells observed across the controlled subset. This is a **report-only** diagnostic (WARN, never fatal — distinct from the hard-error "a row needs adjustment but its selected baseline cell is missing"); written only when controlled rows exist.
 
-  `performance.strength_panel` also derives compact game-level completeness tables from the strength panel: `experiment_completeness.csv` (`experiment, required_games, present_games, missing_games, completeness_pct, repeated_slots, repeat_warning`), `repeated_games.csv` (`experiment, seed, seating_rotation, n_games, game_ids, keep_candidate_game_id, extra_game_ids`), and gap/issue detail tables when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct `game_id`s, and repeated slots list exact duplicate `game_id`s so bad runs can be removed deliberately.
+  `performance.experiment_completeness` derives compact game-level completeness tables from the strength panel as its own report section: `experiment_completeness.csv` (`experiment, required_games, present_games, missing_games, completeness_pct, repeated_slots, warning`), `repeated_games.csv` (`experiment, seed, seating_rotation, n_games, game_ids, keep_candidate_game_id, extra_game_ids`), and gap/issue detail tables when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct `game_id`s, repeated slots list exact duplicate `game_id`s so bad runs can be removed deliberately, and `warning` is `ok` or a readable issue summary rather than a boolean.
 
   A mixed dataset writes these files; each is simply empty/absent when its path didn't run (`cell_baseline.csv`/`cell_coverage.csv` are empty on a fully uncontrolled run). `performance.strength_panel` always surfaces whichever exist (§6.2) — no flag.
 
@@ -520,13 +520,18 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 //   very few games, so the small-sample basis is surfaced, not hidden).
 //   It also surfaces the adjust stage's always-written adjustment diagnostics — the civilization-level
 //   effect table and the VPAI seating×seed effect (cell baseline, explicit/implicit pathways,
-//   §5.1) — whenever they exist. It adds compact controlled-design game completeness
-//   tables, including repeated `game_id`s by seed/rotation slot for cleanup. No flag on
-//   the diagnostics.
+//   §5.1) — whenever they exist. No flag on the diagnostics.
 { "module": "performance.strength_panel",
   "uses": { "tables": ["strength"] },
   "params": { "metric": "adjusted_strength", "by": "player_type",
               "min_games_preliminary": 5 } }   // < this ⇒ flagged preliminary (defaults to ratings min_games)
+
+// performance.experiment_completeness — compact controlled-design game-grid completeness.
+//   Emits a standalone report section with per-experiment required/present/missing games,
+//   readable warning text, and exact repeated `game_id`s by seed/rotation slot for cleanup.
+{ "module": "performance.experiment_completeness",
+  "uses": { "tables": ["strength"] },
+  "params": {} }
 
 // performance.turn_predicted — P(win) / strength trajectory over the game, per estimator
 { "module": "performance.turn_predicted",

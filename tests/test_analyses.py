@@ -179,6 +179,7 @@ def test_registry_has_all_core_modules():
         "prediction.evaluate", "prediction.compare",
         "calibration.reliability", "calibration.loss_by_progress",
         "calibration.civ_effects", "calibration.cell_baseline",
+        "performance.experiment_completeness",
         "performance.score_ratio", "performance.strength_panel", "performance.turn_predicted",
         "exploratory.model_token_costs",
     }
@@ -364,12 +365,20 @@ def test_performance_strength_panel(env):
     assert {"player_type", "mean", "n_games", "ci_lower", "ci_upper", "preliminary"} <= set(tbl.columns)
     assert "cell_coverage_summary" in r.table_paths
     assert "cell_coverage" in r.table_paths  # controlled run surfaces the coverage report
-    assert "experiment_completeness" in r.table_paths
-    assert "repeated_games" in r.table_paths
+    assert "experiment_completeness" not in r.table_paths
     coverage = pd.read_csv(r.table_paths["cell_coverage_summary"])
     assert {"missing_cells", "no_vanilla_baseline_cells", "coverage_pct"} <= set(coverage.columns)
+
+
+def test_performance_experiment_completeness(env):
+    r = env("performance.experiment_completeness", {}, {"tables": ["strength"]})
+    assert "experiment_completeness" in r.table_paths
+    assert "repeated_games" in r.table_paths
     completeness = pd.read_csv(r.table_paths["experiment_completeness"])
-    assert {"required_games", "present_games", "missing_games", "repeated_slots"} <= set(completeness.columns)
+    assert {
+        "required_games", "present_games", "missing_games", "repeated_slots", "warning",
+    } <= set(completeness.columns)
+    assert "repeat_warning" not in completeness.columns
 
 
 def test_strength_panel_coverage_summary_counts_gaps():
@@ -426,7 +435,7 @@ def test_experiment_completeness_complete_grid():
     assert comp["missing_games"] == 0
     assert comp["completeness_pct"] == pytest.approx(1.0)
     assert comp["repeated_slots"] == 0
-    assert not bool(comp["repeat_warning"])
+    assert comp["warning"] == "ok"
     assert out["repeated_games"].empty
     assert out["experiment_completeness_gaps"].empty
 
@@ -470,7 +479,7 @@ def test_experiment_completeness_repeated_games_are_actionable():
     assert comp["present_games"] == 2
     assert comp["missing_games"] == 0
     assert comp["repeated_slots"] == 1
-    assert bool(comp["repeat_warning"])
+    assert "1 repeated slot(s)" in comp["warning"]
 
     repeated = out["repeated_games"].iloc[0]
     assert repeated["n_games"] == 2  # distinct game ids, not player rows

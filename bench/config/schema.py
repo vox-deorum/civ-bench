@@ -148,6 +148,7 @@ ANALYSIS_MODULES = {
     "calibration.civ_effects",
     "calibration.cell_baseline",
     # performance.*
+    "performance.experiment_completeness",
     "performance.score_ratio",
     "performance.strength_panel",
     "performance.turn_predicted",
@@ -179,6 +180,7 @@ ANALYSIS_PARAM_KEYS = {
     "calibration.loss_by_progress": {"n_bins", "metrics"},
     "calibration.civ_effects": set(),
     "calibration.cell_baseline": set(),
+    "performance.experiment_completeness": set(),
     "performance.score_ratio": {"target", "predictors"},
     "performance.strength_panel": {
         "metric", "by", "min_games_preliminary", "bootstrap_n", "ci_level",
