@@ -371,7 +371,14 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
         v = params["ci_level"]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 1:
             raise ConfigError(f"{where}.params.ci_level: must be a number in (0, 1).")
-    for key in ("weighted", "only_llm", "validate_ols", "by_strategist", "include_score_ratio"):
+    for key in (
+        "weighted",
+        "only_llm",
+        "validate_ols",
+        "by_player_type",
+        "by_strategist",
+        "include_score_ratio",
+    ):
         if key in params:
             params[key] = coerce_bool(params[key], f"{where}.params.{key}")
 

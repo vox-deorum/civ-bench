@@ -505,8 +505,39 @@ def test_performance_turn_predicted(env):
 # ── exploratory ──────────────────────────────────────────────────────────────────
 def test_exploratory_model_token_costs(env):
     r = env("exploratory.model_token_costs", {"currency": "usd"}, {"tables": ["tokens"]})
+    assert "token_costs_by_player_type" in r.table_paths
+    by_player = pd.read_csv(r.table_paths["token_costs_by_player_type"])
+    assert {"player_type", "model", "total_cost", "games"} <= set(by_player.columns)
+
     tbl = pd.read_csv(r.table_paths["token_costs"])
+    assert "player_type" not in tbl.columns
     assert "total_cost" in tbl.columns and "games" in tbl.columns
+    assert r.metadata["by_player_type"] is True
+
+
+def test_exploratory_model_token_costs_can_use_model_only_view(env):
+    r = env(
+        "exploratory.model_token_costs",
+        {"currency": "usd", "by_player_type": False},
+        {"tables": ["tokens"]},
+    )
+
+    assert set(r.table_paths) == {"token_costs"}
+    tbl = pd.read_csv(r.table_paths["token_costs"])
+    assert "player_type" not in tbl.columns
+    assert r.metadata["by_player_type"] is False
+
+
+def test_exploratory_model_token_costs_accepts_by_strategist_alias(env):
+    r = env(
+        "exploratory.model_token_costs",
+        {"currency": "usd", "by_strategist": True},
+        {"tables": ["tokens"]},
+    )
+
+    assert "token_costs_by_player_type" in r.table_paths
+    tbl = pd.read_csv(r.table_paths["token_costs_by_player_type"])
+    assert {"player_type", "model"} <= set(tbl.columns)
 
 
 # ── ratings (R fit monkeypatched) ─────────────────────────────────────────────────

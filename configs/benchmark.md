@@ -550,10 +550,15 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 #### `exploratory.*` — dataset descriptives
 
 ```jsonc
-// model_token_costs uses tokens table + pricing from models.json (cost-efficiency is a benchmark axis)
+// model_token_costs uses tokens table + pricing from models.json (cost-efficiency is a benchmark axis).
+// by_player_type defaults to true: emit player_type+model costs first, plus model-only totals.
 { "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
-  "params": { "currency": "usd" } }
+  "params": { "currency": "usd", "by_player_type": true } }
 ```
+
+Set `by_player_type:false` to render only the legacy model-level aggregate. The
+older `by_strategist` boolean is still accepted as a compatibility alias, but new
+configs should use `by_player_type`.
 
 **Optional `exploratory.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 

@@ -136,6 +136,14 @@ def test_malformed_config_raises(name, dev_spec, write_spec):
         load_config(path)
 
 
+def test_model_token_costs_rejects_unknown_param(dev_spec, write_spec):
+    _analysis(dev_spec, "explore_token_costs")["params"]["bogus"] = True
+    path = write_spec(dev_spec)
+
+    with pytest.raises(ConfigError, match="unknown key"):
+        load_config(path)
+
+
 @pytest.mark.parametrize("value", ["none", None, "game_leader"])
 def test_relative_to_none_and_null_load(dev_spec, write_spec, value):
     """relative_to accepts "none"/null (⇒ no leader normalization) and "game_leader"."""
@@ -157,6 +165,8 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
         "stratified": "FALSE",
     }
     _analysis(dev_spec, "matchup_winrates")["params"]["include_score_ratio"] = "FALSE"
+    _analysis(dev_spec, "explore_token_costs")["params"]["by_player_type"] = "FALSE"
+    _analysis(dev_spec, "explore_token_costs")["params"]["by_strategist"] = "TRUE"
     dev_spec["data"]["filter"] = {"only_llm": "FaLsE"}
     dev_spec["report"]["include_disabled"] = "FALSE"
 
@@ -172,6 +182,9 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
     assert cfg.analyses[0].raw["params"]["bootstrap"]["stratified"] is False
     winrates = next(a for a in cfg.analyses if a.id == "matchup_winrates")
     assert winrates.raw["params"]["include_score_ratio"] is False
+    token_costs = next(a for a in cfg.analyses if a.id == "explore_token_costs")
+    assert token_costs.raw["params"]["by_player_type"] is False
+    assert token_costs.raw["params"]["by_strategist"] is True
     assert cfg.data["filter"]["only_llm"] is False
     assert cfg.report["include_disabled"] is False
 

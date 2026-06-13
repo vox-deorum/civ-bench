@@ -233,7 +233,7 @@
       "module": "exploratory.model_token_costs",
       "enabled": true,
       "uses": { "tables": ["tokens"] },
-      "params": { "currency": "usd" }
+      "params": { "currency": "usd", "by_player_type": true }
     }
   ],
 

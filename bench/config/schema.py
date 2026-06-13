@@ -186,7 +186,7 @@ ANALYSIS_PARAM_KEYS = {
         "metric", "by", "min_games_preliminary", "bootstrap_n", "ci_level",
     },
     "performance.turn_predicted": {"aggregate", "by"},
-    "exploratory.model_token_costs": {"currency", "by_strategist"},
+    "exploratory.model_token_costs": {"currency", "by_player_type", "by_strategist"},
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}

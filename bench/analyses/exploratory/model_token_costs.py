@@ -5,7 +5,8 @@ compute per-row cost = ``input_tokens/1e6 * input_price + (reasoning+output)/1e6
 * output_price`` using the catalog's per-model pricing (``pricing_per_million``),
 aggregate to per-game totals (a game with any missing token field is counted but
 excluded from the averages, mirroring the legacy ``complete_group_sum``), then
-summarize per model: games, N/A games, average input/output tokens, total cost.
+summarize costs by player type + model by default, while also preserving the
+legacy per-model aggregate.
 """
 
 from __future__ import annotations
@@ -26,7 +27,9 @@ class ExploratoryModelTokenCosts(Analysis):
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         currency = self.params.get("currency", "usd")
-        group_by_strategist = bool(self.params.get("by_strategist", False))
+        by_player_type = bool(
+            self.params.get("by_player_type", self.params.get("by_strategist", True))
+        )
 
         tokens = ctx.load_table("tokens")
         tokens = ctx.apply_filter(tokens)
@@ -49,7 +52,31 @@ class ExploratoryModelTokenCosts(Analysis):
             + df["combined_output_tokens"] / 1_000_000 * df["output_per_million"]
         )
 
-        group_cols = ["player_type", "model"] if group_by_strategist else ["model"]
+        model_tbl = self._summarize(df, ["model"])
+        tables = {}
+        plot_tbl = model_tbl
+        if by_player_type:
+            by_player_tbl = self._summarize(df, ["player_type", "model"])
+            tables["token_costs_by_player_type"] = by_player_tbl
+            plot_tbl = by_player_tbl
+        tables["token_costs"] = model_tbl
+
+        fig = self._plot(plot_tbl, currency, catalog)
+        total = model_tbl["total_cost"].sum(skipna=True)
+        breakdown = " across player types" if by_player_type else ""
+        summary = (
+            f"Token costs for {len(model_tbl)} model(s){breakdown}; total = "
+            f"{total:.2f} {currency.upper()} over {int(model_tbl['games'].sum())} games."
+        )
+        return AnalysisResult(
+            tables=tables,
+            figures={"token_costs": fig} if fig is not None else {},
+            summary=summary,
+            metadata={"currency": currency, "by_player_type": by_player_type},
+        )
+
+    @staticmethod
+    def _summarize(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
         per_game = (
             df.groupby(["game_id", *group_cols], as_index=False)
             .agg(
@@ -79,18 +106,7 @@ class ExploratoryModelTokenCosts(Analysis):
         summary_tbl = summary_tbl.merge(prices, left_on="model", right_index=True, how="left")
         summary_tbl = summary_tbl.sort_values("total_cost", ascending=False, na_position="last")
         summary_tbl = summary_tbl.reset_index(drop=True)
-
-        fig = self._plot(summary_tbl, currency, catalog)
-        total = summary_tbl["total_cost"].sum(skipna=True)
-        summary = (
-            f"Token costs for {len(summary_tbl)} model(s); total = "
-            f"{total:.2f} {currency.upper()} over {int(summary_tbl['games'].sum())} games."
-        )
-        return AnalysisResult(
-            tables={"token_costs": summary_tbl},
-            figures={"token_costs": fig} if fig is not None else {},
-            summary=summary, metadata={"currency": currency},
-        )
+        return summary_tbl
 
     def _plot(self, tbl: pd.DataFrame, currency: str, catalog):
         import matplotlib.pyplot as plt
@@ -108,7 +124,10 @@ class ExploratoryModelTokenCosts(Analysis):
         colors = [get_player_color(catalog, m) for m in priced["model"]]
         ax.barh(labels[::-1], priced["total_cost"][::-1], color=colors[::-1])
         ax.set_xlabel(f"Total cost ({currency.upper()})")
-        ax.set_title("Estimated token cost by model", fontsize=12, fontweight="bold")
+        title = "Estimated token cost by player type" if "player_type" in priced.columns else (
+            "Estimated token cost by model"
+        )
+        ax.set_title(title, fontsize=12, fontweight="bold")
         ax.grid(True, axis="x", alpha=0.3)
         fig.tight_layout()
         return fig
