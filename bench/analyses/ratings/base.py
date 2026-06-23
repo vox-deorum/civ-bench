@@ -139,7 +139,7 @@ class RatingsAnalysis(Analysis):
                 f'["player_type"].'
             )
         general = self._calculate(panel, reference)
-        general = self._attach_game_counts(general, panel, "player_type")
+        general = self._attach_appearances(general, panel, "player_type")
         ratings = self._strategy_ratings(ctx, panel, extra_dims, reference)
         fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference, metadata)
         summary = (
@@ -153,13 +153,18 @@ class RatingsAnalysis(Analysis):
     # ── strategy (multi-dim) path ────────────────────────────────────────────────
     def _strategy_ratings(self, ctx, panel, extra_dims, reference) -> pd.DataFrame:
         df = self._composite_identity(ctx, panel, extra_dims)
-        game_counts = df.groupby("composite_type")["game_id"].nunique()
+        # Count distinct seats (game_id, player_id), not distinct games: a model
+        # fields several seats per game (e.g. mirror pairs), each with its own
+        # argmax strategy, so one game can land in two strategy cells. Seat counts
+        # are the fit's actual sample size and partition cleanly across strategies
+        # (every seat has exactly one strategy -> they sum to the General total).
+        appearances = df.drop_duplicates(["game_id", "player_id"]).groupby("composite_type").size()
         min_games = int(self.params.get("min_games", 0) or 0)
 
         bt_input = df[["game_id", "player_id", "composite_type", _STRENGTH_COL, "civilization"]].rename(
             columns={"composite_type": "player_type"}
         )
-        vanilla_comp = game_counts[game_counts.index.str.startswith(reference + "-")]
+        vanilla_comp = appearances[appearances.index.str.startswith(reference + "-")]
         comp_ref = vanilla_comp.idxmax() if len(vanilla_comp) else reference
         results = self._calculate(bt_input, comp_ref)
 
@@ -167,7 +172,7 @@ class RatingsAnalysis(Analysis):
         split = results["composite_type"].str.rsplit("-", n=1, expand=True)
         results["player_type"] = split[0]
         results["strategy"] = split[1] if split.shape[1] > 1 else ""
-        results["n_games"] = results["composite_type"].map(game_counts)
+        results["appearances"] = results["composite_type"].map(appearances)
 
         vanilla_mask = results["player_type"] == reference
         if vanilla_mask.any():
@@ -181,16 +186,16 @@ class RatingsAnalysis(Analysis):
             results["p_value"] = np.where(pos, 2 * norm.sf(np.abs(results["z_value"])), np.nan)
 
         if min_games > 0:
-            results = results[results["n_games"] >= min_games].copy()
+            results = results[results["appearances"] >= min_games].copy()
         return results.sort_values(["strategy", "elo"], ascending=[True, False]).reset_index(drop=True)
 
     @staticmethod
-    def _attach_game_counts(ratings: pd.DataFrame, panel: pd.DataFrame, identity_col: str) -> pd.DataFrame:
-        if "n_games" in ratings.columns:
+    def _attach_appearances(ratings: pd.DataFrame, panel: pd.DataFrame, identity_col: str) -> pd.DataFrame:
+        if "appearances" in ratings.columns:
             return ratings
-        counts = panel.groupby(identity_col)["game_id"].nunique()
+        counts = panel.drop_duplicates(["game_id", "player_id"]).groupby(identity_col).size()
         out = ratings.copy()
-        out["n_games"] = out[identity_col].map(counts)
+        out["appearances"] = out[identity_col].map(counts)
         return out
 
     def _strategy_heatmap(
@@ -222,7 +227,7 @@ class RatingsAnalysis(Analysis):
 
         values = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
         se = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
-        n_games = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
+        appearances = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
         pct = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
 
         for row in general.itertuples(index=False):
@@ -231,7 +236,7 @@ class RatingsAnalysis(Analysis):
                 continue
             values.loc[pt, "General"] = float(getattr(row, "elo"))
             se.loc[pt, "General"] = float(getattr(row, "se_elo", np.nan))
-            n_games.loc[pt, "General"] = float(getattr(row, "n_games", np.nan))
+            appearances.loc[pt, "General"] = float(getattr(row, "appearances", np.nan))
 
         for row in ratings.itertuples(index=False):
             pt = str(getattr(row, "player_type"))
@@ -240,9 +245,9 @@ class RatingsAnalysis(Analysis):
                 continue
             values.loc[pt, strategy] = float(getattr(row, "elo"))
             se.loc[pt, strategy] = float(getattr(row, "se_elo", np.nan))
-            n_games.loc[pt, strategy] = float(getattr(row, "n_games", np.nan))
+            appearances.loc[pt, strategy] = float(getattr(row, "appearances", np.nan))
 
-        strategy_counts = n_games[strategies]
+        strategy_counts = appearances[strategies]
         row_totals = strategy_counts.sum(axis=1).replace(0, np.nan)
         pct[strategies] = strategy_counts.div(row_totals, axis=0) * 100
 
@@ -297,7 +302,7 @@ class RatingsAnalysis(Analysis):
                 ax.text(j + 0.5, i + 0.42, top, ha="center", va="center",
                         fontsize=9, color="black")
 
-                n_val = n_games.loc[pt, col]
+                n_val = appearances.loc[pt, col]
                 if pd.notna(n_val):
                     pct_val = pct.loc[pt, col]
                     if pd.isna(pct_val):
