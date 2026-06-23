@@ -75,6 +75,15 @@
       "pricing": { "input_per_million": 1.05, "output_per_million": 3.5 }
     },
     {
+      "id": "GLM-5.2",
+      "aliases": [
+        "glm-5.2",
+        "openai-compatible/glm-5.2"
+      ],
+      "color": "#4DAF4A",
+      "pricing": { "input_per_million": 1.2, "output_per_million": 4.1 }
+    },
+    {
       "id": "Minimax-M2.5",
       "aliases": [
         "minimax-m2.5",
@@ -92,6 +101,15 @@
       ],
       "color": "#984EA3",
       "pricing": { "input_per_million": 0.3, "output_per_million": 1.2 }
+    },
+    {
+      "id": "Kimi-K2.7",
+      "aliases": [
+        "kimi-k2.7",
+        "openai-compatible/kimi-k2.7"
+      ],
+      "color": "#E377C2",
+      "pricing": { "input_per_million": 0.75, "output_per_million": 3.5 }
     },
     {
       "id": "Kimi-K2.6",
