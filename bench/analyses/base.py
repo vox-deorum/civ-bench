@@ -31,15 +31,22 @@ class AnalysisResult:
     that legitimately produces nothing for the given inputs (e.g.
     ``calibration.cell_baseline`` on a fully uncontrolled run) returns an empty
     result — :meth:`is_empty` is true and the runner records it without error.
+
+    ``artifacts`` is the escape hatch for files that are neither a tabular CSV
+    nor a figure (e.g. the generated ``seating/*.seating.json`` files): it maps a
+    path *relative to the analysis dir* (subdirs allowed) to the file's text
+    content. The runner writes each verbatim and the report copies them into
+    ``assets/`` as downloadable links.
     """
 
     tables: dict[str, pd.DataFrame] = field(default_factory=dict)
     figures: dict[str, Any] = field(default_factory=dict)
+    artifacts: dict[str, str] = field(default_factory=dict)
     summary: str = ""
     metadata: dict = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return not self.tables and not self.figures
+        return not self.tables and not self.figures and not self.artifacts
 
 
 class Analysis(ABC):

@@ -11,6 +11,7 @@ suite runs without Rscript), and the ``run_analysis`` persistence integration.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -460,6 +461,153 @@ def test_experiment_completeness_groups_missing_rotations():
     p_gaps = gaps[gaps["experiment"] == "partial"].set_index("seed")
     assert p_gaps.loc[1, "missing_rotations"] == "1"
     assert p_gaps.loc[2, "missing_rotations"] == "0,1"
+
+
+def test_emit_seating_param_allowed(dev_spec, write_spec):
+    cfg = _validate(dev_spec, write_spec, "performance.experiment_completeness",
+                    {"emit_seating": False})
+    assert cfg.analyses[0].raw["params"]["emit_seating"] is False
+
+
+def _seating_rows(experiment, game_id, seed, rotation, config_slots=(0, 1)):
+    """Controlled strength rows carrying ``config_slot`` (needed for seating headers)."""
+    return [
+        {
+            "experiment": experiment, "game_id": game_id, "player_id": pid,
+            "player_type": "Vanilla" if pid == 0 else "TestLLM",
+            "seed": seed, "seating_rotation": rotation, "config_slot": pid,
+            "controlled": True, "adjusted_strength": 0.5,
+        }
+        for pid in config_slots
+    ]
+
+
+def test_generate_seating_opens_missing_cells():
+    from bench.analyses.performance.seating import generate_seating_files
+
+    # Design grid: configSlots {0,1} -> totalSeats 2; seeds {1,2} -> seedCount 2 = 4 cells.
+    # Present (seed,rot): (1,0),(1,1),(2,0); missing (2,1) -> exactly one open cell.
+    rows = []
+    rows.extend(_seating_rows("ctrl", "g-s1-r0", 1, 0))
+    rows.extend(_seating_rows("ctrl", "g-s1-r1", 1, 1))
+    rows.extend(_seating_rows("ctrl", "g-s2-r0", 2, 0))
+
+    artifacts, index_rows, warnings = generate_seating_files(pd.DataFrame(rows))
+
+    assert "seating/ctrl.seating.json" in artifacts
+    state = json.loads(artifacts["seating/ctrl.seating.json"])
+    assert state["totalSeats"] == 2
+    assert state["seedCount"] == 2
+    assert state["configSlots"] == [0, 1]
+    assert state["seatingSeed"] == 0
+    assert state["basePerm"] == [0, 1]
+    assert len(state["consumeOrder"]) == 4  # totalSeats * seedCount
+    assert state["completedCycles"] == 0
+    assert "_comment" in state
+    # seed 1 -> seedIndex 0, seed 2 -> seedIndex 1.
+    assert state["cells"]["0"]["0"] == {"status": "completed", "gameID": "g-s1-r0"}
+    assert state["cells"]["1"]["0"]["gameID"] == "g-s1-r1"
+    assert state["cells"]["0"]["1"]["gameID"] == "g-s2-r0"
+    # Missing (rotation 1, seedIndex 1) is absent => open.
+    assert "1" not in state["cells"].get("1", {})
+
+    idx = index_rows[0]
+    assert idx == {"experiment": "ctrl", "file": "seating/ctrl.seating.json",
+                   "total_cells": 4, "completed_cells": 3, "open_cells": 1}
+    assert warnings == []
+
+
+def test_generate_seating_skips_complete_experiment():
+    from bench.analyses.performance.seating import generate_seating_files
+
+    rows = []
+    for seed in (1, 2):
+        for rot in (0, 1):
+            rows.extend(_seating_rows("ctrl", f"g-s{seed}-r{rot}", seed, rot))
+
+    artifacts, index_rows, _ = generate_seating_files(pd.DataFrame(rows))
+    assert artifacts == {} and index_rows == []  # full grid -> nothing to open
+
+
+def test_generated_state_passes_validator():
+    from bench.analyses.performance.seating import generate_seating_files, validate_seating_state
+
+    rows = []
+    rows.extend(_seating_rows("ctrl", "g-s1-r0", 1, 0))
+    rows.extend(_seating_rows("ctrl", "g-s2-r0", 2, 0))
+    artifacts, _, _ = generate_seating_files(pd.DataFrame(rows))
+    state = json.loads(artifacts["seating/ctrl.seating.json"])
+    assert validate_seating_state(state) == []
+
+
+def test_validator_flags_unconsumable_state():
+    from bench.analyses.performance.seating import validate_seating_state
+
+    good = {"totalSeats": 2, "seedCount": 2, "configSlots": [0, 1], "seatingSeed": 0,
+            "basePerm": [0, 1],
+            "consumeOrder": [{"rotation": r, "seedIndex": s} for r in range(2) for s in range(2)],
+            "cells": {}, "completedCycles": 0}
+    assert validate_seating_state(good) == []
+
+    # A consumeOrder that drops a cell would strand that open game in the runner.
+    bad = dict(good, consumeOrder=good["consumeOrder"][:-1])
+    assert any("consumeOrder" in p for p in validate_seating_state(bad))
+    # configSlots out of [0, totalSeats) drifts the header => runner rebuilds.
+    assert any("configSlots" in p for p in
+               validate_seating_state(dict(good, configSlots=[0, 5])))
+    # A completed cell with no gameID is malformed.
+    assert any("gameID" in p for p in validate_seating_state(
+        dict(good, cells={"0": {"0": {"status": "completed"}}})))
+
+
+def test_seating_open_cells_equal_completeness_missing():
+    """The cells the seating file leaves open == the games the completeness report flags
+    missing — so the runner (which plays open cells) plays exactly civ-bench's gaps."""
+    from bench.analyses.performance.seating import generate_seating_files
+    from bench.analyses.performance.strength_panel import build_experiment_completeness
+
+    # configSlots {0,1} -> totalSeats 2 == #rotations; seeds {1,2}; (2,1) absent.
+    rows = []
+    for seed, rot in [(1, 0), (1, 1), (2, 0)]:
+        rows.extend(_seating_rows("ctrl", f"g-s{seed}-r{rot}", seed, rot))
+    panel = pd.DataFrame(rows)
+
+    # civ-bench's missing set from the completeness report (seed, rotation).
+    gaps = build_experiment_completeness(panel)["experiment_completeness_gaps"]
+    missing = {
+        (int(r.seed), int(rot))
+        for r in gaps.itertuples(index=False)
+        for rot in str(r.missing_rotations).split(",")
+    }
+    assert missing == {(2, 1)}
+
+    # The seating file's open cells, mapped seedIndex -> seed via the sorted design seeds.
+    design_seeds = sorted({int(s) for s in panel["seed"].unique()})
+    state = json.loads(generate_seating_files(panel)[0]["seating/ctrl.seating.json"])
+    completed = {(int(rk), int(sk)) for rk, inner in state["cells"].items() for sk in inner}
+    open_games = {
+        (design_seeds[s], r)
+        for r in range(state["totalSeats"])
+        for s in range(state["seedCount"])
+        if (r, s) not in completed
+    }
+    assert open_games == missing
+
+
+def test_experiment_completeness_emits_seating_artifact(env):
+    r = env("performance.experiment_completeness", {"emit_seating": True}, {"tables": ["strength"]})
+    seating = [rel for rel in r.artifact_paths if rel.startswith("seating/")]
+    assert seating, "expected at least one generated seating.json for the incomplete grid"
+    state = json.loads(Path(r.artifact_paths[seating[0]]).read_text(encoding="utf-8"))
+    assert {"totalSeats", "seedCount", "configSlots", "consumeOrder", "cells"} <= set(state)
+    assert state["seatingSeed"] == 0 and "_comment" in state
+    assert len(state["consumeOrder"]) == state["totalSeats"] * state["seedCount"]
+
+
+def test_experiment_completeness_emit_seating_off(env):
+    r = env("performance.experiment_completeness", {"emit_seating": False}, {"tables": ["strength"]})
+    assert not any(rel.startswith("seating/") for rel in r.artifact_paths)
+    assert "seating_index" not in r.table_paths
 
 
 def test_experiment_completeness_repeated_games_are_actionable():

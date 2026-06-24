@@ -45,6 +45,7 @@ class AnalysisRunResult:
     module: str
     table_paths: dict[str, str] = field(default_factory=dict)
     figure_paths: dict[str, str] = field(default_factory=dict)
+    artifact_paths: dict[str, str] = field(default_factory=dict)
     summary: str = ""
     empty: bool = False
     metadata: dict = field(default_factory=dict)
@@ -84,6 +85,7 @@ def run_analysis(
 
     table_paths: dict[str, str] = {}
     figure_paths: dict[str, str] = {}
+    artifact_paths: dict[str, str] = {}
     # Always create the dir + write a manifest, even for an empty result, so the
     # report stage can record the section as produced-but-empty rather than
     # mistaking it for a never-run stage.
@@ -98,9 +100,15 @@ def run_analysis(
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             figure_paths[name] = str(path)
+        for rel, content in result.artifacts.items():
+            # `rel` may carry subdirs (e.g. "seating/<exp>.seating.json").
+            path = out_dir / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            artifact_paths[rel] = str(path)
 
     manifest_path = _write_manifest(
-        out_dir, stage_id, module, result, table_paths, figure_paths
+        out_dir, stage_id, module, result, table_paths, figure_paths, artifact_paths
     )
 
     return AnalysisRunResult(
@@ -108,6 +116,7 @@ def run_analysis(
         module=module,
         table_paths=table_paths,
         figure_paths=figure_paths,
+        artifact_paths=artifact_paths,
         summary=result.summary,
         empty=result.is_empty(),
         metadata=result.metadata,
@@ -122,12 +131,15 @@ def _write_manifest(
     result: AnalysisResult,
     table_paths: dict[str, str],
     figure_paths: dict[str, str],
+    artifact_paths: dict[str, str],
 ) -> Path:
     """Persist a ``result.json`` describing the produced artifacts.
 
     Filenames are stored relative to the analysis dir (artifacts live beside the
     manifest); ordered lists preserve the module's table/figure emission order so
-    the report renders them as the author intended.
+    the report renders them as the author intended. ``artifacts`` entries keep
+    their relative path (subdirs included) as the ``file`` so the report can
+    mirror the on-disk tree under ``assets/``.
     """
     manifest = {
         "id": stage_id,
@@ -142,6 +154,10 @@ def _write_manifest(
         "figures": [
             {"name": name, "file": Path(path).name}
             for name, path in figure_paths.items()
+        ],
+        "artifacts": [
+            {"name": rel, "file": rel.replace("\\", "/")}
+            for rel in artifact_paths
         ],
     }
     path = out_dir / MANIFEST_NAME

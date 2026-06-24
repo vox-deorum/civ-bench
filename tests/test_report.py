@@ -25,11 +25,12 @@ from bench.reports.runner import _analyses_dir, report_dir
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
 
 
-def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=None, empty=False):
+def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=None,
+          artifacts=None, empty=False):
     """Fabricate one analysis's persisted artifacts + ``result.json`` manifest."""
     d = _analyses_dir(cfg, sid)
     d.mkdir(parents=True, exist_ok=True)
-    tnames, fnames = [], []
+    tnames, fnames, anames = [], [], []
     if not empty:
         for name, frame in (tables or {}).items():
             frame.to_csv(d / f"{name}.csv", index=False)
@@ -37,9 +38,15 @@ def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=N
         for name in figures or []:
             (d / f"{name}.png").write_bytes(_FAKE_PNG)
             fnames.append({"name": name, "file": f"{name}.png"})
+        for rel, content in (artifacts or {}).items():
+            p = d / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            anames.append({"name": rel, "file": rel})
     manifest = {
         "id": sid, "module": module, "summary": summary,
-        "metadata": metadata or {}, "empty": empty, "tables": tnames, "figures": fnames,
+        "metadata": metadata or {}, "empty": empty,
+        "tables": tnames, "figures": fnames, "artifacts": anames,
     }
     (d / "result.json").write_text(json.dumps(manifest), encoding="utf-8")
 
@@ -82,7 +89,8 @@ def report_env(tmp_path, write_spec, dev_spec):
           figures=["reliability"])
     _emit(cfg, "explore_token_costs", "exploratory.model_token_costs",
           summary="Total spend $12.34 across 192 games.",
-          tables={"token_costs": pd.DataFrame({"model": ["a"], "total_cost": [12.34]})})
+          tables={"token_costs": pd.DataFrame({"model": ["a"], "total_cost": [12.34]})},
+          artifacts={"seating/ctrl.seating.json": '{"totalSeats": 2, "cells": {}}'})
     return cfg
 
 
@@ -112,6 +120,20 @@ def test_assets_copied_self_contained(report_env):
     assert (out / "assets" / "pred_metrics" / "metrics.csv").exists()
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "assets/pred_metrics/metrics.png" in md  # report-relative reference
+
+
+def test_artifacts_copied_and_linked(report_env):
+    run_report(report_env)
+    out = report_dir(report_env)
+    # Subdir tree mirrored under assets/<id>/.
+    asset = out / "assets" / "explore_token_costs" / "seating" / "ctrl.seating.json"
+    assert asset.exists()
+    assert asset.read_text(encoding="utf-8") == '{"totalSeats": 2, "cells": {}}'
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "**Generated files**" in md
+    assert "[ctrl.seating.json](assets/explore_token_costs/seating/ctrl.seating.json)" in md
+    html = (out / "report.html").read_text(encoding="utf-8")
+    assert 'href="assets/explore_token_costs/seating/ctrl.seating.json"' in html
 
 
 def test_html_has_table_and_image(report_env):

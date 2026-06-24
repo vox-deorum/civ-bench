@@ -6,8 +6,11 @@ Reports compact experiment-level completeness against the controlled
 
 from __future__ import annotations
 
+import pandas as pd
+
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
+from .seating import SEATING_INDEX_COLUMNS, generate_seating_files
 from .strength_panel import build_experiment_completeness
 from .turn_predicted import _strength_table_id
 
@@ -45,8 +48,25 @@ class PerformanceExperimentCompleteness(Analysis):
             f"{missing_games} missing slots, {repeated_slots} repeated slots, "
             f"{warning_experiments} experiment(s) with warnings."
         )
+
+        artifacts: dict[str, str] = {}
+        if bool(self.params.get("emit_seating", True)):
+            artifacts, index_rows, warnings = generate_seating_files(
+                panel, games, baseline_experiment
+            )
+            if index_rows:
+                out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)
+                open_total = int(sum(r["open_cells"] for r in index_rows))
+                summary += (
+                    f" Generated {len(index_rows)} seating.json file(s) with "
+                    f"{open_total} open cell(s)."
+                )
+            if warnings:
+                summary += " Seating notes: " + "; ".join(warnings) + "."
+
         return AnalysisResult(
             tables=out,
+            artifacts=artifacts,
             summary=summary,
             metadata={"strength_table": table_id},
         )
