@@ -293,9 +293,16 @@ def test_implicit_recovers_baseline_and_uplift(tmp_path, catalog):
     # cell_baseline trail reconciles: adjusted == inv_logit(logit - cell_baseline)
     bmap = {(r.seed, r.player_id): r.cell_baseline
             for r in art.cell_baseline[art.cell_baseline.pathway == "implicit"].itertuples()}
-    recon = inv_logit(p["logit_strength"].to_numpy()
-                      - np.array([bmap[(s, pid)] for s, pid in zip(p["seed"], p["player_id"])]))
-    assert np.allclose(recon, p["adjusted_strength"].to_numpy(), atol=1e-9)
+    diff = p["logit_strength"].to_numpy() - np.array(
+        [bmap[(s, pid)] for s, pid in zip(p["seed"], p["player_id"])]
+    )
+    assert np.allclose(inv_logit(diff), p["adjusted_strength"].to_numpy(), atol=1e-9)
+
+    # cell_logit_advantage persists the EXACT pre-normalization delta (logit_strength
+    # - cell_baseline) — not a re-logit of the clipped adjusted_strength.
+    assert np.allclose(p["cell_logit_advantage"].to_numpy(), diff, atol=1e-12)
+    assert np.allclose(llm["cell_logit_advantage"], DELTA, atol=1e-3)        # LLM uplift
+    assert np.allclose(vanilla["cell_logit_advantage"], 0.0, atol=1e-3)      # baseline ≈ 0
 
 
 def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, catalog):
@@ -315,10 +322,12 @@ def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, c
     llm_s1 = p[(p.player_type != "Vanilla") & (p.seed == 1)]
     assert (llm_s1["adjust_method"] == "cell").all()
     assert np.allclose(llm_s1["adjusted_strength"], inv_logit(DELTA), atol=1e-3)
+    assert llm_s1["cell_logit_advantage"].notna().all()  # cell rows carry an advantage
 
     # the incomplete cell (2, 0) falls back (no own Vanilla baseline) — not 'cell'
     fallback = p[(p.player_type != "Vanilla") & (p.seed == 2) & (p.player_id == 0)]
     assert len(fallback) == 1 and (fallback["adjust_method"] == "civ").all()
+    assert fallback["cell_logit_advantage"].isna().all()  # non-cell rows have no advantage
 
     # report-only: a warning names the incomplete self-coverage, never raises
     assert any("self-coverage incomplete" in w for w in art.warnings)
@@ -326,6 +335,22 @@ def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, c
     cov = art.cell_coverage
     cell20 = cov[(cov.seed == 2) & (cov.player_id == 0)]
     assert not cell20["has_baseline"].any()
+
+
+def test_cell_logit_advantage_unaffected_by_post_cell_normalize(tmp_path, catalog):
+    # The advantage is captured BEFORE post_cell_normalize, so it stays the exact cell
+    # delta even when adjusted_strength is rescaled relative to the game leader.
+    games = _seated_games("ctrl", seed=1, rotations=[0, 1, 2, 3])
+    pp, pa, gp = _write(tmp_path, games)
+    plain = build_strength_panel(pp, pa, gp, _params(block="auto"), catalog).panel
+    normed = build_strength_panel(
+        pp, pa, gp, _params(block="auto", post_cell_normalize="relative_to_leader"), catalog
+    ).panel
+
+    assert not np.allclose(plain["adjusted_strength"], normed["adjusted_strength"])
+    assert np.allclose(plain["cell_logit_advantage"], normed["cell_logit_advantage"], atol=1e-12)
+    llm = normed[normed["player_type"] != "Vanilla"]
+    assert np.allclose(llm["cell_logit_advantage"], DELTA, atol=1e-3)
 
 
 def test_explicit_missing_baseline_still_raises(tmp_path, catalog):

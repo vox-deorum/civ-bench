@@ -67,6 +67,38 @@ def _bootstrap_ci(values: np.ndarray, n: int, ci_level: float, rng: np.random.Ge
     return float(np.quantile(means, alpha)), float(np.quantile(means, 1.0 - alpha))
 
 
+def _summarize_by(
+    df: pd.DataFrame,
+    by: str,
+    value_col: str,
+    min_games_prelim: int,
+    boot_n: int,
+    ci_level: float,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    """Per-identity mean of ``value_col`` with bootstrap CI and a preliminary flag.
+
+    Shared by the main ``by_identity`` summary and the controlled-mode logit-advantage
+    view so both report identical columns and use the same bootstrap machinery.
+    """
+    rows = []
+    for ident, grp in df.groupby(by):
+        vals = grp[value_col].dropna().to_numpy()
+        n_games = int(grp["game_id"].nunique()) if "game_id" in grp.columns else int(len(grp))
+        lo, hi = _bootstrap_ci(vals, boot_n, ci_level, rng)
+        rows.append({
+            by: ident,
+            "mean": float(vals.mean()) if len(vals) else float("nan"),
+            "std": float(vals.std(ddof=1)) if len(vals) > 1 else float("nan"),
+            "n_rows": int(len(vals)),
+            "n_games": n_games,
+            "ci_lower": lo,
+            "ci_upper": hi,
+            "preliminary": bool(n_games < min_games_prelim),
+        })
+    return pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
+
+
 def _truthy(series: pd.Series) -> pd.Series:
     if series.dtype == bool:
         return series.fillna(False)
@@ -269,29 +301,51 @@ class PerformanceStrengthPanel(Analysis):
             )
 
         rng = np.random.default_rng(ctx.config.seed)
-        rows = []
-        for ident, grp in panel.groupby(by):
-            vals = grp[metric].dropna().to_numpy()
-            n_games = int(grp["game_id"].nunique()) if "game_id" in grp.columns else int(len(grp))
-            lo, hi = _bootstrap_ci(vals, boot_n, ci_level, rng)
-            rows.append({
-                by: ident,
-                "mean": float(vals.mean()) if len(vals) else float("nan"),
-                "std": float(vals.std(ddof=1)) if len(vals) > 1 else float("nan"),
-                "n_rows": int(len(vals)),
-                "n_games": n_games,
-                "ci_lower": lo,
-                "ci_upper": hi,
-                "preliminary": bool(n_games < min_games_prelim),
-            })
-        summary_tbl = pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
+        summary_tbl = _summarize_by(
+            panel, by, metric, min_games_prelim, boot_n, ci_level, rng
+        )
 
         tables = {"by_identity": summary_tbl}
+        figures = {}
+        fig = self._plot_bars(
+            summary_tbl, by, ctx, f"mean {metric}",
+            f"{metric} by {by} (bootstrap CI; * = preliminary)",
+        )
+        if fig is not None:
+            figures["strength"] = fig
+
+        # Controlled-mode alternative view: per-identity mean of the exact start-cell
+        # advantage `cell_logit_advantage` (= logit_strength - cell_baseline, persisted
+        # by the adjust stage before any post_cell_normalize), i.e. "your strength -
+        # matched Vanilla VPAI baseline in this cell" on the logit scale. NaN for
+        # non-cell rows, so this view only appears in controlled runs. Vanilla is NOT
+        # forced to 0 — it is summarized like every identity so the report shows where
+        # it actually lands.
+        adv_note = ""
+        advantage_col = "cell_logit_advantage"
+        if advantage_col in panel.columns and panel[advantage_col].notna().any():
+            cell = panel[panel[advantage_col].notna()].copy()
+            adv_tbl = _summarize_by(
+                cell, by, advantage_col, min_games_prelim, boot_n, ci_level, rng
+            )
+            tables["by_identity_logit_advantage"] = adv_tbl
+            adv_fig = self._plot_bars(
+                adv_tbl, by, ctx, "logit advantage vs Vanilla cell baseline",
+                f"logit advantage by {by} (0 = cell baseline; bootstrap CI; * = preliminary)",
+                center_zero=True,
+            )
+            if adv_fig is not None:
+                figures["logit_advantage"] = adv_fig
+            adv_note = f"logit-advantage view over {len(cell)} cell-baselined rows"
+            if by == "player_type":
+                vrow = adv_tbl[adv_tbl[by] == ctx.catalog.vanilla_label]
+                if not vrow.empty:
+                    adv_note += f"; Vanilla mean = {float(vrow['mean'].iloc[0]):+.3f}"
+
         coverage = self._load_coverage(ctx, table_id)
         if coverage is not None:
             tables["cell_coverage_summary"] = self._coverage_summary(coverage)
             tables["cell_coverage"] = coverage
-        fig = self._plot(summary_tbl, by, metric, ctx)
         n_prelim = int(summary_tbl["preliminary"].sum())
         report_notes = []
         if coverage is not None:
@@ -312,9 +366,11 @@ class PerformanceStrengthPanel(Analysis):
         )
         if report_notes:
             summary += "; " + "; ".join(report_notes)
+        if adv_note:
+            summary += "; " + adv_note
         summary += "."
         return AnalysisResult(
-            tables=tables, figures={"strength": fig} if fig is not None else {},
+            tables=tables, figures=figures,
             summary=summary, metadata={"by": by, "metric": metric},
         )
 
@@ -346,11 +402,27 @@ class PerformanceStrengthPanel(Analysis):
             })
         return pd.DataFrame(rows)
 
-    def _plot(self, tbl: pd.DataFrame, by: str, metric: str, ctx: AnalysisContext):
+    def _plot_bars(
+        self,
+        tbl: pd.DataFrame,
+        by: str,
+        ctx: AnalysisContext,
+        xlabel: str,
+        title: str,
+        *,
+        center_zero: bool = False,
+    ):
+        """Horizontal per-identity bar chart with bootstrap-CI whiskers.
+
+        Shared by the main metric view and the controlled-mode logit-advantage view;
+        ``center_zero`` adds the dashed baseline line for the (signed) advantage plot.
+        """
         import matplotlib.pyplot as plt
 
         from ...plotting.styles import get_player_color
 
+        if tbl.empty:
+            return None
         n = len(tbl)
         fig, ax = plt.subplots(figsize=(8, max(3, 0.4 * n + 1.5)))
         order = tbl.iloc[::-1]  # highest at top
@@ -364,13 +436,15 @@ class PerformanceStrengthPanel(Analysis):
         ax.barh(list(y), order["mean"], color=colors, alpha=0.85)
         ax.errorbar(order["mean"], list(y), xerr=xerr, fmt="none", ecolor="black",
                     elinewidth=1.0, capsize=3)
+        if center_zero:
+            ax.axvline(0, color="gray", linestyle="--", linewidth=1)
         for i, prelim in enumerate(order["preliminary"]):
             if prelim:
                 ax.text(0, i, " *", va="center", ha="left", color="darkred", fontsize=10)
         ax.set_yticks(list(y))
         ax.set_yticklabels(order[by])
-        ax.set_xlabel(f"mean {metric}")
-        ax.set_title(f"{metric} by {by} (bootstrap CI; * = preliminary)", fontsize=12, fontweight="bold")
+        ax.set_xlabel(xlabel)
+        ax.set_title(title, fontsize=12, fontweight="bold")
         ax.grid(True, axis="x", alpha=0.3)
         fig.tight_layout()
         return fig

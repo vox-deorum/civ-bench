@@ -84,9 +84,20 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
     # strength panel + audit trails (adjust outputs)
     adj = tmp_path / "adjust"
     adj.mkdir(exist_ok=True)
-    pd.DataFrame(strength).to_csv(adj / "player_strength_panel.csv", index=False)
+    sdf = pd.DataFrame(strength)
+    # Mirror the adjust stage's persisted cell advantage (logit_strength - cell_baseline),
+    # NaN on uncontrolled runs so the analysis only surfaces the view when controlled.
+    sdf["cell_logit_advantage"] = np.nan
+    if controlled:
+        van = sdf[sdf["player_type"] == "Vanilla"]
+        cb = van.groupby(["experiment", "seed"])["logit_strength"].mean()
+        base = pd.Series([cb.get((e, s)) for e, s in zip(sdf["experiment"], sdf["seed"])],
+                         index=sdf.index)
+        cmask = sdf["controlled"].astype(bool)
+        sdf.loc[cmask, "cell_logit_advantage"] = sdf.loc[cmask, "logit_strength"] - base[cmask]
+    sdf.to_csv(adj / "player_strength_panel.csv", index=False)
     paths["adjust_dir"] = str(adj)
-    return paths, pd.DataFrame(strength)
+    return paths, sdf
 
 
 def _write_audit_trails(adj_dir, controlled, strength_df):
@@ -369,6 +380,31 @@ def test_performance_strength_panel(env):
     assert "experiment_completeness" not in r.table_paths
     coverage = pd.read_csv(r.table_paths["cell_coverage_summary"])
     assert {"missing_cells", "no_vanilla_baseline_cells", "coverage_pct"} <= set(coverage.columns)
+
+    # Controlled run also surfaces the logit-advantage alternative view.
+    assert "by_identity_logit_advantage" in r.table_paths
+    assert "logit_advantage" in r.figure_paths
+    adv = pd.read_csv(r.table_paths["by_identity_logit_advantage"])
+    assert {"player_type", "mean", "ci_lower", "ci_upper", "preliminary"} <= set(adv.columns)
+    assert adv["mean"].notna().all()
+    assert set(adv["player_type"]) == set(tbl["player_type"])  # same identities, just re-scaled
+
+
+def test_performance_strength_panel_logit_advantage_uncontrolled_gate(env):
+    # No cell-baselined rows (adjust_method != "cell") ⇒ the logit-advantage view is
+    # omitted; only the base by_identity view renders.
+    save = env.cfg.adjust[0].raw["save"]
+    panel = pd.read_csv(save)
+    panel["adjust_method"] = "civ"
+    panel["controlled"] = False
+    panel["cell_logit_advantage"] = np.nan
+    panel.to_csv(save, index=False)
+
+    r = env("performance.strength_panel", {"metric": "adjusted_strength", "by": "player_type",
+            "bootstrap_n": 50}, {"tables": ["strength"]})
+    assert "by_identity" in r.table_paths
+    assert "by_identity_logit_advantage" not in r.table_paths
+    assert "logit_advantage" not in r.figure_paths
 
 
 def test_performance_experiment_completeness(env):

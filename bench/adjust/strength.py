@@ -52,7 +52,7 @@ PANEL_COLUMNS = [
     "experiment", "game_id", "player_id", "player_type", "civilization",
     "seed", "seating_rotation", "config_slot", "controlled", "is_winner",
     "weighted_strength", "relative_strength", "logit_strength", "adjusted_strength",
-    "adjust_method",
+    "adjust_method", "cell_logit_advantage",
 ]
 CIV_EFFECTS_COLUMNS = ["civilization", "civ_effect", "n_rows"]
 CELL_BASELINE_COLUMNS = [
@@ -522,15 +522,21 @@ def build_strength_panel(
     # cell_mask: controlled rows that actually have a start-cell baseline. Controlled
     # rows missing one (implicit fallback) drop into `rest` with the uncontrolled path.
     adjusted = pd.Series(np.nan, index=df.index)
+    # The exact start-cell advantage on the logit scale (logit_strength - cell_baseline),
+    # captured here *before* the optional post_cell_normalize so it always means
+    # "your strength - matched Vanilla VPAI baseline in this cell". NaN for non-cell rows.
+    cell_logit_advantage = pd.Series(np.nan, index=df.index)
     if cell_active:
         cell_mask = df["controlled"] & cell_baseline_series.notna()
     else:
         cell_mask = pd.Series(False, index=df.index)
     if cell_mask.any():
-        adjusted[cell_mask] = inv_logit(
+        cell_diff = (
             df.loc[cell_mask, "logit_strength"].to_numpy()
             - cell_baseline_series[cell_mask].to_numpy()
         )
+        adjusted[cell_mask] = inv_logit(cell_diff)
+        cell_logit_advantage[cell_mask] = cell_diff
     rest = ~cell_mask
     if p["civ_adjust"] == "ols_logit":
         civ_adj = df["civilization"].map(civ_effects).fillna(0.0)
@@ -540,6 +546,7 @@ def build_strength_panel(
     else:
         adjusted[rest] = df.loc[rest, "relative_strength"].to_numpy()
     df["adjusted_strength"] = adjusted
+    df["cell_logit_advantage"] = cell_logit_advantage
 
     # Audit: how each row was adjusted (cell | civ | relative). Lets the report flag
     # implicit-fallback rows as preliminary without re-deriving the coverage.
