@@ -143,9 +143,17 @@ pip install -e .                                       # install package + civ-b
 civ-bench extract --config configs/benchmark.dev.json  # raw game DBs → canonical CSVs
 civ-bench run     --config configs/benchmark.dev.json  # run the full DAG (extract→estimators→analyses→report)
 civ-bench report  --config configs/benchmark.dev.json  # re-render report from existing analysis artifacts
+civ-bench fix     --config configs/benchmark.dev.json  # recover malformed DBs from import_issues.csv (orig → <name>.db.bak)
 civ-bench run --config configs/benchmark.dev.json --only ratings.bradley_terry   # one stage + its deps
 civ-bench run --config configs/benchmark.dev.json --skip extract                 # reuse existing CSVs
+civ-bench fix --config configs/benchmark.dev.json --dry-run                       # preview the DBs fix would repair
 ```
+
+`fix` is a recovery tool, not a pipeline stage: it reads `import_issues.csv` and, for
+each flagged game, examines every related `.db` (the game DB **and** its `*-player-*.db`
+telemetry exports). Corrupt files are recovered in place (original kept as
+`<name>.db.bak`); files that are already healthy are left untouched with no backup. The
+ledger is left as-is — re-run `extract --force-rebuild` afterwards to refresh the CSVs.
 
 Until the CLI exists, mirror the old entrypoints (`python -m bench.extract`, etc.) but always parameterize by config path.
 

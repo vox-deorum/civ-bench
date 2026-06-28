@@ -64,6 +64,23 @@ def build_parser() -> argparse.ArgumentParser:
                 help="re-extract even when outputs are newer than the DBs "
                      "(overrides data.extract.force_rebuild)",
             )
+
+    # `fix` repairs the malformed DBs recorded in import_issues.csv. It takes no
+    # stage selection (--only/--skip are meaningless), so it gets a lean subparser
+    # with its own --dry-run (preview) and --force (overwrite an existing .bak).
+    fix = sub.add_parser("fix", help="repair malformed game DBs from import_issues.csv")
+    fix.add_argument(
+        "--config", required=True,
+        help="path to a benchmark run-spec (configs/benchmark*.json)",
+    )
+    fix.add_argument(
+        "--dry-run", action="store_true",
+        help="list the problem DBs that would be repaired, without writing anything",
+    )
+    fix.add_argument(
+        "--force", action="store_true",
+        help="re-repair even when a <name>.db.bak backup already exists (overwrites it)",
+    )
     return parser
 
 
@@ -198,6 +215,27 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         cfg = load_config(args.config)
+    except ConfigError as exc:
+        print(f"civ-bench: config error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.command == "fix":
+        # `fix` repairs raw DB files; it needs no DAG and owns its own --dry-run
+        # (preview), so it is handled before the DAG build and the generic _is_dry path.
+        from .fix import FixError, run_fix
+
+        try:
+            result = run_fix(
+                cfg, dry_run=bool(args.dry_run), force=bool(getattr(args, "force", False))
+            )
+        except (ConfigError, FixError) as exc:
+            print(f"civ-bench: fix error: {exc}", file=sys.stderr)
+            return 2
+        # Best-effort tool: non-zero only when the run resolved nothing yet left
+        # unresolved DBs (every attempt failed, or none could be located).
+        return 2 if (result.unresolved and not result.repaired) else 0
+
+    try:
         dag = build_dag(cfg)
     except ConfigError as exc:
         print(f"civ-bench: config error: {exc}", file=sys.stderr)

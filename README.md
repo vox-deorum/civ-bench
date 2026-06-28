@@ -99,10 +99,11 @@ civ-bench/
 │   ├── experiments.json              # experiment registry + player-type labels
 │   └── paths.json                    # data + output roots
 ├── bench/               # the Python package
-│   ├── cli.py                # `civ-bench extract|run|report`
+│   ├── cli.py                # `civ-bench extract|run|report|fix`
 │   ├── pipeline/             # DAG builder + scheduler
 │   ├── config/               # load + validate JSON into typed config objects
 │   ├── extract/              # game SQLite DBs to canonical CSVs
+│   ├── fix/                  # recover malformed game DBs listed in import_issues.csv
 │   ├── data/                 # canonical CSV loading + filtering
 │   ├── catalog/              # model + experiment catalogs backed by configs/
 │   ├── estimators/           # predictor producers: tune / train / load / infer
