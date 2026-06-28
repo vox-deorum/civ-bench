@@ -438,26 +438,96 @@ def test_run_fix_swap_failure_restores_original(monkeypatch, tmp_path):
     assert leftover == []                                 # temp cleaned up
 
 
-def test_repair_reports_truncation_when_bounds_unreadable(monkeypatch, tmp_path):
-    # When a corrupt page both blocks the bulk copy and hides the rowid bounds, recovery
-    # falls back to a plain scan that can stop early — that loss must be documented.
+def test_repair_recovers_tail_when_bounds_unreadable(monkeypatch, tmp_path):
+    # Regression: a corrupt page that blocks the bulk copy AND hides MIN/MAX(rowid) used
+    # to fall back to a plain scan that truncated the table's tail (losing everything past
+    # the bad page). The rowid walk must now recover the whole table regardless — a rowid
+    # table can always be range-walked; unreadable bounds are no reason to drop the tail.
     import bench.fix.repair as repair_mod
 
-    def _raise(*_a, **_k):
+    src = tmp_path / "g.db"
+    _make_db(src, n_rows=1500, with_index=False)
+    monkeypatch.setattr(repair_mod, "_try_iterdump", lambda *a, **k: False)
+
+    def _boom(*_a, **_k):
         raise sqlite3.DatabaseError("simulated corrupt page")
 
-    src = tmp_path / "g.db"
-    _make_db(src, n_rows=20, with_index=False)
-    monkeypatch.setattr(repair_mod, "_try_iterdump", lambda *a, **k: False)
-    monkeypatch.setattr(repair_mod, "_bulk_copy", _raise)
+    monkeypatch.setattr(repair_mod, "_bulk_copy", _boom)
     monkeypatch.setattr(repair_mod, "_rowid_bounds", lambda *a, **k: (None, None))
-    monkeypatch.setattr(repair_mod, "_tolerant_scan", lambda *a, **k: (3, True))
     dst = tmp_path / "out.db"
 
     report = repair_database(str(src), str(dst))
 
     assert report.success and report.strategy == "tolerant-rebuild"
-    assert any("truncated" in note for note in report.objects_skipped)
+    assert report.rows_recovered == 1502    # 1500 items + 2 meta, whole tail recovered
+    assert report.rows_skipped == 0
+    assert report.tables_partial == []      # nothing lost → no partial-table note
+    assert _row_count(dst) == 1500
+
+
+def test_copy_by_rowid_gives_up_after_skip_limit(monkeypatch):
+    # Safety guard: if the rowid b-tree is unreadable (every window errors), the walk must
+    # not grind toward the open upper bound — it stops after _SKIP_LIMIT consecutive
+    # unreadable rowids. Because no real rows ever followed those skips, they are *not*
+    # reported as lost rows (they were end-probing, not data) — only `truncated` is set.
+    import bench.fix.repair as repair_mod
+
+    monkeypatch.setattr(repair_mod, "_SKIP_LIMIT", 5)
+    monkeypatch.setattr(repair_mod, "_rowid_bounds", lambda *a, **k: (None, None))
+
+    class _DeadSrc:  # every range read raises → the b-tree cannot be walked at all
+        def execute(self, _sql, _params=None):
+            raise sqlite3.DatabaseError("b-tree unreadable")
+
+    dst = sqlite3.connect(":memory:")
+    dst.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+
+    copied, skipped, truncated = repair_mod._copy_by_rowid(
+        _DeadSrc(), dst, "t", "INSERT INTO t VALUES (?, ?)"
+    )
+    dst.close()
+
+    assert copied == 0
+    assert skipped == 0       # the give-up probes are speculative, never counted as lost
+    assert truncated is True
+
+
+def test_partial_note_reads_as_kept_not_dropped():
+    # The user-facing fix: partial row loss in a recovered table must never read as a
+    # dropped table. A clean table produces no note at all.
+    from bench.fix.repair import _partial_note
+
+    assert _partial_note("GameEvents", copied=5, skipped=0, truncated=False) is None
+
+    skipped_note = _partial_note("GameEvents", copied=739223, skipped=9, truncated=False)
+    assert skipped_note == "GameEvents: recovered 739223 row(s); 9 on a corrupt page were unreadable"
+    assert "dropped" not in skipped_note
+
+    trunc_note = _partial_note("GameEvents", copied=10, skipped=2, truncated=True)
+    assert "recovered 10 row(s)" in trunc_note and "corrupt region" in trunc_note
+    assert "dropped" not in trunc_note
+
+
+def test_count_rows_on_disk_is_accurate(tmp_path):
+    # The honest denominator: a raw page scan must count exactly the table rows physically
+    # present (user tables + sqlite_master's schema rows), independent of the b-tree.
+    from bench.fix.repair import _count_rows_on_disk
+
+    db = tmp_path / "g.db"
+    _make_db(db, n_rows=300, with_index=True, wide=True)  # spans many leaf pages + an interior page
+
+    conn = sqlite3.connect(str(db))
+    expected = sum(
+        conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        for t in ("items", "meta", "sqlite_master")
+    )
+    conn.close()
+
+    assert _count_rows_on_disk(str(db)) == expected
+    # A non-SQLite file is reported as unknown, not zero.
+    bad = tmp_path / "bad.bin"
+    bad.write_bytes(b"not a sqlite database")
+    assert _count_rows_on_disk(str(bad)) is None
 
 
 def test_run_fix_clears_stale_sidecars(tmp_path):

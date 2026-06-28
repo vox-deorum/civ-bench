@@ -258,13 +258,27 @@ def _print_outcome(outcome: FixOutcome) -> None:
     """One human-readable line per DB, in the extract-runner style."""
     rep = outcome.report
     if outcome.status == "repaired" and rep is not None:
-        lost = f", {rep.rows_skipped} lost" if rep.rows_skipped else ""
+        # Lead with the on-disk ground truth (page scan) — it catches rows the walk's skip
+        # counter silently misses. Fall back to the skip count only when no scan was made.
+        if rep.rows_on_disk and rep.rows_on_disk > rep.rows_recovered:
+            missing = rep.rows_on_disk - rep.rows_recovered
+            pct = 100.0 * rep.rows_recovered / rep.rows_on_disk
+            rows = (
+                f"{rep.rows_recovered:,} of {rep.rows_on_disk:,} row(s) recovered ({pct:.1f}%; "
+                f"{missing:,} lost to corrupt pages)"
+            )
+        elif rep.rows_skipped:
+            rows = f"{rep.rows_recovered:,} row(s) recovered ({rep.rows_skipped:,} lost to corrupt pages)"
+        else:
+            rows = f"{rep.rows_recovered:,} row(s) recovered"
         dropped = f", {len(rep.objects_skipped)} object(s) dropped" if rep.objects_skipped else ""
         print(
             f"  [repaired] {outcome.db_name} ({rep.strategy}): "
-            f"{len(rep.tables_recovered)} table(s), {rep.rows_recovered} row(s){lost}{dropped}"
+            f"{len(rep.tables_recovered)} table(s), {rows}{dropped}"
         )
-        for note in rep.objects_skipped:
+        for note in rep.tables_partial:   # tables kept, with some row loss
+            print(f"             - {note}")
+        for note in rep.objects_skipped:  # objects dropped entirely
             print(f"             - dropped {note}")
     elif outcome.status == "healthy":
         print(f"  [healthy]  {outcome.db_name} — already valid, left as-is")
