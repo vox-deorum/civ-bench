@@ -120,6 +120,7 @@ def _mutations():
         "report_sections_not_list": lambda c: c["report"].__setitem__("sections", "bt_main"),
         "report_out_dir_not_string": lambda c: c["report"].__setitem__("out_dir", 7),
         "extract_max_dbs_zero": lambda c: c["data"]["extract"].__setitem__("max_dbs", 0),
+        "extract_issues_path_not_string": lambda c: c["data"]["extract"].__setitem__("issues_path", 7),
         "tables_path_not_string": lambda c: c["data"]["tables"].__setitem__("turns", 7),
         "stage_filter_widens_global": lambda c: (
             c["data"].__setitem__("filter", {"experiments": ["global_only"]}),
@@ -142,6 +143,13 @@ def test_model_token_costs_rejects_unknown_param(dev_spec, write_spec):
 
     with pytest.raises(ConfigError, match="unknown key"):
         load_config(path)
+
+
+def test_extract_issues_path_override_loads(dev_spec, write_spec):
+    """data.extract.issues_path is an accepted (string) override under strict validation."""
+    dev_spec["data"]["extract"]["issues_path"] = "runs/custom_issues.csv"
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.data["extract"]["issues_path"] == "runs/custom_issues.csv"
 
 
 @pytest.mark.parametrize("value", ["none", None, "game_leader"])

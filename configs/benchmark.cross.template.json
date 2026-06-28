@@ -29,7 +29,8 @@
       "outputs": ["turns", "panel", "games", "tokens"],
       "max_dbs": null,
       "prune_missing": false,
-      "force_rebuild": false
+      "force_rebuild": false,
+      "issues_path": "runs/import_issues.csv"
     },
     "tables": {
       "turns": "runs/turn_data.csv",

@@ -95,6 +95,10 @@ def _make_game_db(
 
 
 def _run_config(tmp_path: Path, extract: dict, tables: dict) -> RunConfig:
+    # Default the issue report into tmp so tests never write the repo's runs/ and
+    # the freshness check (which now counts issues_path) is deterministic; a test
+    # may still override issues_path via its own ``extract`` dict.
+    extract = {"issues_path": str(tmp_path / "import_issues.csv"), **extract}
     return RunConfig(
         name="test",
         seed=1,
@@ -280,17 +284,101 @@ def test_run_extract_skips_when_fresh(tmp_path, catalog):
     _make_game_db(db, {"gameId": "g"})
     out = tmp_path / "game_data.csv"
     out.write_text("game_id,timestamp,experiment,seed,seating_rotation\n", encoding="utf-8")
+    # The issue report is one of the outputs the freshness check requires; a fresh
+    # run only skips when it too exists and is newer than the DBs.
+    issues = tmp_path / "import_issues.csv"
+    issues.write_text("game_id,experiment,seed,seating_rotation,stages,players,db_name,message\n", encoding="utf-8")
     time.sleep(0.01)
-    os.utime(str(out), None)  # output newer than the DB
+    os.utime(str(out), None)  # outputs newer than the DB
+    os.utime(str(issues), None)
 
     cfg = _run_config(
         tmp_path,
-        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"]},
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "issues_path": str(issues)},
         {"games": str(out)},
     )
     result = run_extract(cfg, catalog=catalog)
     assert result.skipped is True
     assert "newer than the source" in result.reason
+
+
+def test_run_extract_carries_forward_prior_issue_for_unreexamined_stage(tmp_path, catalog):
+    # Reconcile, don't clobber: a prior tokens-stage issue survives a games-only run
+    # because the tokens stage never re-examined the game (the report is durable).
+    runs = tmp_path / "runs"
+    db = runs / "exp" / "oldg_100.db"
+    _make_game_db(db, {"gameId": "oldg", "configuredSyncRandSeed": "7",
+                       "configuredMapRandSeed": "7", "seatingRotation": "1"})
+    issues = tmp_path / "import_issues.csv"
+    issues.write_text(
+        "game_id,experiment,seed,seating_rotation,stages,players,db_name,message\n"
+        "oldg,exp,7,1,tokens,2,oldg-player-2.db,trace boom\n",
+        encoding="utf-8",
+    )
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "issues_path": str(issues)},
+        {"games": str(tmp_path / "game_data.csv")},
+    )
+    result = run_extract(cfg, catalog=catalog)
+
+    assert result.skipped is False
+    assert len(result.issues) == 1
+    issue = result.issues.issues()[0]
+    assert issue.game_id == "oldg" and issue.stages == {"tokens"}
+    assert issue.seed == 7 and issue.seating_rotation == 1
+    import csv
+    persisted = list(csv.DictReader(issues.open(encoding="utf-8")))
+    assert persisted and persisted[0]["game_id"] == "oldg" and persisted[0]["stages"] == "tokens"
+
+
+def test_run_extract_prune_only_reconciles_report_without_clobber(tmp_path, catalog):
+    # Prune-only inspects no DBs: it must keep issues for present games and drop
+    # those whose DB is gone — never overwrite the report with a clean header.
+    runs = tmp_path / "runs"
+    _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})
+    issues = tmp_path / "import_issues.csv"
+    issues.write_text(
+        "game_id,experiment,seed,seating_rotation,stages,players,db_name,message\n"
+        "keep,exp,-1,-1,panel,,keep_100.db,boom\n"
+        "gone,exp,-1,-1,panel,,gone_100.db,boom\n",
+        encoding="utf-8",
+    )
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"],
+         "prune_missing": True, "issues_path": str(issues)},
+        {"games": str(tmp_path / "game_data.csv")},
+    )
+    result = run_extract(cfg, catalog=catalog)
+
+    assert result.skipped is False
+    assert {i.game_id for i in result.issues.issues()} == {"keep"}
+    import csv
+    persisted = {r["game_id"] for r in csv.DictReader(issues.open(encoding="utf-8"))}
+    assert persisted == {"keep"}
+
+
+def test_run_extract_does_not_skip_when_issue_report_missing(tmp_path, catalog):
+    # Outputs fresh but the issue report has never been written → must (re)build so
+    # the report is not stranded behind already-fresh tables.
+    runs = tmp_path / "runs"
+    db = runs / "exp" / "g_1.db"
+    _make_game_db(db, {"gameId": "g"})
+    out = tmp_path / "game_data.csv"
+    out.write_text("game_id,timestamp,experiment,seed,seating_rotation\n", encoding="utf-8")
+    time.sleep(0.01)
+    os.utime(str(out), None)
+
+    issues = tmp_path / "import_issues.csv"  # deliberately absent
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "issues_path": str(issues)},
+        {"games": str(out)},
+    )
+    result = run_extract(cfg, catalog=catalog)
+    assert result.skipped is False
+    assert issues.exists()  # the (re)build created the report
 
 
 def test_run_extract_force_rebuild_runs_anyway(tmp_path, catalog):

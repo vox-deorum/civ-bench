@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 from typing import Dict, List, Optional, Tuple
 
 from ..catalog import Catalog
 from .identity import compose_identities
+from .issues import record_db_failure
 from .utilities import (
     append_csv_file, extract_seeding_fields, filter_existing_data,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
@@ -232,14 +234,27 @@ def extract_player_model_token_rows(
     experiment: str,
     player_type: str,
     catalog: Catalog,
+    issues=None,
+    metadata=None,
 ) -> List[dict]:
-    """Aggregate one row per (player, model) from a player-trace DB."""
+    """Aggregate one row per (player, model) from a player-trace DB.
+
+    ``metadata`` is the owning game's already-read ``GameMetadata`` (or ``{}`` if it
+    was unreadable); passing it lets a trace failure report the game's real seed/
+    rotation rather than "unknown".
+    """
     _, player_id = _parse_player_trace_path(trace_db_path)
     if player_id is None:
         return []
 
     conn, _ = open_database_readonly(trace_db_path)
     if not conn:
+        if issues is not None:
+            issues.record(
+                stage="tokens", db_path=trace_db_path, game_id=game_id,
+                experiment=experiment, player_id=player_id, metadata=metadata,
+                message="could not open trace database",
+            )
         return []
 
     try:
@@ -252,6 +267,13 @@ def extract_player_model_token_rows(
         trace_ids = [trace_id for _, trace_id in valid_turns]
         spans = _fetch_relevant_spans(cursor, trace_ids)
         conn.close()
+    except sqlite3.DatabaseError as exc:
+        record_db_failure(
+            issues, stage="tokens", db_path=trace_db_path, exc=exc,
+            game_id=game_id, experiment=experiment, player_id=player_id, metadata=metadata,
+        )
+        conn.close()
+        return []
     except Exception as exc:
         print(f"Error processing {os.path.basename(trace_db_path)}: {exc}")
         conn.close()
@@ -315,11 +337,20 @@ def extract_player_model_token_rows(
     return final_rows
 
 
-def _game_player_types(game_db_path: str, catalog: Optional[Catalog]) -> Dict[int, str]:
-    """Compose ``{player_id: player_type}`` from the game DB's metadata (§3.3)."""
+def _game_player_types(game_db_path: str, catalog: Optional[Catalog], issues=None):
+    """Compose ``({player_id: player_type}, metadata)`` from the game DB (§3.3).
+
+    Token counts come from the separate ``*-player-*.db`` trace files, so a corrupt
+    game DB only costs us the ``player_type`` labels — record the issue and degrade
+    to ``({}, {})`` (labels become ``N/A``) rather than crashing or dropping tokens.
+    The ``metadata`` is returned so a *trace* failure on an otherwise-readable game
+    can still report the game's real seed/rotation instead of "unknown".
+    """
     conn, cursor = open_database_readonly(game_db_path)
     if not conn:
-        return {}
+        if issues is not None:
+            issues.record(stage="tokens", db_path=game_db_path, message="could not open database")
+        return {}, {}
     try:
         metadata = read_game_metadata(cursor)
         experiment = get_experiment_from_path(game_db_path)
@@ -328,19 +359,24 @@ def _game_player_types(game_db_path: str, catalog: Optional[Catalog]) -> Dict[in
         major_players = [pid for pid, info in player_info_cache.items() if info["is_major"]]
         seeding = extract_seeding_fields(metadata, where=f"game {game_id}")
         identities = compose_identities(metadata, major_players, experiment, catalog, seeding)
+    except sqlite3.DatabaseError as exc:
+        # Malformed/locked image — record and degrade labels to N/A. A
+        # controlled-seed mismatch (ExtractError) stays a hard abort.
+        record_db_failure(issues, stage="tokens", db_path=game_db_path, exc=exc)
+        return {}, {}
     finally:
         conn.close()
-    return {pid: ident.get("player_type") for pid, ident in identities.items()}
+    return {pid: ident.get("player_type") for pid, ident in identities.items()}, metadata
 
 
-def extract_game_model_token_data(game_db_path: str, catalog: Catalog) -> List[dict]:
+def extract_game_model_token_data(game_db_path: str, catalog: Catalog, issues=None) -> List[dict]:
     """Aggregate per-(player, model) token rows for one game's trace DBs."""
     experiment = get_experiment_from_path(game_db_path)
     game_id = get_game_id_from_path(game_db_path)
     if not game_id:
         return []
 
-    player_types = _game_player_types(game_db_path, catalog)
+    player_types, metadata = _game_player_types(game_db_path, catalog, issues=issues)
 
     all_rows = []
     for player_id, trace_db_path in _find_player_trace_databases(game_db_path):
@@ -351,13 +387,15 @@ def extract_game_model_token_data(game_db_path: str, catalog: Catalog) -> List[d
                 game_id=game_id,
                 experiment=experiment,
                 player_type=player_type,
+                metadata=metadata,
                 catalog=catalog,
+                issues=issues,
             )
         )
     return all_rows
 
 
-def export_model_token_data(db_files, available_game_ids, output_file, catalog: Catalog, prune_only=False) -> int:
+def export_model_token_data(db_files, available_game_ids, output_file, catalog: Catalog, prune_only=False, issues=None) -> int:
     """Export model-token rows to ``output_file``; returns the count of new rows."""
     expected_fieldnames = MODEL_TOKEN_FIELDNAMES
     existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
@@ -402,7 +440,9 @@ def export_model_token_data(db_files, available_game_ids, output_file, catalog: 
             if game_id and should_skip_game(game_id, existing_game_ids):
                 skipped_count += 1
                 continue
-            model_rows = extract_game_model_token_data(db_file, catalog)
+            if issues is not None:
+                issues.mark_evaluated("tokens", game_id)
+            model_rows = extract_game_model_token_data(db_file, catalog, issues=issues)
             if not model_rows:
                 continue
             new_rows.extend(model_rows)

@@ -327,6 +327,19 @@ def get_experiment_from_path(db_path):
     return os.path.basename(os.path.dirname(db_path))
 
 
+def is_schema_mismatch(exc: Exception) -> bool:
+    """True for a benign "this older DB lacks that table/column" read error.
+
+    Used to keep table-tolerant helpers narrow: a missing ``FlavorChanges`` table
+    or column on an older DB is fine to fall back on, but a corrupt/locked image
+    (``database disk image is malformed``, ``file is not a database``, ``database
+    is locked``) must surface — never be silently turned into empty/default data.
+    """
+    return isinstance(exc, sqlite3.OperationalError) and (
+        "no such table" in str(exc) or "no such column" in str(exc)
+    )
+
+
 def open_database_readonly(db_path):
     """Open a SQLite DB read-only + immutable; ``(conn, cursor)`` or ``(None, None)``."""
     try:

@@ -12,11 +12,17 @@ from typing import Optional
 
 from ..catalog import Catalog
 from ..config import RunConfig
+from .errors import ExtractError
 from .extract_games import export_game_data
 from .extract_model_tokens import export_model_token_data
 from .extract_panel import export_panel_data
 from .extract_turns import export_turn_data
+from .issues import ImportIssueLog
 from .utilities import find_all_databases, outputs_are_fresh
+
+
+# Durable record of malformed-DB import issues (overridable via data.extract).
+DEFAULT_ISSUES_PATH = "runs/import_issues.csv"
 
 
 # Canonical table key → default CSV path (used when `data.tables` omits a key).
@@ -34,6 +40,8 @@ class ExtractResult:
     reason: str = ""
     new_rows: dict = field(default_factory=dict)
     output_paths: dict = field(default_factory=dict)
+    issues: ImportIssueLog = field(default_factory=ImportIssueLog)
+    issues_path: str = ""
 
 
 def _table_path(cfg: RunConfig, key: str) -> str:
@@ -64,6 +72,7 @@ def run_extract(
     max_dbs = extract_cfg.get("max_dbs")
     prune_only = bool(extract_cfg.get("prune_missing", False))
     force_rebuild = force_rebuild or bool(extract_cfg.get("force_rebuild", False))
+    issues_path = extract_cfg.get("issues_path", DEFAULT_ISSUES_PATH)
 
     output_paths = {key: _table_path(cfg, key) for key in outputs}
 
@@ -88,17 +97,28 @@ def run_extract(
     # "outputs cover every DB", so it is unsafe whenever max_dbs caps the run
     # below the available DB count — those outputs are a subset and skipping
     # would strand the remaining games permanently. Only trust the skip when
-    # the run would process every discovered DB.
+    # the run would process every discovered DB. The issues report is one of the
+    # outputs: a missing/stale report forces a (re)build so it is never stranded
+    # behind already-fresh tables.
+    freshness_paths = list(output_paths.values()) + [issues_path]
     if not force_rebuild and not prune_only and not capped \
-            and outputs_are_fresh(list(output_paths.values()), db_files):
+            and outputs_are_fresh(freshness_paths, db_files):
         return ExtractResult(
             skipped=True,
             reason="all outputs exist and are newer than the source DBs "
                    "(pass force_rebuild to override).",
             output_paths=output_paths,
+            issues_path=issues_path,
         )
 
     catalog = catalog or Catalog.from_run_config(cfg)
+
+    # One issue log threaded through every exporter; malformed-DB failures are
+    # recorded here (deduped by game_id). It is seeded from the existing report so
+    # the run reconciles rather than clobbers — an issue on a game skipped this run
+    # (e.g. it still produced some rows) is carried forward, not lost.
+    issues = ImportIssueLog()
+    issues.load(issues_path)
 
     new_rows: dict = {}
     for key in outputs:
@@ -107,13 +127,23 @@ def run_extract(
         print(f"EXTRACTING {key} → {path}")
         print("-" * 60)
         if key == "games":
-            new_rows[key] = export_game_data(selected_db_files, available_game_ids, path, prune_only=prune_only)
+            new_rows[key] = export_game_data(selected_db_files, available_game_ids, path, prune_only=prune_only, issues=issues)
         elif key == "panel":
-            new_rows[key] = export_panel_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only)
+            new_rows[key] = export_panel_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues)
         elif key == "turns":
-            new_rows[key] = export_turn_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only)
+            new_rows[key] = export_turn_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues)
         elif key == "tokens":
-            new_rows[key] = export_model_token_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only)
+            new_rows[key] = export_model_token_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only, issues=issues)
+
+    # Reconcile this run's findings with the prior report (carry forward issues for
+    # games no stage re-examined; drop those whose DB is gone) and persist. This
+    # also gives prune-only correct behavior: it inspects no DBs, so it simply drops
+    # issues for removed games and keeps the rest — never clobbering with a clean
+    # header. Fail loud if persistence fails (else the CLI would claim issues were
+    # "recorded" when nothing was written).
+    issues.reconcile(available_game_ids)
+    if not issues.write_csv(issues_path):
+        raise ExtractError(f"failed to write import-issues report to {issues_path}")
 
     print("\n" + "=" * 60)
     print("EXTRACTION COMPLETE")
@@ -121,4 +151,15 @@ def run_extract(
     for key in outputs:
         print(f"  {key}: {new_rows.get(key, 0)} new rows → {output_paths[key]}")
 
-    return ExtractResult(skipped=False, new_rows=new_rows, output_paths=output_paths)
+    if issues:
+        print(f"\nPROBLEM DATABASES ({len(issues)}) → {issues_path}")
+        for line in issues.summary_lines():
+            print(line)
+
+    return ExtractResult(
+        skipped=False,
+        new_rows=new_rows,
+        output_paths=output_paths,
+        issues=issues,
+        issues_path=issues_path,
+    )

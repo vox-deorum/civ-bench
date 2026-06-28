@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .errors import ExtractError
 from .identity import compose_identities
+from .issues import ImportIssue, ImportIssueLog
 from .runner import ExtractResult, run_extract
 from .utilities import (
     SeedingInfo,
@@ -22,6 +23,8 @@ from .utilities import (
 __all__ = [
     "ExtractError",
     "ExtractResult",
+    "ImportIssue",
+    "ImportIssueLog",
     "SeedingInfo",
     "compose_identities",
     "extract_seeding_fields",

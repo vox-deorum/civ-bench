@@ -67,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _report_extract_issues(result) -> None:
+    """Print the one-line malformed-DB issue count to stderr (no-op when clean)."""
+    if not result.skipped and result.issues:
+        print(
+            f"civ-bench: extract — {len(result.issues)} problem database(s) "
+            f"recorded in {result.issues_path}",
+            file=sys.stderr,
+        )
+
+
 def _is_dry(args: argparse.Namespace) -> bool:
     # `--skip all` is the documented equivalent of a dry run (Done criterion).
     return bool(args.dry_run) or any(s.lower() == "all" for s in args.skip)
@@ -127,6 +137,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
             result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
             if result.skipped:
                 print(f"civ-bench: extract skipped — {result.reason}")
+            _report_extract_issues(result)
         elif node.kind == "estimators":
             from .estimators import run_estimator  # lazy: pulls torch/xgboost
 
@@ -208,6 +219,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
         if result.skipped:
             print(f"civ-bench: extract skipped — {result.reason}")
+        _report_extract_issues(result)
         return 0
 
     if args.command == "report":

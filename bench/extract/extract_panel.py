@@ -11,16 +11,19 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from typing import Optional
 
 from ..catalog import Catalog
+from .errors import ExtractError
 from .identity import compose_identities
+from .issues import record_db_failure
 from .utilities import (
     POLICY_BRANCHES, STRATEGY_MAPPINGS, CHANGE_FIELDS, PLAYER_CORE_FIELDS,
     append_csv_file, extract_seeding_fields, filter_existing_data,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    open_database_readonly, read_existing_csv, read_game_metadata,
-    should_skip_game, write_csv_file,
+    is_schema_mismatch, open_database_readonly, read_existing_csv,
+    read_game_metadata, should_skip_game, write_csv_file,
 )
 
 # Combine all player-specific fields for error handling
@@ -130,8 +133,12 @@ def extract_flavor_max(cursor, player_id, column_name, default=50):
             ORDER BY Turn
         """, (player_id,))
         rows = cursor.fetchall()
-    except Exception:
-        return default
+    except sqlite3.DatabaseError as exc:
+        # Tolerate only an older DB missing FlavorChanges; corruption/locking must
+        # surface (→ recorded + game skipped), not silently become the default.
+        if is_schema_mismatch(exc):
+            return default
+        raise
 
     first_changed_idx = None
     for i, (value,) in enumerate(rows):
@@ -407,6 +414,11 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
                         print(f"  WARNING: Unknown policy branch type '{branch_type}' found for player {player_id} in {db_name}")
             except Exception as exc:
                 print(f"  ERROR: Error processing policy branch for player {player_id}: {exc}")
+    except sqlite3.DatabaseError:
+        # A corrupt/locked image is a game-level fact, not a per-player one — let
+        # it bubble to the game handler so the whole game is recorded once and
+        # skipped (rather than emitting an all-N/A row per player).
+        raise
     except Exception as exc:
         print(f"Error extracting data for player {player_id}: {exc}")
         for key in ALL_PLAYER_FIELDS:
@@ -416,13 +428,22 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
     return player_data
 
 
-def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None):
-    """Extract panel rows (one per major player) for a single game DB."""
+def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=None):
+    """Extract panel rows (one per major player) for a single game DB.
+
+    A malformed/locked DB is recorded as a single :class:`ImportIssue` and the
+    game is skipped (returns ``[]``) — no all-N/A rows.
+    """
     panel_rows = []
     conn, cursor = open_database_readonly(db_path)
     if not conn:
+        if issues is not None:
+            issues.record(stage="panel", db_path=db_path, message="could not open database")
         return []
 
+    # Pre-bound so the except handler can report seed/rotation even when the
+    # failure happens before (or during) the metadata read.
+    metadata: dict = {}
     try:
         metadata = read_game_metadata(cursor)
         experiment = get_experiment_from_path(db_path)
@@ -500,13 +521,25 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None):
             print(f"WARNING: Folder name '{experiment}' does not start with metadata experiment '{metadata['experiment']}' in {os.path.basename(db_path)}")
 
         return panel_rows
+    except ExtractError:
+        # A controlled-seed mismatch (rule 14) is a hard policy abort — it must
+        # propagate even on a panel-only run, never be swallowed into [].
+        conn.close()
+        raise
+    except sqlite3.DatabaseError as exc:
+        # Malformed/locked image — record once and skip the game (no N/A rows).
+        record_db_failure(issues, stage="panel", db_path=db_path, exc=exc, metadata=metadata)
+        conn.close()
+        return []
     except Exception as exc:
+        # Other non-DB faults keep the prior skip-and-continue behavior; they are
+        # not malformed-DB issues.
         print(f"Error processing {os.path.basename(db_path)}: {exc}")
         conn.close()
         return []
 
 
-def export_panel_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False) -> int:
+def export_panel_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
     """Export panel rows to ``output_file``; returns the count of new rows."""
     expected_fieldnames = list(PANEL_FIELD_MAPPINGS.keys())
     existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
@@ -546,7 +579,9 @@ def export_panel_data(db_files, available_game_ids, output_file, catalog: Option
             if game_id and should_skip_game(game_id, existing_game_ids):
                 skipped_count += 1
                 continue
-            panel_rows = extract_game_panel_data(db_file, catalog=catalog)
+            if issues is not None:
+                issues.mark_evaluated("panel", game_id)
+            panel_rows = extract_game_panel_data(db_file, catalog=catalog, issues=issues)
             if panel_rows:
                 new_panel_data.extend(panel_rows)
                 print(f"Processed: {os.path.basename(db_file)} ({len(panel_rows)} player rows)")

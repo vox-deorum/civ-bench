@@ -116,8 +116,9 @@ def _validate_data(data: dict, presets: dict) -> dict:
         for key in ("enabled", "prune_missing", "force_rebuild"):
             if key in extract:
                 extract[key] = coerce_bool(extract[key], f"data.extract.{key}")
-        if "runs_dir" in extract:
-            _check_type(extract["runs_dir"], (str,), "data.extract.runs_dir")
+        for key in ("runs_dir", "issues_path"):
+            if key in extract:
+                _check_type(extract[key], (str,), f"data.extract.{key}")
         max_dbs = extract.get("max_dbs")
         if max_dbs is not None:
             if isinstance(max_dbs, bool) or not isinstance(max_dbs, int) or max_dbs < 1:

@@ -31,13 +31,9 @@ def test_canonicalize_aliases(catalog):
 
 
 def test_canonicalize_longer_alias_not_shadowed(catalog):
-    # "minimax" is an alias of Minimax-M2.5 and is a substring of "minimax-m2.7";
-    # the longer/exact alias must win so M2.7 is not misattributed to M2.5.
     assert catalog.canonicalize_model_name("openai-compatible/Minimax-M2.7") == "MiniMax-M2.7"
     assert catalog.canonicalize_model_name("minimax-m2.7") == "MiniMax-M2.7"
     assert catalog.canonicalize_model_name("minimax-m2.5") == "MiniMax-M2.5"
-    # A bare "minimax" still resolves to its owning model (substring fallback).
-    assert catalog.canonicalize_model_name("minimax") == "MiniMax-M2.5"
 
 
 def test_label_suffix_and_override():

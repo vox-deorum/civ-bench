@@ -12,15 +12,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 from typing import Optional
 
 from ..catalog import Catalog
+from .errors import ExtractError
 from .identity import compose_identities
+from .issues import record_db_failure
 from .utilities import (
     append_csv_file, extract_seeding_fields, filter_existing_data,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    is_decision_changes, open_database_readonly, read_existing_csv,
-    read_game_metadata, should_skip_game, write_csv_file,
+    is_decision_changes, is_schema_mismatch, open_database_readonly,
+    read_existing_csv, read_game_metadata, should_skip_game, write_csv_file,
 )
 
 # Mapping from FlavorChanges DB column (PascalCase) to CSV column (snake_case)
@@ -120,8 +123,12 @@ def _fetch_flavor_events(cursor, major_players):
             WHERE fc.Key IN ({placeholders})
             ORDER BY fc.Key, fc.Turn, fc.ID
         """, major_players)
-    except Exception:
-        return {}
+    except sqlite3.DatabaseError as exc:
+        # Older DBs may lack FlavorChanges (fall back to StrategyChanges); a
+        # corrupt/locked image must surface, not become an empty result.
+        if is_schema_mismatch(exc):
+            return {}
+        raise
 
     latest = {}
     for row in cursor.fetchall():
@@ -197,8 +204,11 @@ def _fetch_strategy_grand_strategy(cursor, major_players):
             WHERE Key IN ({placeholders})
             ORDER BY Key, Turn, ID
         """, major_players)
-    except Exception:
-        return {}
+    except sqlite3.DatabaseError as exc:
+        # Older DBs may lack StrategyChanges; corruption/locking must surface.
+        if is_schema_mismatch(exc):
+            return {}
+        raise
 
     latest = {}
     for player_id, turn, gs in cursor.fetchall():
@@ -230,13 +240,22 @@ def _build_strategy_lookup(strategy_events, players_needing_fallback, all_turns)
     return lookup
 
 
-def extract_game_turn_data(db_path, catalog: Optional[Catalog] = None):
-    """Extract per-player-per-turn rows for a single game DB."""
+def extract_game_turn_data(db_path, catalog: Optional[Catalog] = None, issues=None):
+    """Extract per-player-per-turn rows for a single game DB.
+
+    A malformed/locked DB is recorded as a single :class:`ImportIssue` and the
+    game is skipped (returns ``[]``).
+    """
     turn_data = []
     conn, cursor = open_database_readonly(db_path)
     if not conn:
+        if issues is not None:
+            issues.record(stage="turns", db_path=db_path, message="could not open database")
         return []
 
+    # Pre-bound so the except handler can report seed/rotation even when the
+    # failure happens before (or during) the metadata read.
+    metadata: dict = {}
     try:
         experiment_name = get_experiment_from_path(db_path)
         metadata = read_game_metadata(cursor)
@@ -469,7 +488,19 @@ def extract_game_turn_data(db_path, catalog: Optional[Catalog] = None):
 
         conn.close()
         return turn_data
+    except ExtractError:
+        # A controlled-seed mismatch (rule 14) is a hard policy abort — it must
+        # propagate even on a turns-only run, never be swallowed into [].
+        conn.close()
+        raise
+    except sqlite3.DatabaseError as exc:
+        # Malformed/locked image — record once and skip the game.
+        record_db_failure(issues, stage="turns", db_path=db_path, exc=exc, metadata=metadata)
+        conn.close()
+        return []
     except Exception as exc:
+        # Other non-DB faults keep the prior skip-and-continue behavior; they are
+        # not malformed-DB issues.
         print(f"Error processing {os.path.basename(db_path)}: {exc}")
         conn.close()
         return []
@@ -579,7 +610,7 @@ def process_turn_group(turn_players, turn_data, experiment_name, game_id, max_tu
         turn_data.append(record)
 
 
-def export_turn_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False) -> int:
+def export_turn_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
     """Export turn rows to ``output_file``; returns the count of new rows."""
     expected_fieldnames = list(TURN_FIELD_MAPPINGS.keys())
     existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
@@ -620,7 +651,9 @@ def export_turn_data(db_files, available_game_ids, output_file, catalog: Optiona
             if game_id and should_skip_game(game_id, existing_game_ids):
                 skipped_count += 1
                 continue
-            turn_rows = extract_game_turn_data(db_file, catalog=catalog)
+            if issues is not None:
+                issues.mark_evaluated("turns", game_id)
+            turn_rows = extract_game_turn_data(db_file, catalog=catalog, issues=issues)
             if turn_rows:
                 new_turn_data.extend(turn_rows)
                 processed_count += 1

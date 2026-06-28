@@ -95,7 +95,8 @@ Every stage that writes (`estimators` `save_predictions`/`save_model`, `adjust` 
     "outputs": ["turns", "panel", "games", "tokens"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract
-    "force_rebuild": false               // true → rebuild even if outputs exist & are newer
+    "force_rebuild": false,              // true → rebuild even if outputs exist & are newer
+    "issues_path": "runs/import_issues.csv"  // where malformed/locked-DB import issues are recorded
   },
 
   "tables": {                            // canonical CSV locations (extract writes / loaders read)
