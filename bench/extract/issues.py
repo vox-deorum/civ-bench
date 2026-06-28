@@ -27,6 +27,12 @@ from .utilities import (
     write_csv_file,
 )
 
+# Durable record of malformed-DB import issues (overridable via ``data.extract``).
+# Defined here (rather than in ``runner.py``) so both the extract orchestrator that
+# *writes* it and the analysis layer that *reads* it to exclude problem games share
+# one definition.
+DEFAULT_ISSUES_PATH = "runs/import_issues.csv"
+
 # ``seed``/``seating_rotation`` value used when the DB was too corrupt to read its
 # ``GameMetadata`` — kept distinct from the legitimate ``-1`` UNCONTROLLED sentinel.
 UNKNOWN = "unknown"
@@ -41,6 +47,28 @@ ISSUE_FIELDNAMES = [
     "db_name",
     "message",
 ]
+
+
+def read_problem_game_ids(path: str) -> set[str]:
+    """Return the set of ``game_id``s recorded in an ``import_issues.csv``.
+
+    The downstream consumer of the malformed-DB log: analyses read this to drop
+    problem games (whose stale, identity-less rows otherwise poison ratings) from
+    their inputs. A missing/empty/unreadable report yields an empty set — never an
+    error — so analyses still run when no issues were ever recorded.
+    """
+    if not path or not Path(path).exists():
+        return set()
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            return {
+                gid
+                for row in csv.DictReader(fh)
+                if (gid := (row.get("game_id") or "").strip())
+            }
+    except Exception as exc:  # a corrupt report must not abort analyses
+        print(f"WARNING: could not read import-issues report {path}: {exc}")
+        return set()
 
 
 @dataclass

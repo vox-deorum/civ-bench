@@ -17,12 +17,8 @@ from .extract_games import export_game_data
 from .extract_model_tokens import export_model_token_data
 from .extract_panel import export_panel_data
 from .extract_turns import export_turn_data
-from .issues import ImportIssueLog
+from .issues import DEFAULT_ISSUES_PATH, ImportIssueLog
 from .utilities import find_all_databases, outputs_are_fresh
-
-
-# Durable record of malformed-DB import issues (overridable via data.extract).
-DEFAULT_ISSUES_PATH = "runs/import_issues.csv"
 
 
 # Canonical table key → default CSV path (used when `data.tables` omits a key).

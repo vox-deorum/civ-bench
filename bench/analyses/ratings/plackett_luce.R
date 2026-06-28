@@ -42,8 +42,19 @@ mod <- PlackettLuce(R)
 ref_slot <- paste0(reference_type, "_0")
 vanilla_ref <- match(ref_slot, slot_ids)
 log_worth_all <- coef(mod, ref = vanilla_ref)
-s <- summary(mod, ref = vanilla_ref)
-coef_table <- s$coefficients
+# Standard errors come from the variance-covariance matrix, whose information matrix
+# can be singular (non-positive-definite) for sparse/disconnected ranking data —
+# vcov.PlackettLuce then aborts inside chol(). The point estimates (coef) are
+# unaffected, so treat a vcov failure as "SEs unavailable" (NA) and still emit the
+# log-worth / Elo ratings, rather than killing the whole `civ-bench run`.
+coef_table <- tryCatch(
+  summary(mod, ref = vanilla_ref)$coefficients,
+  error = function(e) {
+    message("plackett_luce: vcov/summary failed (", conditionMessage(e),
+            "); standard errors set to NA.")
+    NULL
+  }
+)
 
 # Build slot-level dataframe
 slot_results <- data.frame(
@@ -56,15 +67,19 @@ slot_results <- data.frame(
 # Extract the base player_type from slot_id (remove trailing _N)
 slot_results$player_type <- sub("_[0-9]+$", "", slot_results$slot_id)
 
-# Fill in standard errors from coefficients table
-for (sid in rownames(coef_table)) {
-  idx <- match(sid, slot_results$slot_id)
-  if (!is.na(idx)) {
-    slot_results$se_log_worth[idx] <- coef_table[sid, "Std. Error"]
+if (!is.null(coef_table)) {
+  # Fill in standard errors from the coefficients table
+  for (sid in rownames(coef_table)) {
+    idx <- match(sid, slot_results$slot_id)
+    if (!is.na(idx)) {
+      slot_results$se_log_worth[idx] <- coef_table[sid, "Std. Error"]
+    }
   }
+  # The reference slot is absent from the coefficients table by construction, so its
+  # SE is genuinely 0. Only the reference is zeroed: when vcov failed every other SE
+  # stays NA rather than being coerced to 0 (which would falsely imply certainty).
+  slot_results$se_log_worth[slot_results$slot_id == ref_slot] <- 0
 }
-# Reference slot gets SE = 0
-slot_results$se_log_worth[is.na(slot_results$se_log_worth)] <- 0
 
 # Aggregate by player_type: average log-worth, pooled SE
 player_types <- sort(unique(slot_results$player_type))

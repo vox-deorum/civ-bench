@@ -151,14 +151,48 @@ class AnalysisContext:
         )
 
     def load_table(self, name: str) -> pd.DataFrame:
-        """Read a resolved table CSV (canonical or adjust output), unfiltered."""
+        """Read a resolved table CSV (canonical or adjust output), unfiltered
+        except that games flagged in the malformed-DB ``import_issues.csv`` are
+        dropped (see :meth:`_drop_problem_games`)."""
         path = self.table_path(name)
         if not Path(path).exists():
             raise AnalysisError(
                 f"analysis '{self.stage_id}': table '{name}' not found at '{path}'. "
                 f"Run the upstream stage (extract / adjust) first."
             )
-        return pd.read_csv(path)
+        return self._drop_problem_games(pd.read_csv(path))
+
+    # ── problem-game exclusion ──────────────────────────────────────────────────
+    def _problem_game_ids(self) -> set[str]:
+        """game_ids recorded as malformed in ``import_issues.csv`` (cached).
+
+        Resolved from ``data.extract.issues_path`` (default ``runs/import_issues.csv``)
+        and read raw, NOT output-suffix-rooted — the issues report is a ``runs/``
+        artifact shared across configs, not a per-output table.
+        """
+        cached = getattr(self, "_problem_ids_cache", None)
+        if cached is None:
+            from ..extract.issues import DEFAULT_ISSUES_PATH, read_problem_game_ids
+
+            path = (self.config.data.get("extract") or {}).get("issues_path") \
+                or DEFAULT_ISSUES_PATH
+            cached = read_problem_game_ids(path)
+            self._problem_ids_cache = cached
+        return cached
+
+    def _drop_problem_games(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop rows belonging to a flagged problem game.
+
+        A malformed DB the panel exporter could not re-read leaves stale,
+        identity-less rows (player_type → ``Player <id>`` fallbacks) that form a
+        disconnected clique and make the Plackett-Luce information matrix singular
+        (``vcov`` Cholesky fails). The extract stage already *records* these games;
+        here every analysis input *consumes* that record so they never reach a fit.
+        """
+        problem = self._problem_game_ids()
+        if problem and "game_id" in df.columns:
+            df = df[~df["game_id"].isin(problem)]
+        return df
 
     def strength_provenance(self, table_id: Optional[str] = None, panel: Optional[pd.DataFrame] = None) -> dict:
         """Compact provenance for analyses consuming a strength adjust table."""
