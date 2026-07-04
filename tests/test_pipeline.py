@@ -6,8 +6,8 @@ from bench.config import load_config
 from bench.pipeline import build_dag, render_dag
 
 
-def test_dag_is_topologically_ordered(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_dag_is_topologically_ordered(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
     pos = {nid: i for i, nid in enumerate(dag.order)}
     # every dependency appears before its dependent
@@ -16,8 +16,8 @@ def test_dag_is_topologically_ordered(configs_dir):
             assert pos[dep] < pos[node.id], f"{dep} must precede {node.id}"
 
 
-def test_extract_node_present_when_enabled(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_extract_node_present_when_enabled(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
     assert "extract" in dag.nodes
     # estimators depend on extract
@@ -31,30 +31,30 @@ def test_extract_dropped_when_disabled(configs_dir):
     assert dag.nodes["attention"].deps == set()
 
 
-def test_report_depends_on_all_analyses(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_report_depends_on_all_analyses(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
     analysis_ids = {s.id for s in cfg.analyses if s.enabled}
     assert analysis_ids <= dag.nodes["report"].deps
 
 
-def test_render_dag_shows_resolved_root(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_render_dag_shows_resolved_root(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     text = render_dag(build_dag(cfg), cfg)
     assert "reports-dev/" in text
     assert "Resolved DAG" in text
 
 
-def test_build_dag_uses_cached_resolved_graph(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_build_dag_uses_cached_resolved_graph(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     cached = cfg._resolved_graph
     dag = build_dag(cfg)
     assert cfg._resolved_graph is cached
     assert dag.order == cached.order
 
 
-def test_dag_node_resolves_save_path(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+def test_dag_node_resolves_save_path(dev_spec, write_spec):
+    cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
     assert (
         dag.nodes["strength"].resolved_save_path(cfg)

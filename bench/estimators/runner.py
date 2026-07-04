@@ -71,16 +71,6 @@ def _default_predictions_path(cfg: RunConfig, stage_id: str) -> str:
     return f"{cfg.output.root}/estimators/{stage_id}/predictions.csv"
 
 
-def _strip_id_columns_if_not_needed(X: pd.DataFrame, model) -> pd.DataFrame:
-    """Drop ID columns when the model doesn't require them (port of the evaluator)."""
-    required_ids = getattr(model, "REQUIRES_ID_COLUMNS", None)
-    if required_ids is None:
-        id_cols_to_strip = ["game_id", "turn", "player_id", "experiment"]
-        cols_to_keep = [c for c in X.columns if c not in id_cols_to_strip]
-        return X[cols_to_keep]
-    return X
-
-
 def _exp_col(df: pd.DataFrame) -> str:
     return "experiment" if "experiment" in df.columns else "condition"
 
@@ -178,6 +168,8 @@ def _run_pretrained(
         raise EstimatorError(
             f"estimator '{stage_id}': predict_subset selected zero rows from the turns table."
         )
+
+    from .training import _strip_id_columns_if_not_needed  # lazy: keeps dry-run import light
 
     X, _ = prepare_features(df_pred, use_variant_columns=use_variants)
     if "_is_zero_score" in X.columns:

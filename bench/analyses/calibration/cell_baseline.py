@@ -32,7 +32,6 @@ import pandas as pd
 from ...plotting.heatmap import plot_diverging_heatmap, robust_symmetric_limit
 from ...stats.transforms import LOGIT_EPS, logit
 from ..base import Analysis, AnalysisContext, AnalysisResult
-from .civ_effects import _adjust_table_id
 
 # The enforced-winner / clip sentinel on the logit scale (relative_strength == 1-eps).
 # This is specific to relative_to="game_leader" (where every game's leader is pinned to
@@ -47,7 +46,7 @@ class CalibrationCellBaseline(Analysis):
     module = "calibration.cell_baseline"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        adjust_dir = Path(ctx.adjust_dir(_adjust_table_id(ctx)))
+        adjust_dir = Path(ctx.adjust_dir(ctx.strength_table_id()))
         baseline_path = adjust_dir / "cell_baseline.csv"
         if not baseline_path.exists():
             return AnalysisResult(summary="No cell_baseline.csv (adjust stage not run).")

@@ -53,14 +53,26 @@ class BasePredictor(ABC):
         self.random_state = random_state
         self.selected_features_: Optional[List[str]] = None  # Set during fit
 
-    def _expand_wildcards(self, patterns: List[str], available_features: List[str]) -> Set[str]:
-        matched = set()
+    def _expand_wildcards(self, patterns: List[str], available_features: List[str]) -> List[str]:
+        """Expand include/exclude patterns to a deterministic, de-duplicated list.
+
+        Literal patterns keep their declared order; wildcard patterns expand in
+        ``available_features`` (data-column) order. First occurrence wins. Returning
+        a list rather than a set is what makes the selected feature order — and hence
+        the fitted column order and predictions — byte-stable across runs; a set's
+        iteration order over strings is hash-randomized (PYTHONHASHSEED).
+        """
+        matched: List[str] = []
+        seen: Set[str] = set()
         for pattern in patterns:
             if "*" in pattern or "?" in pattern:
-                matches = fnmatch.filter(available_features, pattern)
-                matched.update(matches)
+                candidates = fnmatch.filter(available_features, pattern)
             else:
-                matched.add(pattern)
+                candidates = [pattern]
+            for feat in candidates:
+                if feat not in seen:
+                    seen.add(feat)
+                    matched.append(feat)
         return matched
 
     def _filter_features(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -72,10 +84,10 @@ class BasePredictor(ABC):
 
         if self.include_features is not None:
             included = self._expand_wildcards(self.include_features, available_features)
-            missing = included - set(available_features)
+            missing = set(included) - set(available_features)
             if missing:
                 raise ValueError(f"Requested features not available in data: {missing}")
-            selected = list(included)
+            selected = included
         elif self.DEFAULT_FEATURES is not None:
             missing = [f for f in self.DEFAULT_FEATURES if f not in available_features]
             if missing:
@@ -85,7 +97,7 @@ class BasePredictor(ABC):
             selected = available_features
 
         if self.exclude_features:
-            excluded = self._expand_wildcards(self.exclude_features, selected)
+            excluded = set(self._expand_wildcards(self.exclude_features, selected))
             selected = [f for f in selected if f not in excluded]
 
         if self.REQUIRED_FEATURES is not None:

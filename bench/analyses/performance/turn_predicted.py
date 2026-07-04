@@ -17,16 +17,6 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 
 
-def _strength_table_id(ctx: AnalysisContext) -> str:
-    """The adjust stage id referenced via uses.tables (default first adjust / 'strength')."""
-    for tbl in ctx.uses_tables():
-        if any(s.id == tbl for s in ctx.config.adjust):
-            return tbl
-    if ctx.config.adjust:
-        return ctx.config.adjust[0].id
-    return "strength"
-
-
 class PerformanceTurnPredicted(Analysis):
     module = "performance.turn_predicted"
     default_all_estimators = True
@@ -47,8 +37,11 @@ class PerformanceTurnPredicted(Analysis):
         frames = []
         for est in estimators:
             pred = ctx.load_predictions(est)
-            df = pred.merge(panel, on=["game_id", "player_id"], how="left")
-            df[by] = df[by].fillna("Player " + df["player_id"].astype(str))
+            # Inner join: both inputs already exclude flagged problem games, so a
+            # prediction row with no panel identity is a genuine gap — drop it rather
+            # than resurrect a fake ``Player <id>`` player_type that would pollute the
+            # per-identity aggregation.
+            df = pred.merge(panel, on=["game_id", "player_id"], how="inner")
             df = ctx.apply_filter(df)
             if df.empty:
                 continue

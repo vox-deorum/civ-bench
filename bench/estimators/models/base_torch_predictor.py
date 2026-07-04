@@ -139,6 +139,21 @@ class BaseTorchPredictor(BasePredictor):
         gen.manual_seed(self.random_state)
         return gen
 
+    def _seed_torch(self) -> None:
+        """Seed the torch *global* RNGs at the start of each fit.
+
+        ``_make_generator`` covers the explicit ``torch.randperm`` shuffle, but
+        weight init (``nn.Linear`` etc.) and dropout draw from the process-global
+        RNG — unseeded, they make every fit's predictions drift run-to-run despite
+        the documented byte-stability guarantee. Seeding per fit (not once at
+        import) keeps each CV fold reproducible independent of fold order. We do
+        **not** enable ``torch.use_deterministic_algorithms`` (it can hard-error and
+        needs a CUBLAS env var on CUDA); the guarantee is same-machine/same-device.
+        """
+        torch.manual_seed(self.random_state)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.random_state)
+
     # ── AMP ─────────────────────────────────────────────────────────────────
     def _create_scaler(self) -> Optional["torch.amp.GradScaler"]:
         if self._amp_enabled:
@@ -295,6 +310,7 @@ class GroupedTorchPredictor(BaseTorchPredictor):
 
     # ── template fit() ────────────────────────────────────────────────────────
     def fit(self, X: pd.DataFrame, y: pd.Series, clusters: Optional[pd.Series] = None, epoch_callback=None):
+        self._seed_torch()
         self._filter_features(X)
 
         missing = [c for c in self.REQUIRES_ID_COLUMNS if c not in X.columns]

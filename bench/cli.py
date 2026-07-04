@@ -113,16 +113,18 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
         print(f"civ-bench: extract skipped — {result.reason}")
     _report_extract_issues(result)
 
-    # Only fix when a fresh extract actually recorded issues. A skipped (fresh-outputs)
-    # run has nothing new; genuinely-unrecoverable games from a prior run must not be
-    # re-attempted every invocation — pass --force-rebuild to re-try a stale ledger.
-    if not auto_fix or result.skipped or not result.issues:
+    # Only fix when this run FRESHLY recorded issues. A skipped (fresh-outputs) run and
+    # a prune-only run evaluate nothing, so they never have fresh issues; carried-forward
+    # (already-unrecoverable) games from a prior run must not be re-attempted every
+    # invocation — pass --force-rebuild to re-examine (and re-fix) a stale ledger.
+    if not auto_fix or result.skipped or not result.issues.has_fresh_issues:
         return result
 
     from .fix import FixError, run_fix
 
     try:
-        fix_result = run_fix(cfg)  # prints its own header/summary
+        # Repair only the games that failed this run, not the whole carried-forward ledger.
+        fix_result = run_fix(cfg, only_game_ids=result.issues.fresh_game_ids)  # prints its own summary
     except FixError as exc:  # a fix failure must never abort the pipeline
         print(f"civ-bench: auto-fix skipped — {exc}", file=sys.stderr)
         return result
@@ -131,7 +133,9 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
 
     print("civ-bench: re-importing repaired databases …")
     catalog = catalog or Catalog.from_run_config(cfg)
-    result = run_extract(cfg, catalog=catalog, force_rebuild=True)
+    # force_rebuild + prune_missing=False so the repaired DBs are actually re-inspected
+    # (a prune-only re-import would evaluate nothing and never clear the ledger).
+    result = run_extract(cfg, catalog=catalog, force_rebuild=True, prune_missing=False)
     _report_extract_issues(result)
     return result
 
@@ -229,7 +233,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fi
         elif node.kind == "report":
             from .reports import run_report  # lazy: pulls pandas only
 
-            result = run_report(cfg, catalog=catalog)
+            result = run_report(cfg)
             print(
                 f"civ-bench: report → {result.report_dir} "
                 f"({result.n_sections} section(s); {', '.join(result.formats)})"

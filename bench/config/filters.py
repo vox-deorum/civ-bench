@@ -28,6 +28,18 @@ def validate_filter_object(obj: dict, where: str) -> None:
         raise ConfigError(f"{where}: expected an object, got {type(obj).__name__}.")
     _check_filter_keys(obj, where)
 
+    # The membership fields must be lists of strings. A scalar (e.g. ``5`` or
+    # ``"solo"``) would be silently wrapped by ``_as_list`` at apply time and
+    # match nothing / the wrong thing, dropping every row without an error —
+    # exactly the kind of silent no-op the fail-loud invariant forbids (§3.1).
+    for key in ("experiments", "exclude_experiments", "players"):
+        if key in obj and obj[key] is not None:
+            value = obj[key]
+            if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+                raise ConfigError(
+                    f"{where}.{key}: expected a list of strings, got {value!r}."
+                )
+
     if "only_llm" in obj:
         obj["only_llm"] = coerce_bool(obj["only_llm"], f"{where}.only_llm")
 

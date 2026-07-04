@@ -137,6 +137,24 @@ class AnalysisContext:
         """Directory holding an adjust stage's panel + audit trails."""
         return Path(self.adjust_save_path(table_id)).parent
 
+    def strength_table_id(self) -> str:
+        """Resolve the adjust-stage id that produced the strength table this analysis reads.
+
+        The single resolver shared by every strength-consuming analysis (ratings,
+        matchups, turn_predicted, strength_panel, experiment_completeness, the civ/
+        cell calibration views). Fallback order: (1) the first ``uses.tables`` entry
+        that names an adjust stage (or the literal ``"strength"``); (2) else the first
+        enabled strength-module adjust stage; (3) else the literal ``"strength"``.
+        """
+        adjust_ids = {s.id for s in self.config.adjust}
+        for tbl in self.uses_tables():
+            if tbl == "strength" or tbl in adjust_ids:
+                return tbl
+        for stage in self.config.adjust:
+            if stage.enabled and (stage.raw.get("module") == "strength"):
+                return stage.id
+        return "strength"
+
     def table_path(self, name: str) -> str:
         """Resolve a ``uses.tables`` entry: a canonical table key or an adjust id."""
         canonical = self._canonical_path(name)
@@ -172,11 +190,9 @@ class AnalysisContext:
         """
         cached = getattr(self, "_problem_ids_cache", None)
         if cached is None:
-            from ..extract.issues import DEFAULT_ISSUES_PATH, read_problem_game_ids
+            from ..extract.issues import read_problem_game_ids, resolve_issues_path
 
-            path = (self.config.data.get("extract") or {}).get("issues_path") \
-                or DEFAULT_ISSUES_PATH
-            cached = read_problem_game_ids(path)
+            cached = read_problem_game_ids(resolve_issues_path(self.config.data))
             self._problem_ids_cache = cached
         return cached
 
@@ -189,10 +205,9 @@ class AnalysisContext:
         (``vcov`` Cholesky fails). The extract stage already *records* these games;
         here every analysis input *consumes* that record so they never reach a fit.
         """
-        problem = self._problem_game_ids()
-        if problem and "game_id" in df.columns:
-            df = df[~df["game_id"].isin(problem)]
-        return df
+        from ..data.loading import drop_problem_games
+
+        return drop_problem_games(df, self._problem_game_ids())
 
     def strength_provenance(self, table_id: Optional[str] = None, panel: Optional[pd.DataFrame] = None) -> dict:
         """Compact provenance for analyses consuming a strength adjust table."""
@@ -255,13 +270,21 @@ class AnalysisContext:
         return self.config.output.resolve(authored)
 
     def load_predictions(self, estimator_id: str, usecols=None) -> pd.DataFrame:
+        """Read an estimator's predictions, dropping flagged problem games.
+
+        Predictions carry a ``game_id`` column, so the same malformed-DB exclusion
+        applied to :meth:`load_table` is applied here too — otherwise a flagged
+        game's stale rows would still poison prediction-consuming analyses (the
+        exclusion the docstring on ``_drop_problem_games`` promises for *every*
+        analysis input). A no-op when ``usecols`` omits ``game_id``.
+        """
         path = self.predictions_path(estimator_id)
         if not Path(path).exists():
             raise AnalysisError(
                 f"analysis '{self.stage_id}': estimator '{estimator_id}' predictions "
                 f"not found at '{path}'. Run the estimator stage first."
             )
-        return pd.read_csv(path, usecols=usecols)
+        return self._drop_problem_games(pd.read_csv(path, usecols=usecols))
 
     def uses_estimators(self) -> list[str]:
         explicit = list((self.stage_raw.get("uses") or {}).get("estimators") or [])

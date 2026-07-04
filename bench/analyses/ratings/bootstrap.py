@@ -22,13 +22,16 @@ the (often small-``n``) baseline's own noise into the CIs.
 
 from __future__ import annotations
 
+import sys
 from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
 
+from ...adjust.strength import fit_civ_effects
 from ...catalog import Catalog
 from ...stats.transforms import inv_logit
+from ..errors import AnalysisError
 
 
 def compute_margin(strength_df: pd.DataFrame, rating_col: str, tie_threshold: float = 0.01) -> float:
@@ -96,10 +99,12 @@ def readjust(
     civ_adjust = params.get("civ_adjust", "ols_logit")
     baseline_experiment = params.get("baseline_experiment")
 
-    # Refit civ effects on the whole resampled panel (matches the stage: fit on all rows).
+    # Refit civ effects on the whole resampled (pre-narrowing) panel — this is the
+    # SAME population the adjust stage fits on, so the refit matches the point
+    # estimate (the shared fit_civ_effects, not a diverged local copy).
     civ_effects: dict[str, float] = {}
     if civ_adjust == "ols_logit":
-        civ_effects = _fit_civ_effects(df, catalog)
+        civ_effects, _ = fit_civ_effects(df, catalog)
 
     # Fixed per-cell baseline (option C): explicit keys on (seed, player_id),
     # implicit on (experiment, seed, player_id). Held constant across replicates.
@@ -135,27 +140,6 @@ def readjust(
     return df
 
 
-def _fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> dict[str, float]:
-    from statsmodels.formula.api import ols
-
-    vanilla = catalog.vanilla_label
-    formula = (
-        "logit_strength ~ C(civilization, Sum) "
-        f'+ C(player_type, Treatment(reference="{vanilla}"))'
-    )
-    # Let a fit failure propagate: run_bootstrap drops the whole replicate rather
-    # than silently applying zero civ adjustment (which would bias the CIs).
-    fit = ols(formula, data=df).fit()
-    effects: dict[str, float] = {}
-    for var in fit.params.index:
-        if "C(civilization, Sum)[S." in var:
-            effects[var.split("[S.", 1)[1].rstrip("]")] = float(fit.params[var])
-    omitted = set(df["civilization"].dropna().unique()) - set(effects)
-    for civ in omitted:
-        effects[civ] = -sum(effects.values())
-    return effects
-
-
 def run_bootstrap(
     panel: pd.DataFrame,
     point_df: pd.DataFrame,
@@ -170,16 +154,25 @@ def run_bootstrap(
     catalog: Optional[Catalog] = None,
     refit_strength: bool = True,
     fixed_cell_baseline: Optional[dict] = None,
+    narrow: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None,
+    max_failure_rate: float = 0.5,
 ) -> pd.DataFrame:
     """Run ``n`` replicates and return the point estimate joined with percentile CIs.
 
-    ``calculator(resampled_panel) -> rating_df`` performs the rating fit (margin
-    frozen by the caller for BT). ``refit_strength`` re-runs the strength
-    adjustment per replicate (recommended); set False to bootstrap the frozen
-    ``adjusted_strength`` directly. A replicate whose readjust or rating fit
-    raises is dropped (not counted toward the CI).
+    Each replicate resamples the **full** (problem-excluded, pre-narrowing) panel,
+    re-runs the strength adjustment on it (``refit_strength`` — the civ OLS refit
+    needs the full population, incl. the Vanilla reference the rating filters drop),
+    optionally applies ``narrow`` (the rating-population filters — only_llm /
+    min_games) *after* readjustment, then fits the rating via ``calculator`` (margin
+    frozen by the caller for BT).
+
+    Failures are counted, not silently swallowed: a warning naming the last error is
+    printed to stderr, and if more than ``max_failure_rate`` of the replicates fail
+    an :class:`AnalysisError` is raised rather than returning all-NaN CIs.
     """
     rows = []
+    failures = 0
+    last_error: Optional[Exception] = None
     for rep in range(n):
         rng = np.random.default_rng(np.random.SeedSequence([seed, rep]))
         resampled = resample_games(panel, rng, stratified=stratified)
@@ -189,11 +182,28 @@ def run_bootstrap(
                     resampled, adjust_params, catalog,
                     fixed_cell_baseline=fixed_cell_baseline,
                 )
+            if narrow is not None:
+                resampled = narrow(resampled)
             rating = calculator(resampled)
-        except Exception:
+        except Exception as exc:  # a degenerate/singular replicate — count, don't hide
+            failures += 1
+            last_error = exc
             continue
         for _, r in rating.iterrows():
             rows.append({"rep": rep, group_col: r[group_col], "elo": r["elo"]})
+
+    if failures:
+        print(
+            f"WARNING: ratings bootstrap: {failures}/{n} replicate(s) failed "
+            f"(last error: {last_error}).",
+            file=sys.stderr,
+        )
+    if failures > max_failure_rate * n:
+        raise AnalysisError(
+            f"ratings bootstrap: {failures}/{n} replicates failed "
+            f"(> {max_failure_rate:.0%}); the CIs would be unreliable. "
+            f"Last error: {last_error}."
+        )
 
     reps = pd.DataFrame(rows)
     alpha = (1.0 - ci_level) / 2.0

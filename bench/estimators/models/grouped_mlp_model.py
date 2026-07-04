@@ -56,6 +56,58 @@ class _UtilityNet(nn.Module):
         return self.head(x).squeeze(-1)
 
 
+# ── shared MLP helpers (deduped: MLPPredictor and GroupedMLPPredictor both use
+#    a _UtilityNet with a `layer_sizes` hyperparameter, so these were byte-identical
+#    copies in both modules). mlp_model already imports _UtilityNet from here.
+def _layer_sizes_optuna_defaults(model_class) -> dict:
+    """Optuna default-param dict derived from a layer_sizes-based ``__init__``."""
+    import inspect
+    sig = inspect.signature(model_class.__init__)
+    d = {k: v.default for k, v in sig.parameters.items()
+         if v.default is not inspect.Parameter.empty}
+    layer_sizes = d["layer_sizes"]
+    return {
+        "n_layers": len(layer_sizes),
+        "layer_size": layer_sizes[0] if layer_sizes else 64,
+        "dropout": d["dropout"], "lr": d["lr"],
+        "weight_decay": d["weight_decay"], "epochs": d["epochs"],
+        "loss_tp_alpha": d["loss_tp_alpha"],
+    }
+
+
+def _layer_sizes_convert_optuna(raw_params) -> dict:
+    """Fold optuna's flat (n_layers, layer_size) back into a ``layer_sizes`` tuple."""
+    params = dict(raw_params)
+    n_layers = params.pop("n_layers", None)
+    layer_size = params.pop("layer_size", None)
+    if n_layers is not None and layer_size is not None:
+        params["layer_sizes"] = tuple([layer_size] * n_layers)
+    return params
+
+
+def _utilitynet_feature_importance(model, layer_sizes, feature_names) -> Optional[pd.DataFrame]:
+    """|weight|-based feature importance for a fitted ``_UtilityNet`` predictor."""
+    if model is None:
+        raise ValueError("Model must be fitted before getting feature importance")
+
+    if len(layer_sizes) == 0:
+        weights = model.net.weight.detach().cpu().numpy()
+        importances = np.abs(weights).flatten()
+    elif len(layer_sizes) == 1:
+        weights = model.net[0].weight.detach().cpu().numpy()
+        importances = np.abs(weights).mean(axis=0)
+    else:
+        weights = model.proj.weight.detach().cpu().numpy()
+        importances = np.abs(weights).mean(axis=0)
+
+    importance_df = pd.DataFrame({
+        "feature": feature_names,
+        "coefficient": importances,
+        "abs_coefficient": np.abs(importances),
+    })
+    return importance_df.sort_values("abs_coefficient", ascending=False)
+
+
 class GroupedMLPPredictor(GroupedTorchPredictor):
     """Scores each player with an MLP, then group-softmax over (game_id, turn)."""
 
@@ -76,27 +128,11 @@ class GroupedMLPPredictor(GroupedTorchPredictor):
 
     @classmethod
     def optuna_default_params(cls):
-        import inspect
-        sig = inspect.signature(cls.__init__)
-        d = {k: v.default for k, v in sig.parameters.items()
-             if v.default is not inspect.Parameter.empty}
-        layer_sizes = d["layer_sizes"]
-        return {
-            "n_layers": len(layer_sizes),
-            "layer_size": layer_sizes[0] if layer_sizes else 64,
-            "dropout": d["dropout"], "lr": d["lr"],
-            "weight_decay": d["weight_decay"], "epochs": d["epochs"],
-            "loss_tp_alpha": d["loss_tp_alpha"],
-        }
+        return _layer_sizes_optuna_defaults(cls)
 
     @staticmethod
     def convert_optuna_params(raw_params):
-        params = dict(raw_params)
-        n_layers = params.pop("n_layers", None)
-        layer_size = params.pop("layer_size", None)
-        if n_layers is not None and layer_size is not None:
-            params["layer_sizes"] = tuple([layer_size] * n_layers)
-        return params
+        return _layer_sizes_convert_optuna(raw_params)
 
     def __init__(
         self,
@@ -163,25 +199,7 @@ class GroupedMLPPredictor(GroupedTorchPredictor):
         }
 
     def get_feature_importance(self) -> Optional[pd.DataFrame]:
-        if self.model is None:
-            raise ValueError("Model must be fitted before getting feature importance")
-
-        if len(self.layer_sizes) == 0:
-            weights = self.model.net.weight.detach().cpu().numpy()
-            importances = np.abs(weights).flatten()
-        elif len(self.layer_sizes) == 1:
-            weights = self.model.net[0].weight.detach().cpu().numpy()
-            importances = np.abs(weights).mean(axis=0)
-        else:
-            weights = self.model.proj.weight.detach().cpu().numpy()
-            importances = np.abs(weights).mean(axis=0)
-
-        importance_df = pd.DataFrame({
-            "feature": self.feature_names,
-            "coefficient": importances,
-            "abs_coefficient": np.abs(importances),
-        })
-        return importance_df.sort_values("abs_coefficient", ascending=False)
+        return _utilitynet_feature_importance(self.model, self.layer_sizes, self.feature_names)
 
     # ── Save / Load ─────────────────────────────────────────────────────────
     def _get_hyperparams(self) -> dict:

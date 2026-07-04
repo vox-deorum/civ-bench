@@ -16,13 +16,18 @@ Two entry points mirror the estimator ``predict`` axis (benchmark.md §4.2):
   that never trained on its game) plus an aggregated feature-importance table.
 
 Determinism: the single ``random_state`` (threaded from the top-level ``seed``)
-seeds the GroupKFold split order, the resamplers, and each model's torch/xgboost
-init, so an identical config re-runs byte-stable (benchmark.md §1).
+seeds the GroupKFold split order, the resamplers (SMOTE/SMOTENC/RandomUnderSampler),
+xgboost, and — as of the fit-time ``_seed_torch`` — each torch model's global RNG
+(weight init, dropout, the ``randperm`` shuffle). Selected feature order is
+deterministic (first-occurrence dedupe, no set iteration). Together these make an
+identical config re-run **byte-stable on the same machine and device**; results are
+not promised to match bit-for-bit across CPUs/GPUs/BLAS builds, and torch
+non-deterministic kernels are not force-disabled (that can hard-error on CUDA).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -44,14 +49,21 @@ def apply_resampling(
 ) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
     """Resample training rows to address class imbalance (imbalanced-learn).
 
-    Only ever applied to *training* data. ``None`` returns the inputs untouched.
-    Cluster ids (``game_id``) are encoded as a temporary numeric column so they
-    survive SMOTE, then decoded back to integers (synthetic rows are rounded).
+    Only ever applied to *training* data — and only after ID columns have been
+    stripped, so ``X`` is a purely numeric feature matrix (SMOTE would crash on a
+    string ``game_id``/``experiment`` column). ``None`` returns the inputs untouched.
+
+    Cluster ids (``game_id``, consumed downstream for cluster-robust SEs) are encoded
+    as a temporary integer column and declared **categorical** to SMOTENC. That way
+    each synthetic row inherits a *real* neighbour's cluster instead of the rounded
+    average of two arbitrary game ids the old numeric-SMOTE path produced. On the way
+    out the column is decoded back to the **original** ``game_id`` values (the previous
+    code leaked the internal encoder integers). Undersampling only ever keeps real rows.
     """
     if method is None:
         return X, y, clusters
 
-    from imblearn.over_sampling import SMOTE
+    from imblearn.over_sampling import SMOTE, SMOTENC
     from imblearn.under_sampling import RandomUnderSampler
 
     has_clusters = clusters is not None
@@ -60,18 +72,21 @@ def apply_resampling(
         cluster_to_int = {cid: idx for idx, cid in enumerate(unique_clusters)}
         X_with_clusters = X.copy()
         X_with_clusters["__cluster_id__"] = clusters.map(cluster_to_int).values
+        # SMOTENC keeps the encoded cluster categorical: synthetic rows copy a real
+        # neighbour's category rather than interpolating (and rounding) two game ids.
+        cat_idx = [X_with_clusters.columns.get_loc("__cluster_id__")]
+        oversampler = SMOTENC(categorical_features=cat_idx, random_state=random_state)
     else:
         X_with_clusters = X.copy()
+        oversampler = SMOTE(random_state=random_state)
 
     if method == "oversample":
-        sampler = SMOTE(random_state=random_state)
-        X_resampled, y_resampled = sampler.fit_resample(X_with_clusters, y)
+        X_resampled, y_resampled = oversampler.fit_resample(X_with_clusters, y)
     elif method == "undersample":
         sampler = RandomUnderSampler(random_state=random_state)
         X_resampled, y_resampled = sampler.fit_resample(X_with_clusters, y)
     elif method == "combined":
-        smote = SMOTE(random_state=random_state)
-        X_temp, y_temp = smote.fit_resample(X_with_clusters, y)
+        X_temp, y_temp = oversampler.fit_resample(X_with_clusters, y)
         undersampler = RandomUnderSampler(random_state=random_state)
         X_resampled, y_resampled = undersampler.fit_resample(X_temp, y_temp)
     else:
@@ -81,15 +96,19 @@ def apply_resampling(
         )
 
     if has_clusters:
-        cluster_ints = X_resampled["__cluster_id__"].values.round().astype(int)
+        # SMOTENC/undersampling both yield exact encoder integers here; map them back
+        # through unique_clusters so callers get the real game_ids they started with.
+        cluster_ints = np.asarray(X_resampled["__cluster_id__"]).astype(int)
         cluster_ints = cluster_ints.clip(0, len(unique_clusters) - 1)
-        clusters_resampled = pd.Series(cluster_ints, name=clusters.name)
+        clusters_resampled = pd.Series(
+            np.asarray(unique_clusters)[cluster_ints], name=clusters.name
+        )
         X_resampled = X_resampled.drop(columns=["__cluster_id__"])
     else:
         clusters_resampled = None
 
-    X_resampled = pd.DataFrame(X_resampled, columns=X.columns)
-    y_resampled = pd.Series(y_resampled, name=y.name)
+    X_resampled = pd.DataFrame(X_resampled, columns=X.columns).reset_index(drop=True)
+    y_resampled = pd.Series(np.asarray(y_resampled), name=y.name)
     return X_resampled, y_resampled, clusters_resampled
 
 
@@ -207,13 +226,17 @@ def run_full_train(
 
     model = model_class(random_state=random_state, **model_kwargs)
 
+    # Strip ID columns BEFORE resampling so SMOTE sees a purely numeric matrix
+    # (string game_id/experiment would crash it). Models that keep their ID
+    # columns (REQUIRES_ID_COLUMNS) all set DISABLE_RESAMPLING, so the two paths
+    # never collide. Mirrors tuning._evaluate_fold_metrics.
+    X_train = _strip_id_columns_if_not_needed(X_train, model)
     if resample_method is not None and not getattr(model, "DISABLE_RESAMPLING", False):
         X_train, y_train, clusters_train = apply_resampling(
             X_train, y_train, clusters_train,
             method=resample_method, random_state=random_state,
         )
 
-    X_train = _strip_id_columns_if_not_needed(X_train, model)
     model.fit(X_train, y_train, clusters=clusters_train)
 
     X_pred, _ = prepare_features(df_pred, use_variant_columns=use_variants)
@@ -287,14 +310,16 @@ def run_cross_val(
             X_val = X_val.drop(columns=["_is_zero_score"])
 
         model = model_class(random_state=random_state, **model_kwargs)
+        # Strip ID columns before resampling (numeric matrix for SMOTE); see the
+        # note in run_full_train. Matches tuning._evaluate_fold_metrics.
+        X_train = _strip_id_columns_if_not_needed(X_train, model)
+        X_val = _strip_id_columns_if_not_needed(X_val, model)
         if resample_method is not None and not getattr(model, "DISABLE_RESAMPLING", False):
             X_train, y_train, clusters_train = apply_resampling(
                 X_train, y_train, clusters_train,
                 method=resample_method, random_state=random_state,
             )
 
-        X_train = _strip_id_columns_if_not_needed(X_train, model)
-        X_val = _strip_id_columns_if_not_needed(X_val, model)
         model.fit(X_train, y_train, clusters=clusters_train)
         n_train_rows += len(X_train)
 

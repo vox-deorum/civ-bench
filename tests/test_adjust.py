@@ -525,3 +525,32 @@ def test_unknown_baseline_experiment_id_allowed_at_config_load(tmp_path, write_s
                      {"block": "auto"}, baseline="no-such-experiment")
     cfg = load_config(write_spec(spec))
     assert cfg.adjust[0].raw["params"]["baseline_experiment"] == "no-such-experiment"
+
+
+# ── problem-game exclusion (WS2): flagged games never reach the fit/panel ─────
+def test_build_strength_panel_drops_flagged_games(tmp_path, catalog):
+    games = [
+        {
+            "experiment": "exp-llm", "game_id": "g1", "seed": -1, "seating_rotation": -1,
+            "seats": [
+                (0, "TestLLM-Simple", "TestLLM", "Rome", 0.5, True),
+                (1, "Vanilla", "VPAI", "Egypt", 0.25, False),
+            ],
+        },
+        {
+            "experiment": "exp-llm", "game_id": "g_bad", "seed": -1, "seating_rotation": -1,
+            "seats": [
+                (0, "TestLLM-Simple", "TestLLM", "Spain", 0.6, True),
+                (1, "Vanilla", "VPAI", "Greece", 0.30, False),
+            ],
+        },
+    ]
+    pp, pa, gp = _write(tmp_path, games)
+    art = build_strength_panel(
+        pp, pa, gp, _params(civ_adjust="ols_logit"), catalog,
+        problem_game_ids={"g_bad"},
+    )
+    # the flagged game contributes no rows to the emitted panel …
+    assert set(art.panel["game_id"]) == {"g1"}
+    # … nor to the civ-effects fit (Spain/Greece only appear in the flagged game)
+    assert set(art.civ_effects["civilization"]) <= {"Rome", "Egypt"}

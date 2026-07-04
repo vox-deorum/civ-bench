@@ -1,9 +1,10 @@
 """``ratings.matchups`` — empirical head-to-head matrices + OLS validation.
 
 Ported from ``ratings/matchups.py``: for every pair of player types that met in a
-game, report the win rate ``P(A stronger than B)`` (``mode:"winrate"``), the mean
-strength difference ``mean(A - B)`` (``mode:"mean"``), or both
-(``mode:"both"``, default), with per-cell significance tests. With
+game, report the win rate ``P(A stronger than B)`` with ties split 0.5/0.5
+(``mode:"winrate"``), the mean strength difference ``mean(A - B)`` (``mode:"mean"``),
+or both (``mode:"both"``, default), with per-cell **paired** t-tests on the aligned
+within-game strength pairs (``ttest_rel``). With
 ``validate_ols`` it also fits ``adjusted_strength ~ C(player_type, Treatment(ref))``
 and surfaces the per-type deviation effects as a cross-check on the matrix
 ordering.
@@ -21,8 +22,16 @@ _STRENGTH_COL = "adjusted_strength"
 
 
 def create_matchup_matrix(strength_df: pd.DataFrame):
-    """Empirical P(A has higher adjusted strength than B); ANOVA p-values."""
-    from scipy.stats import f_oneway
+    """Empirical P(A has higher adjusted strength than B), ties counted as 0.5.
+
+    p-values are a **paired** t-test on the within-game (A, B) strength pairs
+    (``ttest_rel``, equivalent to ``ttest_1samp(A - B, 0)`` used by the mean matrix)
+    — the samples are aligned per game, not two independent groups, so ``f_oneway``
+    was the wrong test. Counting exact ties as 0.5 (rather than a loss for both)
+    restores ``P(i,j) + P(j,i) = 1``; the strength stage's ``enforce_winner`` can
+    manufacture exact 1.0 ties, so ties are not merely a rounding artefact.
+    """
+    from scipy.stats import ttest_rel
 
     player_types = sorted(strength_df["player_type"].unique())
     n = len(player_types)
@@ -41,7 +50,9 @@ def create_matchup_matrix(strength_df: pd.DataFrame):
                 a_vals[i][j].append(sa)
                 b_vals[i][j].append(sb)
                 if sa > sb:
-                    win[i, j] += 1
+                    win[i, j] += 1.0
+                elif sa == sb:
+                    win[i, j] += 0.5  # split ties → P(i,j)+P(j,i)=1
                 count[i, j] += 1
     prob = np.full((n, n), np.nan)
     pval = np.full((n, n), np.nan)
@@ -51,7 +62,7 @@ def create_matchup_matrix(strength_df: pd.DataFrame):
                 continue
             prob[i, j] = win[i, j] / count[i, j]
             if len(a_vals[i][j]) > 1 and len(b_vals[i][j]) > 1:
-                pval[i, j] = f_oneway(a_vals[i][j], b_vals[i][j]).pvalue
+                pval[i, j] = ttest_rel(a_vals[i][j], b_vals[i][j]).pvalue
     return (
         pd.DataFrame(prob, index=player_types, columns=player_types),
         pd.DataFrame(count, index=player_types, columns=player_types),
@@ -103,8 +114,7 @@ class RatingsMatchups(Analysis):
             raise AnalysisError(
                 f"ratings.matchups '{self.stage_id}': mode must be 'mean', 'winrate', or 'both'."
             )
-        table_id = next((t for t in ctx.uses_tables()
-                         if t == "strength" or any(s.id == t for s in ctx.config.adjust)), "strength")
+        table_id = ctx.strength_table_id()
         panel = ctx.apply_filter(ctx.load_table(table_id))
         if _STRENGTH_COL not in panel.columns or panel.empty:
             raise AnalysisError(

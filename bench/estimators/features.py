@@ -219,7 +219,6 @@ def drop_transformed_columns(df: pd.DataFrame, keep_variants: bool = False) -> p
 def prepare_features(
     df: pd.DataFrame,
     keep_ids: bool = True,
-    use_all_features: bool = False,
     use_variant_columns: bool = False,
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """Prepare feature matrix X and target vector y for modelling.
@@ -241,8 +240,7 @@ def prepare_features(
             and c != "grand_strategy"
         ]
     else:
-        feature_cols = get_all_feature_names() if use_all_features else list(SELECTED_FEATURES)
-        feature_cols = [c for c in feature_cols if c in df.columns]
+        feature_cols = [c for c in SELECTED_FEATURES if c in df.columns]
 
     if keep_ids:
         id_cols = ["game_id", "turn", "player_id"]

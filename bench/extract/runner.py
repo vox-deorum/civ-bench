@@ -49,11 +49,15 @@ def run_extract(
     cfg: RunConfig,
     catalog: Optional[Catalog] = None,
     force_rebuild: bool = False,
+    prune_missing: Optional[bool] = None,
 ) -> ExtractResult:
     """Run the extract stage for ``cfg`` and return a summary of what was written.
 
     ``force_rebuild`` (e.g. the CLI ``--force-rebuild`` flag) overrides the
-    config's ``data.extract.force_rebuild`` when either is set.
+    config's ``data.extract.force_rebuild`` when either is set. ``prune_missing``
+    (``None`` = use the config value) lets a caller force a full re-import — the
+    auto-fix re-import passes ``prune_missing=False`` so it actually re-inspects the
+    repaired DBs instead of only pruning.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
 
@@ -66,7 +70,10 @@ def run_extract(
     runs_dir = extract_cfg.get("runs_dir", "runs/")
     outputs = list(extract_cfg.get("outputs", list(DEFAULT_TABLE_PATHS)))
     max_dbs = extract_cfg.get("max_dbs")
-    prune_only = bool(extract_cfg.get("prune_missing", False))
+    if prune_missing is None:
+        prune_only = bool(extract_cfg.get("prune_missing", False))
+    else:
+        prune_only = bool(prune_missing)
     force_rebuild = force_rebuild or bool(extract_cfg.get("force_rebuild", False))
     issues_path = extract_cfg.get("issues_path", DEFAULT_ISSUES_PATH)
 

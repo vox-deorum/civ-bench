@@ -16,7 +16,18 @@ from types import SimpleNamespace
 import pandas as pd
 
 from bench.analyses.base import AnalysisContext
-from bench.extract.issues import read_problem_game_ids
+from bench.config.models import OutputConfig, Stage
+from bench.extract.issues import DEFAULT_ISSUES_PATH, read_problem_game_ids, resolve_issues_path
+
+
+# ── resolve_issues_path ──────────────────────────────────────────────────────
+def test_resolve_issues_path_default_override_and_null():
+    assert resolve_issues_path({}) == DEFAULT_ISSUES_PATH
+    assert resolve_issues_path({"extract": {}}) == DEFAULT_ISSUES_PATH
+    assert resolve_issues_path({"extract": None}) == DEFAULT_ISSUES_PATH  # normalized elsewhere
+    assert resolve_issues_path(
+        {"extract": {"issues_path": "runs/custom.csv"}}
+    ) == "runs/custom.csv"
 
 
 # ── read_problem_game_ids ────────────────────────────────────────────────────
@@ -92,3 +103,34 @@ def test_load_table_without_game_id_column_is_untouched(tmp_path):
     out = ctx.load_table("tokens")
 
     assert len(out) == 2  # no game_id column → nothing to exclude, left as-is
+
+
+# ── AnalysisContext.load_predictions exclusion ───────────────────────────────
+def _pred_ctx(predictions_path: str, issues_path: str) -> AnalysisContext:
+    est = Stage(id="score", kind="estimators", enabled=True,
+                raw={"id": "score", "save_predictions": predictions_path})
+    config = SimpleNamespace(
+        data={"tables": {}, "extract": {"issues_path": issues_path}},
+        estimators=[est],
+        output=OutputConfig(),
+    )
+    return AnalysisContext(
+        config=config, catalog=None, stage_id="t", stage_raw={}, out_dir=Path(".")
+    )
+
+
+def test_load_predictions_drops_flagged_games(tmp_path):
+    preds = tmp_path / "predictions.csv"
+    pd.DataFrame({
+        "game_id": ["keep1", "bad1", "keep2"],
+        "player_id": [0, 1, 2],
+        "predicted_win_probability": [0.1, 0.2, 0.3],
+    }).to_csv(preds, index=False)
+    report = tmp_path / "import_issues.csv"
+    pd.DataFrame({"game_id": ["bad1"]}).to_csv(report, index=False)
+
+    ctx = _pred_ctx(str(preds), str(report))
+    out = ctx.load_predictions("score")
+
+    # predictions carry game_id → the same exclusion as load_table applies here now
+    assert set(out["game_id"]) == {"keep1", "keep2"}

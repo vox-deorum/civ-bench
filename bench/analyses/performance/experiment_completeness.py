@@ -12,14 +12,13 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .seating import SEATING_INDEX_COLUMNS, generate_seating_files
 from .strength_panel import build_experiment_completeness
-from .turn_predicted import _strength_table_id
 
 
 class PerformanceExperimentCompleteness(Analysis):
     module = "performance.experiment_completeness"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        table_id = _strength_table_id(ctx)
+        table_id = ctx.strength_table_id()
         panel = ctx.apply_filter(ctx.load_table(table_id))
         games = self._load_games(ctx)
         baseline_experiment = ctx.strength_provenance(table_id, panel).get(

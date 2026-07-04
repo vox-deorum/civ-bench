@@ -270,6 +270,61 @@ def test_export_game_data_mismatch_aborts(tmp_path):
         export_game_data([str(db)], {"bad"}, str(out))
 
 
+# ── WS7: export driver — swallowed-failure + structure-mismatch bugs ──────────
+def test_export_append_failure_raises(tmp_path, monkeypatch):
+    from bench.extract import export_common
+
+    db = tmp_path / "exp" / "g_100.db"
+    _make_game_db(db, {"gameId": "g"})
+    out = tmp_path / "game_data.csv"  # fresh file → append path
+    monkeypatch.setattr(export_common, "append_csv_file", lambda *a, **k: False)
+    with pytest.raises(ExtractError, match="failed to append"):
+        export_game_data([str(db)], {"g"}, str(out))
+
+
+def test_export_write_failure_raises(tmp_path, monkeypatch):
+    from bench.extract import export_common
+
+    db = tmp_path / "exp" / "g_100.db"
+    _make_game_db(db, {"gameId": "g"})
+    out = tmp_path / "game_data.csv"
+    out.write_text("game_id,old_col\nx,1\n", encoding="utf-8")  # mismatch → rewrite path
+    monkeypatch.setattr(export_common, "write_csv_file", lambda *a, **k: False)
+    with pytest.raises(ExtractError, match="failed to write"):
+        export_game_data([str(db)], {"g"}, str(out))
+
+
+def test_export_structure_mismatch_rewrites_on_normal_run(tmp_path):
+    from bench.extract.extract_games import GAME_FIELDNAMES
+
+    db = tmp_path / "exp" / "g_100.db"
+    _make_game_db(db, {"gameId": "g"})
+    out = tmp_path / "game_data.csv"
+    out.write_text("game_id,old_col\nx,1\n", encoding="utf-8")  # wrong schema
+
+    export_game_data([str(db)], {"g"}, str(out))
+
+    import csv
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
+    # the file now carries the current schema, not the stale one it was "discarded" for
+    assert list(rows[0].keys()) == GAME_FIELDNAMES
+    assert rows[0]["game_id"] == "g"
+
+
+def test_export_structure_mismatch_prune_only_leaves_file_untouched(tmp_path, capsys):
+    db = tmp_path / "exp" / "g_100.db"
+    _make_game_db(db, {"gameId": "g"})
+    out = tmp_path / "game_data.csv"
+    original = "game_id,old_col\nx,1\n"
+    out.write_text(original, encoding="utf-8")
+
+    n = export_game_data([str(db)], {"g"}, str(out), prune_only=True)
+
+    assert n == 0
+    assert out.read_text(encoding="utf-8") == original  # not silently discarded
+    assert "untouched" in capsys.readouterr().out       # …and it says so honestly
+
+
 # ── run_extract orchestration ────────────────────────────────────────────────
 def test_run_extract_disabled_is_skipped(tmp_path, catalog):
     cfg = _run_config(tmp_path, {"enabled": False}, {})

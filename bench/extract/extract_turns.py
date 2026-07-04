@@ -17,13 +17,14 @@ from typing import Optional
 
 from ..catalog import Catalog
 from .errors import ExtractError
+from .export_common import run_table_export
 from .identity import compose_identities
 from .issues import record_db_failure
 from .utilities import (
-    append_csv_file, extract_seeding_fields, filter_existing_data,
+    extract_seeding_fields,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
     is_decision_changes, is_schema_mismatch, open_database_readonly,
-    read_existing_csv, read_game_metadata, should_skip_game, write_csv_file,
+    read_game_metadata,
 )
 
 # Mapping from FlavorChanges DB column (PascalCase) to CSV column (snake_case)
@@ -610,70 +611,26 @@ def process_turn_group(turn_players, turn_data, experiment_name, game_id, max_tu
         turn_data.append(record)
 
 
+def _describe_turn_db(db_file, turn_rows) -> str:
+    unique_turns = len(set(row["turn"] for row in turn_rows))
+    num_players = len(set(row["player_id"] for row in turn_rows))
+    changed_rows = sum(1 for row in turn_rows if row["is_changed"])
+    return (
+        f"{num_players} players × {unique_turns} turns = {len(turn_rows)} records, "
+        f"{changed_rows} with flavor changes"
+    )
+
+
 def export_turn_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
     """Export turn rows to ``output_file``; returns the count of new rows."""
-    expected_fieldnames = list(TURN_FIELD_MAPPINGS.keys())
-    existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
-    pruned_rows = 0
+    def _extract_rows(db_file, issues):
+        return extract_game_turn_data(db_file, catalog=catalog, issues=issues)
 
-    if not structure_matches:
-        print("Discarding existing turn data due to structure mismatch...")
-        existing_data = []
-        existing_game_ids = set()
-    else:
-        existing_data, existing_game_ids, pruned_rows, pruned_game_ids = filter_existing_data(
-            existing_data, available_game_ids
-        )
-        if pruned_rows > 0:
-            print(f"  Filtered out {pruned_rows} turn records from {len(pruned_game_ids)} games without database files")
-
-        seen = {}
-        for i, row in enumerate(existing_data):
-            seen[(row.get("game_id"), row.get("player_id"), row.get("turn"))] = i
-        if len(seen) < len(existing_data):
-            deduped_count = len(existing_data) - len(seen)
-            existing_data = [existing_data[i] for i in sorted(seen.values())]
-            existing_game_ids = {r["game_id"] for r in existing_data if r.get("game_id") and r["game_id"] != "N/A"}
-            pruned_rows += deduped_count
-            print(f"  Removed {deduped_count} duplicate turn records")
-
-        print(f"Found {len(existing_data)} existing turn records from {len(existing_game_ids)} games")
-
-    new_turn_data = []
-    skipped_count = 0
-    processed_count = 0
-    print("\nExtracting turn-based data...")
-    if prune_only:
-        print("Prune-only mode: skipping extraction of new turn rows.")
-    else:
-        for db_file in db_files:
-            game_id = get_game_id_from_path(db_file)
-            if game_id and should_skip_game(game_id, existing_game_ids):
-                skipped_count += 1
-                continue
-            if issues is not None:
-                issues.mark_evaluated("turns", game_id)
-            turn_rows = extract_game_turn_data(db_file, catalog=catalog, issues=issues)
-            if turn_rows:
-                new_turn_data.extend(turn_rows)
-                processed_count += 1
-                unique_turns = len(set(row["turn"] for row in turn_rows))
-                num_players = len(set(row["player_id"] for row in turn_rows))
-                changed_rows = sum(1 for row in turn_rows if row["is_changed"])
-                print(f"Processed: {os.path.basename(db_file)} ({num_players} players × {unique_turns} turns = {len(turn_rows)} records, {changed_rows} with flavor changes)")
-
-    print(f"\nProcessed {processed_count} new databases")
-    print(f"Skipped {skipped_count} databases that were already exported")
-
-    all_turn_data = existing_data + new_turn_data
-    needs_rewrite = pruned_rows > 0 or not structure_matches
-    if needs_rewrite and (new_turn_data or pruned_rows > 0):
-        if write_csv_file(output_file, expected_fieldnames, all_turn_data):
-            print(f"\nRewrote {len(all_turn_data)} turn records to {output_file}")
-    elif new_turn_data:
-        if append_csv_file(output_file, expected_fieldnames, new_turn_data):
-            print(f"\nAppended {len(new_turn_data)} new turn records to {output_file}")
-    else:
-        print(f"\nNo new turn data to export. Existing file contains {len(existing_data)} records.")
-
-    return len(new_turn_data)
+    return run_table_export(
+        db_files, available_game_ids, output_file,
+        stage="turns", fieldnames=list(TURN_FIELD_MAPPINGS.keys()),
+        extract_rows=_extract_rows,
+        dedupe_key=lambda r: (r.get("game_id"), r.get("player_id"), r.get("turn")),
+        describe_db=_describe_turn_db,
+        noun="turn records", prune_only=prune_only, issues=issues,
+    )

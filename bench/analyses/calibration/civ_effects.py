@@ -19,20 +19,11 @@ import pandas as pd
 from ..base import Analysis, AnalysisContext, AnalysisResult
 
 
-def _adjust_table_id(ctx: AnalysisContext) -> str:
-    for tbl in ctx.uses_tables():
-        if any(s.id == tbl for s in ctx.config.adjust):
-            return tbl
-    if ctx.config.adjust:
-        return ctx.config.adjust[0].id
-    return "strength"
-
-
 class CalibrationCivEffects(Analysis):
     module = "calibration.civ_effects"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        adjust_dir = ctx.adjust_dir(_adjust_table_id(ctx))
+        adjust_dir = ctx.adjust_dir(ctx.strength_table_id())
         path = Path(adjust_dir) / "civ_effects.csv"
         if not path.exists():
             return AnalysisResult(summary="No civ_effects.csv (adjust stage not run).")

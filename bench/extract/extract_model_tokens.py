@@ -16,13 +16,13 @@ import sqlite3
 from typing import Dict, List, Optional, Tuple
 
 from ..catalog import Catalog
+from .export_common import run_table_export
 from .identity import compose_identities
 from .issues import record_db_failure
 from .utilities import (
-    append_csv_file, extract_seeding_fields, filter_existing_data,
+    extract_seeding_fields,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    open_database_readonly, read_existing_csv, read_game_metadata,
-    should_skip_game, write_csv_file,
+    open_database_readonly, read_game_metadata,
 )
 
 
@@ -395,74 +395,22 @@ def extract_game_model_token_data(game_db_path: str, catalog: Catalog, issues=No
     return all_rows
 
 
+def _describe_token_db(db_file, model_rows) -> str:
+    unique_players = len({row["player_id"] for row in model_rows})
+    unique_models = len({(row["player_id"], row["model_base"]) for row in model_rows})
+    return f"{unique_players} players, {unique_models} player-model rows"
+
+
 def export_model_token_data(db_files, available_game_ids, output_file, catalog: Catalog, prune_only=False, issues=None) -> int:
     """Export model-token rows to ``output_file``; returns the count of new rows."""
-    expected_fieldnames = MODEL_TOKEN_FIELDNAMES
-    existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
-    pruned_rows = 0
+    def _extract_rows(db_file, issues):
+        return extract_game_model_token_data(db_file, catalog, issues=issues)
 
-    if not structure_matches:
-        print("Discarding existing model token usage data due to structure mismatch...")
-        existing_data = []
-        existing_game_ids = set()
-    else:
-        existing_data, existing_game_ids, pruned_rows, pruned_game_ids = filter_existing_data(
-            existing_data, available_game_ids
-        )
-        if pruned_rows > 0:
-            print(f"  Filtered out {pruned_rows} model-token rows from {len(pruned_game_ids)} games without database files")
-
-        seen = {}
-        for index, row in enumerate(existing_data):
-            seen[(row.get("game_id"), row.get("player_id"), row.get("model_base"))] = index
-        if len(seen) < len(existing_data):
-            deduped_count = len(existing_data) - len(seen)
-            existing_data = [existing_data[index] for index in sorted(seen.values())]
-            existing_game_ids = {
-                row["game_id"] for row in existing_data
-                if row.get("game_id") and row.get("game_id") != "N/A"
-            }
-            pruned_rows += deduped_count
-            print(f"  Removed {deduped_count} duplicate model-token rows")
-
-        print(f"Found {len(existing_data)} existing model-token rows from {len(existing_game_ids)} games")
-
-    print("\nExtracting model token usage data...")
-    new_rows = []
-    skipped_count = 0
-    processed_count = 0
-
-    if prune_only:
-        print("Prune-only mode: skipping extraction of new model token rows.")
-    else:
-        for db_file in db_files:
-            game_id = get_game_id_from_path(db_file)
-            if game_id and should_skip_game(game_id, existing_game_ids):
-                skipped_count += 1
-                continue
-            if issues is not None:
-                issues.mark_evaluated("tokens", game_id)
-            model_rows = extract_game_model_token_data(db_file, catalog, issues=issues)
-            if not model_rows:
-                continue
-            new_rows.extend(model_rows)
-            processed_count += 1
-            unique_players = len({row["player_id"] for row in model_rows})
-            unique_models = len({(row["player_id"], row["model_base"]) for row in model_rows})
-            print(f"Processed: {os.path.basename(db_file)} ({unique_players} players, {unique_models} player-model rows)")
-
-    print(f"\nProcessed {processed_count} new databases")
-    print(f"Skipped {skipped_count} databases that were already exported")
-
-    all_rows = existing_data + new_rows
-    needs_rewrite = pruned_rows > 0 or not structure_matches
-    if needs_rewrite and (new_rows or pruned_rows > 0):
-        if write_csv_file(output_file, expected_fieldnames, all_rows):
-            print(f"\nRewrote {len(all_rows)} model-token rows to {output_file}")
-    elif new_rows:
-        if append_csv_file(output_file, expected_fieldnames, new_rows):
-            print(f"\nAppended {len(new_rows)} new model-token rows to {output_file}")
-    else:
-        print(f"\nNo new model token usage data to export. Existing file contains {len(existing_data)} rows.")
-
-    return len(new_rows)
+    return run_table_export(
+        db_files, available_game_ids, output_file,
+        stage="tokens", fieldnames=MODEL_TOKEN_FIELDNAMES,
+        extract_rows=_extract_rows,
+        dedupe_key=lambda r: (r.get("game_id"), r.get("player_id"), r.get("model_base")),
+        describe_db=_describe_token_db,
+        noun="model-token rows", prune_only=prune_only, issues=issues,
+    )

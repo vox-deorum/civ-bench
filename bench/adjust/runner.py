@@ -94,6 +94,13 @@ def run_adjust(
     if catalog is None:
         catalog = Catalog.from_run_config(cfg)
 
+    # Exclude malformed-DB games from the adjust inputs too — otherwise a flagged
+    # game's stale rows still shape the civ-OLS / cell-baseline fits, and every
+    # ratings analysis reads an adjusted_strength panel built partly on bad data.
+    from ..extract.issues import read_problem_game_ids, resolve_issues_path
+
+    problem_ids = read_problem_game_ids(resolve_issues_path(cfg.data))
+
     artifacts = builder(
         predictions_path,
         panel_path,
@@ -101,6 +108,7 @@ def run_adjust(
         stage_raw.get("params"),
         catalog,
         estimator_id,
+        problem_game_ids=problem_ids,
     )
 
     save_path = cfg.output.resolve(stage_raw.get("save") or _default_save_path(cfg, stage_id))

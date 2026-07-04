@@ -4,7 +4,7 @@
 # trained estimators (see AGENTS.md "Repo layout"). Nothing experiment-specific
 # beyond configs/ examples lives in git.
 runs/
-reports/
+/reports/
 reports-*/
 
 # Concrete benchmark run-specs are LOCAL and gitignored — they point at real

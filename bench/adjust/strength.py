@@ -16,8 +16,8 @@ Parity notes (so ``block:"none"`` reproduces the legacy per-row values):
     legacy pipeline groups/weights on ``round(turn/max_turn, 2)`` — we re-round here.
   * the ``turn_progress_min`` filter is a strict ``>``.
   * ``eps = 1e-5`` (``bench.stats.transforms.LOGIT_EPS``) matches the legacy clip.
-  * the legacy Step-6 ``filter_non_llm_games`` is intentionally NOT ported — the
-    panel keeps every experiment so ``ref="Vanilla"`` / the baseline pathways resolve.
+  * the legacy Step-6 non-LLM game filter is intentionally NOT applied — the panel
+    keeps every experiment so ``ref="Vanilla"`` / the baseline pathways resolve.
 """
 
 from __future__ import annotations
@@ -199,12 +199,18 @@ def _join_identity(
 
 
 # ── uncontrolled path: OLS civilization effects (logit scale) ────────────────
-def _fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> tuple[dict, pd.DataFrame]:
+def fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> tuple[dict, pd.DataFrame]:
     """Fit `logit_strength ~ C(civilization, Sum) + C(player_type, Treatment(ref))` on ALL rows.
 
     Returns (civ_effects map, civ_effects_df). The omitted Sum-coded level is
     discovered from the data (all civilizations − parsed terms) and set to
-    −sum(observed effects); no hardcoded omitted civ.
+    −sum(observed effects), computed ONCE before assignment (so ≥2 omitted civs
+    all get the same, correct value); no hardcoded omitted civ.
+
+    Shared with the ratings bootstrap (``analyses.ratings.bootstrap.readjust``) so a
+    replicate's civ refit is byte-identical to the adjust stage's — the bootstrap's
+    previous private copy diverged (it recomputed −sum inside the omitted loop while
+    mutating the dict, mis-scaling every omitted civ after the first).
     """
     from statsmodels.formula.api import ols
 
@@ -442,14 +448,22 @@ def build_strength_panel(
     params: dict | None,
     catalog: Catalog,
     estimator_id: str = "",
+    problem_game_ids: set[str] | None = None,
 ) -> StrengthArtifacts:
-    """Derive the strength panel + audit trails from an estimator's predictions."""
+    """Derive the strength panel + audit trails from an estimator's predictions.
+
+    ``problem_game_ids`` (from the malformed-DB ``import_issues.csv``) are dropped
+    from all three inputs right after reading, so the civ-OLS effects and the
+    Vanilla cell baselines are fit on clean rows only.
+    """
     p = _resolve_params(params)
     warnings_out: list[str] = []
 
-    pred = pd.read_csv(predictions_path)
-    panel = pd.read_csv(panel_path)
-    games = pd.read_csv(games_path)
+    from ..data.loading import drop_problem_games
+
+    pred = drop_problem_games(pd.read_csv(predictions_path), problem_game_ids)
+    panel = drop_problem_games(pd.read_csv(panel_path), problem_game_ids)
+    games = drop_problem_games(pd.read_csv(games_path), problem_game_ids)
 
     df = _weighted_strength(pred, p["turn_progress_min"], p["weight"])
     if df.empty:
@@ -468,7 +482,7 @@ def build_strength_panel(
     civ_effects: dict[str, float] = {}
     civ_effects_df = pd.DataFrame(columns=CIV_EFFECTS_COLUMNS)
     if p["civ_adjust"] == "ols_logit":
-        civ_effects, civ_effects_df = _fit_civ_effects(df, catalog)
+        civ_effects, civ_effects_df = fit_civ_effects(df, catalog)
 
     # Controlled path: matched start-cell Vanilla VPAI baseline.
     cell_baseline_df = pd.DataFrame(columns=CELL_BASELINE_COLUMNS)

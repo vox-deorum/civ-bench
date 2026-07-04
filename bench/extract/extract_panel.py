@@ -16,14 +16,15 @@ from typing import Optional
 
 from ..catalog import Catalog
 from .errors import ExtractError
+from .export_common import run_table_export
 from .identity import compose_identities
 from .issues import record_db_failure
 from .utilities import (
     POLICY_BRANCHES, STRATEGY_MAPPINGS, CHANGE_FIELDS, PLAYER_CORE_FIELDS,
-    append_csv_file, extract_seeding_fields, filter_existing_data,
+    extract_seeding_fields,
     get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    is_schema_mismatch, open_database_readonly, read_existing_csv,
-    read_game_metadata, should_skip_game, write_csv_file,
+    is_schema_mismatch, open_database_readonly,
+    read_game_metadata,
 )
 
 # Combine all player-specific fields for error handling
@@ -541,62 +542,14 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=N
 
 def export_panel_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
     """Export panel rows to ``output_file``; returns the count of new rows."""
-    expected_fieldnames = list(PANEL_FIELD_MAPPINGS.keys())
-    existing_data, existing_game_ids, structure_matches = read_existing_csv(output_file, expected_fieldnames)
-    pruned_rows = 0
+    def _extract_rows(db_file, issues):
+        return extract_game_panel_data(db_file, catalog=catalog, issues=issues)
 
-    if not structure_matches:
-        print("Discarding existing panel data due to structure mismatch...")
-        existing_data = []
-        existing_game_ids = set()
-    else:
-        existing_data, existing_game_ids, pruned_rows, pruned_game_ids = filter_existing_data(
-            existing_data, available_game_ids
-        )
-        if pruned_rows > 0:
-            print(f"  Filtered out {pruned_rows} rows from {len(pruned_game_ids)} games without database files")
-
-        seen = {}
-        for i, row in enumerate(existing_data):
-            seen[(row.get("game_id"), row.get("player_id"))] = i
-        if len(seen) < len(existing_data):
-            deduped_count = len(existing_data) - len(seen)
-            existing_data = [existing_data[i] for i in sorted(seen.values())]
-            existing_game_ids = {r["game_id"] for r in existing_data if r.get("game_id") and r["game_id"] != "N/A"}
-            pruned_rows += deduped_count
-            print(f"  Removed {deduped_count} duplicate rows")
-
-        print(f"Found {len(existing_data)} existing rows from {len(existing_game_ids)} games")
-
-    new_panel_data = []
-    skipped_count = 0
-    print("\nExtracting panel data...")
-    if prune_only:
-        print("Prune-only mode: skipping extraction of new panel rows.")
-    else:
-        for db_file in db_files:
-            game_id = get_game_id_from_path(db_file)
-            if game_id and should_skip_game(game_id, existing_game_ids):
-                skipped_count += 1
-                continue
-            if issues is not None:
-                issues.mark_evaluated("panel", game_id)
-            panel_rows = extract_game_panel_data(db_file, catalog=catalog, issues=issues)
-            if panel_rows:
-                new_panel_data.extend(panel_rows)
-                print(f"Processed: {os.path.basename(db_file)} ({len(panel_rows)} player rows)")
-
-    print(f"\nSkipped {skipped_count} databases that were already exported")
-
-    all_panel_data = existing_data + new_panel_data
-    needs_rewrite = pruned_rows > 0 or not structure_matches
-    if needs_rewrite and (new_panel_data or pruned_rows > 0):
-        if write_csv_file(output_file, expected_fieldnames, all_panel_data):
-            print(f"\nRewrote {len(all_panel_data)} player-game observations to {output_file}")
-    elif new_panel_data:
-        if append_csv_file(output_file, expected_fieldnames, new_panel_data):
-            print(f"\nAppended {len(new_panel_data)} new rows to {output_file}")
-    else:
-        print(f"\nNo new panel data to export. Existing file contains {len(existing_data)} rows.")
-
-    return len(new_panel_data)
+    return run_table_export(
+        db_files, available_game_ids, output_file,
+        stage="panel", fieldnames=list(PANEL_FIELD_MAPPINGS.keys()),
+        extract_rows=_extract_rows,
+        dedupe_key=lambda r: (r.get("game_id"), r.get("player_id")),
+        describe_db=lambda db_file, rows: f"{len(rows)} player rows",
+        noun="panel rows", prune_only=prune_only, issues=issues,
+    )

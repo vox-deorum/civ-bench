@@ -219,12 +219,6 @@ def get_player_info_cache(cursor):
     return player_info
 
 
-def get_major_players(cursor):
-    """Return the sorted list of major-civilization player ids."""
-    cursor.execute("SELECT Key FROM PlayerInformations WHERE IsMajor = 1 ORDER BY Key")
-    return [row[0] for row in cursor.fetchall()]
-
-
 def read_game_metadata(cursor) -> dict:
     """Read the ``GameMetadata`` Key→Value table into a dict."""
     cursor.execute("SELECT Key, Value FROM GameMetadata")

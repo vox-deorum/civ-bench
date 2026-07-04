@@ -18,7 +18,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from .base_torch_predictor import BaseTorchPredictor
-from .grouped_mlp_model import _UtilityNet
+from .grouped_mlp_model import (
+    _UtilityNet,
+    _layer_sizes_convert_optuna,
+    _layer_sizes_optuna_defaults,
+    _utilitynet_feature_importance,
+)
 
 
 class MLPPredictor(BaseTorchPredictor):
@@ -40,27 +45,11 @@ class MLPPredictor(BaseTorchPredictor):
 
     @classmethod
     def optuna_default_params(cls):
-        import inspect
-        sig = inspect.signature(cls.__init__)
-        d = {k: v.default for k, v in sig.parameters.items()
-             if v.default is not inspect.Parameter.empty}
-        layer_sizes = d["layer_sizes"]
-        return {
-            "n_layers": len(layer_sizes),
-            "layer_size": layer_sizes[0] if layer_sizes else 64,
-            "dropout": d["dropout"], "lr": d["lr"],
-            "weight_decay": d["weight_decay"], "epochs": d["epochs"],
-            "loss_tp_alpha": d["loss_tp_alpha"],
-        }
+        return _layer_sizes_optuna_defaults(cls)
 
     @staticmethod
     def convert_optuna_params(raw_params):
-        params = dict(raw_params)
-        n_layers = params.pop("n_layers", None)
-        layer_size = params.pop("layer_size", None)
-        if n_layers is not None and layer_size is not None:
-            params["layer_sizes"] = tuple([layer_size] * n_layers)
-        return params
+        return _layer_sizes_convert_optuna(raw_params)
 
     def __init__(
         self,
@@ -91,6 +80,7 @@ class MLPPredictor(BaseTorchPredictor):
         self.batch_size = batch_size
 
     def fit(self, X: pd.DataFrame, y: pd.Series, clusters: Optional[pd.Series] = None, epoch_callback=None) -> "MLPPredictor":
+        self._seed_torch()
         X_filtered = self._filter_features(X)
         self.feature_names = list(X_filtered.columns)
 
@@ -178,25 +168,7 @@ class MLPPredictor(BaseTorchPredictor):
         return np.column_stack([1.0 - p_win, p_win])
 
     def get_feature_importance(self) -> Optional[pd.DataFrame]:
-        if self.model is None:
-            raise ValueError("Model must be fitted before getting feature importance")
-
-        if len(self.layer_sizes) == 0:
-            weights = self.model.net.weight.detach().cpu().numpy()
-            importances = np.abs(weights).flatten()
-        elif len(self.layer_sizes) == 1:
-            weights = self.model.net[0].weight.detach().cpu().numpy()
-            importances = np.abs(weights).mean(axis=0)
-        else:
-            weights = self.model.proj.weight.detach().cpu().numpy()
-            importances = np.abs(weights).mean(axis=0)
-
-        importance_df = pd.DataFrame({
-            "feature": self.feature_names,
-            "coefficient": importances,
-            "abs_coefficient": np.abs(importances),
-        })
-        return importance_df.sort_values("abs_coefficient", ascending=False)
+        return _utilitynet_feature_importance(self.model, self.layer_sizes, self.feature_names)
 
     def get_model_summary(self) -> dict:
         if self.model is None:

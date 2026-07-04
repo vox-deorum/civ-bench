@@ -10,7 +10,7 @@ optionally attach bootstrap CIs. The subclass only supplies the per-fit calculat
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -35,19 +35,35 @@ class RatingsAnalysis(Analysis):
         return lambda df: self._calculate(df, reference)
 
     # ── input prep ─────────────────────────────────────────────────────────────
-    def _strength_table_id(self, ctx: AnalysisContext) -> str:
-        for tbl in ctx.uses_tables():
-            if tbl == "strength" or any(s.id == tbl for s in ctx.config.adjust):
-                return tbl
-        return "strength"
-
     def _strength_params(self, ctx: AnalysisContext, table_id: str) -> dict:
         stage = next((s for s in ctx.config.adjust if s.id == table_id), None)
         return dict((stage.raw.get("params") or {})) if stage else {}
 
-    def _load_and_filter(self, ctx: AnalysisContext, reference: str) -> pd.DataFrame:
-        table_id = self._strength_table_id(ctx)
+    def _load(self, ctx: AnalysisContext) -> pd.DataFrame:
+        """The full strength panel BEFORE rating-population narrowing.
+
+        ``load_table`` has already dropped malformed-DB games; no rating filters are
+        applied here. This is the population the bootstrap resamples and re-adjusts,
+        so a replicate's civ-OLS refit sees exactly the rows the adjust stage fit on
+        (including the Vanilla reference that only_llm / min_games later drop — the
+        cause of the vanished-Vanilla all-NaN CIs).
+        """
+        table_id = ctx.strength_table_id()
         panel = ctx.load_table(table_id)
+        if _STRENGTH_COL not in panel.columns:
+            raise AnalysisError(
+                f"ratings '{self.stage_id}': strength table lacks '{_STRENGTH_COL}'."
+            )
+        return panel
+
+    def _narrow(self, ctx: AnalysisContext, panel: pd.DataFrame, reference: str) -> pd.DataFrame:
+        """Apply the rating-population filters to a full/resampled panel.
+
+        config data.filter (+ stage filter) → only_llm degenerate-self-play drop →
+        min_games (never dropping the reference) → sort. Applied to both the point
+        panel and each bootstrap replicate *after* readjustment, so the replicate and
+        point populations are narrowed identically.
+        """
         panel = ctx.apply_filter(panel)
 
         only_llm = bool(self.params.get("only_llm", True))
@@ -71,10 +87,6 @@ class RatingsAnalysis(Analysis):
             raise AnalysisError(
                 f"ratings '{self.stage_id}': no rows after filtering (only_llm="
                 f"{only_llm}, min_games={min_games})."
-            )
-        if _STRENGTH_COL not in panel.columns:
-            raise AnalysisError(
-                f"ratings '{self.stage_id}': strength table lacks '{_STRENGTH_COL}'."
             )
         return panel.sort_values(["game_id", "player_id"]).reset_index(drop=True)
 
@@ -117,15 +129,16 @@ class RatingsAnalysis(Analysis):
         extra_dims = group_by[1:]
         bootstrap = self.params.get("bootstrap")
 
-        panel = self._load_and_filter(ctx, reference)
-        table_id = self._strength_table_id(ctx)
+        full_panel = self._load(ctx)
+        panel = self._narrow(ctx, full_panel, reference)
+        table_id = ctx.strength_table_id()
         metadata = {"group_by": group_by, **ctx.strength_provenance(table_id, panel)}
 
         if not extra_dims:
             ratings = self._calculate(panel, reference)
             summary = self._summary(ratings, "player_type")
             ratings, boot_summary = self._maybe_bootstrap(
-                ctx, panel, ratings, reference, bootstrap, "player_type"
+                ctx, full_panel, panel, ratings, reference, bootstrap, "player_type"
             )
             fig = self._forest(ratings, ctx, "player_type", metadata)
             tables = {"ratings": ratings}
@@ -338,22 +351,26 @@ class RatingsAnalysis(Analysis):
         return ""
 
     # ── bootstrap ──────────────────────────────────────────────────────────────
-    def _maybe_bootstrap(self, ctx, panel, ratings, reference, bootstrap, identity_col):
+    def _maybe_bootstrap(self, ctx, full_panel, narrowed, ratings, reference, bootstrap, identity_col):
         if bootstrap is None:
             return ratings, None
         n = int(bootstrap.get("n"))
         ci_level = float(bootstrap.get("ci_level", 0.95))
         stratified = bool(bootstrap.get("stratified", True))
-        table_id = self._strength_table_id(ctx)
+        table_id = ctx.strength_table_id()
         adjust_params = self._strength_params(ctx, table_id)
-        fixed_cell_baseline = self._fixed_cell_baseline(ctx, table_id, panel, adjust_params)
-        calculator = self._frozen_calculator(panel, reference)
+        # has-cell-rows detection + margin freeze use the FULL panel and the NARROWED
+        # point panel respectively; the resample population is the full panel, and each
+        # replicate is narrowed (via `narrow`) after readjustment.
+        fixed_cell_baseline = self._fixed_cell_baseline(ctx, table_id, full_panel, adjust_params)
+        calculator = self._frozen_calculator(narrowed, reference)
+        narrow = lambda df: self._narrow(ctx, df, reference)  # noqa: E731
         point = ratings[[identity_col, "elo"]].copy()
         summary = boot.run_bootstrap(
-            panel, point, calculator, group_col=identity_col, n=n, seed=ctx.config.seed,
+            full_panel, point, calculator, group_col=identity_col, n=n, seed=ctx.config.seed,
             ci_level=ci_level, stratified=stratified, adjust_params=adjust_params,
             catalog=ctx.catalog, refit_strength=True,
-            fixed_cell_baseline=fixed_cell_baseline,
+            fixed_cell_baseline=fixed_cell_baseline, narrow=narrow,
         )
         merged = ratings.merge(
             summary[[identity_col, "ci_lower", "ci_upper", "boot_se_elo", "n_valid"]],

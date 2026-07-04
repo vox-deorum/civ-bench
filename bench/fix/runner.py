@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..config import RunConfig
-from ..extract.issues import DEFAULT_ISSUES_PATH
+from ..extract.issues import resolve_issues_path
 from .errors import FixError
 from .repair import SIDECAR_SUFFIXES, RepairReport, _remove, repair_database, source_quick_check
 
@@ -199,15 +199,25 @@ def _process_one(
         return FixOutcome(db_name, game_id, "failed", path=full_path, detail=detail)
 
 
-def run_fix(cfg: RunConfig, dry_run: bool = False, force: bool = False) -> FixResult:
+def run_fix(
+    cfg: RunConfig,
+    dry_run: bool = False,
+    force: bool = False,
+    only_game_ids: set[str] | None = None,
+) -> FixResult:
     """Repair the malformed DBs (and their related trace DBs) named in ``import_issues.csv``.
 
     Raises :class:`FixError` for an operational failure (a ``runs_dir`` that does not
     exist while there are DBs to repair) — distinct from a per-file ``failed`` outcome.
+
+    ``only_game_ids`` (``None`` = repair everything recorded, the standalone
+    ``civ-bench fix`` behaviour) narrows the batch to the ledger rows whose dedupe key
+    (``game_id`` or, absent that, ``db_name``) is in the set — used by auto-fix to
+    repair only the games that failed *this* run, not the whole carried-forward ledger.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
     runs_dir = extract_cfg.get("runs_dir", "runs/")
-    issues_path = extract_cfg.get("issues_path", DEFAULT_ISSUES_PATH)
+    issues_path = resolve_issues_path(cfg.data)
 
     print("=" * 60)
     print("civ-bench fix" + (" (dry-run)" if dry_run else ""))
@@ -217,6 +227,8 @@ def run_fix(cfg: RunConfig, dry_run: bool = False, force: bool = False) -> FixRe
 
     result = FixResult(runs_dir=runs_dir, issues_path=issues_path)
     rows = _read_issue_rows(issues_path)
+    if only_game_ids is not None:
+        rows = [r for r in rows if (r["game_id"] or r["db_name"]) in only_game_ids]
     if not rows:
         print("No problem databases recorded — nothing to fix.")
         return result

@@ -49,6 +49,18 @@ ISSUE_FIELDNAMES = [
 ]
 
 
+def resolve_issues_path(data: dict) -> str:
+    """The effective import-issues report path for a run's ``data`` block.
+
+    Falls back to :data:`DEFAULT_ISSUES_PATH` when ``data.extract.issues_path`` is
+    unset (or ``data.extract`` itself is null/absent). Shared by the extract stage
+    that *writes* the ledger and every adjust/analysis consumer that *reads* it to
+    exclude problem games, so a configured override is honoured in one place.
+    """
+    extract = (data or {}).get("extract") or {}
+    return extract.get("issues_path") or DEFAULT_ISSUES_PATH
+
+
 def read_problem_game_ids(path: str) -> set[str]:
     """Return the set of ``game_id``s recorded in an ``import_issues.csv``.
 
@@ -144,6 +156,7 @@ class ImportIssueLog:
         self._by_game: dict = {}        # issues found *this run* (game_id → ImportIssue)
         self._prior: dict = {}          # issues loaded from the existing report
         self._evaluated: dict = {}      # game_id → {stage} re-examined this run
+        self._fresh: set = set()        # game_ids RECORDED this run (never carried-forward)
 
     def load(self, path: str) -> None:
         """Seed the prior-report state from an existing ``import_issues.csv``.
@@ -238,6 +251,11 @@ class ImportIssueLog:
         exp = experiment if experiment is not None else get_experiment_from_path(db_path)
         seed, rotation = _best_effort_seeding(metadata)
 
+        # Mark this game as freshly failed THIS run. reconcile() never touches
+        # _fresh, so a carried-forward prior issue stays non-fresh — which is what
+        # lets auto-fix fire only on genuinely-new failures (WS3).
+        self._fresh.add(gid)
+
         issue = self._by_game.get(gid)
         if issue is None:
             issue = ImportIssue(
@@ -266,6 +284,22 @@ class ImportIssueLog:
 
     def __bool__(self) -> bool:
         return bool(self._by_game)
+
+    @property
+    def fresh_game_ids(self) -> set:
+        """game_ids that FAILED during this run (excludes carried-forward priors).
+
+        This is the auto-fix trigger set: repairing a game that a prior run already
+        flagged (but that no stage re-examined this run) would re-attempt the same
+        unrecoverable DB every invocation. ``--force-rebuild`` re-examines a stale
+        ledger, which re-records still-broken games as fresh.
+        """
+        return set(self._fresh)
+
+    @property
+    def has_fresh_issues(self) -> bool:
+        """True when a malformed DB was recorded *this run* (not just carried over)."""
+        return bool(self._fresh)
 
     def issues(self) -> list:
         """Issues sorted by ``(experiment, game_id)`` for stable output."""

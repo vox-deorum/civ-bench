@@ -8,9 +8,12 @@ from bench.config import ConfigError, OutputConfig, load_config
 from bench.config.analysis_metadata import analysis_defaults_to_all_estimators
 from bench.pipeline import build_dag
 
+from conftest import DEV_CONFIG
 
-def test_dev_config_loads(configs_dir):
-    cfg = load_config(configs_dir / "benchmark.dev.json")
+
+def test_dev_config_loads(dev_spec, write_spec):
+    """The synthetic dev spec loads and has the shape the mutation tests rely on."""
+    cfg = load_config(write_spec(dev_spec))
     assert cfg.name == "civbench-dev"
     assert cfg.seed == 42
     assert cfg.output.resolved_root == "reports-dev"
@@ -18,6 +21,16 @@ def test_dev_config_loads(configs_dir):
     # 12 original core analyses + PL strategy ratings + observed matchup winrates
     # + two controlled-design calibration views + experiment completeness.
     assert len(cfg.analyses) == 17
+
+
+@pytest.mark.skipif(not DEV_CONFIG.exists(), reason="local (gitignored) dev config absent")
+def test_real_dev_config_smoke():
+    """When the machine-specific dev config is present, it still validates.
+
+    No content assertions — the file is hand-edited locally, so only its
+    loadability is contracted here.
+    """
+    assert load_config(DEV_CONFIG) is not None
 
 
 def test_pretrained_template_loads(configs_dir):
@@ -123,6 +136,15 @@ def _mutations():
         "extract_auto_fix_not_bool": lambda c: c["data"]["extract"].__setitem__("auto_fix", "yes"),
         "extract_issues_path_not_string": lambda c: c["data"]["extract"].__setitem__("issues_path", 7),
         "tables_path_not_string": lambda c: c["data"]["tables"].__setitem__("turns", 7),
+        # stage ids must be non-empty strings (a non-string breaks the topo sort)
+        "estimator_id_not_string": lambda c: c["estimators"][0].__setitem__("id", 7),
+        "adjust_id_not_string": lambda c: c["adjust"][0].__setitem__("id", 7),
+        "analysis_id_empty": lambda c: c["analyses"][0].__setitem__("id", "  "),
+        # an adjust id must not shadow a canonical table name (it doubles as one)
+        "adjust_id_shadows_table": lambda c: c["adjust"][0].__setitem__("id", "panel"),
+        # filter membership fields must be lists of strings (no scalar coercion)
+        "filter_players_scalar": lambda c: c["data"].__setitem__("filter", {"players": 5}),
+        "filter_experiments_string": lambda c: c["data"].__setitem__("filter", {"experiments": "solo"}),
         "stage_filter_widens_global": lambda c: (
             c["data"].__setitem__("filter", {"experiments": ["global_only"]}),
             c["analyses"][4].__setitem__("filter", {"experiments": ["other"]}),
@@ -158,6 +180,22 @@ def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
     dev_spec["data"]["extract"]["auto_fix"] = "FALSE"
     cfg = load_config(write_spec(dev_spec))
     assert cfg.data["extract"]["auto_fix"] is False
+
+
+def test_extract_null_loads_with_extract_enabled(dev_spec, write_spec):
+    """A JSON-null ``data.extract`` normalizes to {} ⇒ extract stays enabled (default)."""
+    dev_spec["data"]["extract"] = None
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.extract_enabled is True
+    assert cfg.data["extract"] == {}
+
+
+def test_emit_seating_coerces_from_string(dev_spec, write_spec):
+    """experiment_completeness.emit_seating is coerced like the other analysis bools."""
+    _analysis(dev_spec, "perf_experiment_completeness")["params"]["emit_seating"] = "false"
+    cfg = load_config(write_spec(dev_spec))
+    ec = next(a for a in cfg.analyses if a.id == "perf_experiment_completeness")
+    assert ec.raw["params"]["emit_seating"] is False
 
 
 @pytest.mark.parametrize("value", ["none", None, "game_leader"])

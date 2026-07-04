@@ -11,19 +11,15 @@ from __future__ import annotations
 
 import sqlite3
 
+from .export_common import run_table_export
 from .issues import record_db_failure
 from .utilities import (
-    append_csv_file,
     extract_seeding_fields,
-    filter_existing_data,
     get_experiment_from_path,
     get_game_id_from_path,
     get_timestamp_from_path,
     open_database_readonly,
-    read_existing_csv,
     read_game_metadata,
-    should_skip_game,
-    write_csv_file,
 )
 
 
@@ -74,52 +70,13 @@ def extract_game_row(db_path, issues=None) -> dict | None:
 
 def export_game_data(db_files, available_game_ids, output_file, prune_only=False, issues=None) -> int:
     """Export per-game rows to ``output_file``; returns the count of new rows."""
-    expected_fieldnames = GAME_FIELDNAMES
-    existing_data, existing_game_ids, structure_matches = read_existing_csv(
-        output_file, expected_fieldnames
+    def _extract_rows(db_file, issues):
+        row = extract_game_row(db_file, issues=issues)
+        return [row] if row is not None else []
+
+    # games is 1 row per DB, so there is nothing to dedupe (dedupe_key=None).
+    return run_table_export(
+        db_files, available_game_ids, output_file,
+        stage="games", fieldnames=GAME_FIELDNAMES, extract_rows=_extract_rows,
+        dedupe_key=None, noun="game rows", prune_only=prune_only, issues=issues,
     )
-    pruned_rows = 0
-
-    if not structure_matches:
-        print("Discarding existing game data due to structure mismatch...")
-        existing_data = []
-        existing_game_ids = set()
-    else:
-        existing_data, existing_game_ids, pruned_rows, pruned_game_ids = filter_existing_data(
-            existing_data, available_game_ids
-        )
-        if pruned_rows > 0:
-            print(f"  Filtered out {pruned_rows} rows from {len(pruned_game_ids)} games without database files")
-        print(f"Found {len(existing_data)} existing game rows from {len(existing_game_ids)} games")
-
-    new_rows = []
-    skipped_count = 0
-    print("\nExtracting game data...")
-    if prune_only:
-        print("Prune-only mode: skipping extraction of new game rows.")
-    else:
-        for db_file in db_files:
-            game_id = get_game_id_from_path(db_file)
-            if game_id and should_skip_game(game_id, existing_game_ids):
-                skipped_count += 1
-                continue
-            if issues is not None:
-                issues.mark_evaluated("games", game_id)
-            row = extract_game_row(db_file, issues=issues)
-            if row is not None:
-                new_rows.append(row)
-
-    print(f"Skipped {skipped_count} games that were already exported")
-
-    all_rows = existing_data + new_rows
-    needs_rewrite = pruned_rows > 0 or not structure_matches
-    if needs_rewrite and (new_rows or pruned_rows > 0):
-        if write_csv_file(output_file, expected_fieldnames, all_rows):
-            print(f"\nRewrote {len(all_rows)} game rows to {output_file}")
-    elif new_rows:
-        if append_csv_file(output_file, expected_fieldnames, new_rows):
-            print(f"\nAppended {len(new_rows)} new game rows to {output_file}")
-    else:
-        print(f"\nNo new game data to export. Existing file contains {len(existing_data)} rows.")
-
-    return len(new_rows)

@@ -276,6 +276,40 @@ def test_prior_issue_dropped_when_db_gone(tmp_path):
     assert len(log) == 0
 
 
+# ── fresh-issue tracking (WS3: auto-fix gates on genuinely-new failures) ──────
+def test_record_marks_game_fresh(tmp_path):
+    log = ImportIssueLog()
+    log.record(stage="games", db_path=_game_path(tmp_path), message="boom")
+    assert log.has_fresh_issues
+    assert log.fresh_game_ids == {GAME_ID}
+
+
+def test_carried_forward_prior_is_not_fresh(tmp_path):
+    # A prior-run issue folded in by reconcile() must NOT count as fresh — otherwise
+    # auto-fix would re-attempt an already-unrecoverable game every run.
+    report = _written_report(tmp_path, stage="panel", message="boom")
+    log = ImportIssueLog()
+    log.load(report)
+    log.reconcile(available_game_ids={GAME_ID})
+
+    assert bool(log) is True          # the ledger still lists the game
+    assert log.has_fresh_issues is False
+    assert log.fresh_game_ids == set()
+
+
+def test_fresh_excludes_carried_but_includes_rerecorded(tmp_path):
+    # A game that fails again this run IS fresh; a distinct carried-forward game is not.
+    p = _game_path(tmp_path)
+    report = _written_report(tmp_path, stage="panel", message="old boom")
+    log = ImportIssueLog()
+    log.load(report)
+    log.record(stage="panel", db_path=p, message="new boom")  # re-fails this run
+    log.reconcile(available_game_ids={GAME_ID})
+
+    assert log.fresh_game_ids == {GAME_ID}
+    assert log.has_fresh_issues is True
+
+
 def test_reexamined_healthy_stage_clears_prior(tmp_path):
     report = _written_report(tmp_path, stage="panel", message="boom")
     log = ImportIssueLog()

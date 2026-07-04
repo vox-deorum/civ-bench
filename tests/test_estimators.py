@@ -25,7 +25,19 @@ from bench.estimators.features import (
     prepare_features,
 )
 from bench.estimators.models import ScorePredictor, AttentionMLPPredictor
+from bench.estimators.models.base_predictor import BasePredictor
 from bench.estimators.registry import MODEL_REGISTRY, get_model, list_models, load_model
+from bench.estimators.training import apply_resampling
+
+
+class _DummyPredictor(BasePredictor):
+    """Minimal concrete predictor for exercising BasePredictor helpers (no fit)."""
+
+    def fit(self, X, y, clusters=None, epoch_callback=None):
+        return self
+
+    def predict_proba(self, X):
+        return np.zeros((len(X), 2))
 
 
 # ── synthetic turns fixture ──────────────────────────────────────────────────
@@ -471,3 +483,54 @@ def test_explicit_params_override_load_params(turns_csv, tmp_path, write_spec):
     cfg2 = load_config(write_spec(spec2))
     run_estimator(cfg2, cfg2.estimators[0].raw)
     assert load_model(save_model).exponent == 5.0
+
+
+# ── determinism helpers (WS1/WS6, pure-unit — no model fits) ─────────────────
+def test_expand_wildcards_is_order_preserving_and_deduped():
+    m = _DummyPredictor()
+    # literals keep declared order; a wildcard expands in data-column order; the
+    # repeated literal is de-duplicated (first occurrence wins) — a list, not a set.
+    out = m._expand_wildcards(
+        ["z_lit", "*_share", "z_lit"], ["b_share", "a_share", "c_other"]
+    )
+    assert out == ["z_lit", "b_share", "a_share"]
+
+
+def test_filter_features_include_order_is_declared_not_hashed():
+    m = _DummyPredictor()
+    m.include_features = ["gamma", "alpha", "beta"]
+    df = pd.DataFrame({"alpha": [1.0], "beta": [2.0], "gamma": [3.0], "delta": [4.0]})
+    out = m._filter_features(df)
+    # Declared include order preserved (previously ``list(set(...))`` → hash order).
+    assert list(out.columns) == ["gamma", "alpha", "beta"]
+    assert m.selected_features_ == ["gamma", "alpha", "beta"]
+
+
+def test_apply_resampling_oversample_keeps_columns_and_real_clusters():
+    rng = np.random.default_rng(0)
+    n = 40
+    X = pd.DataFrame({
+        "f1": rng.normal(size=n),
+        "f2": rng.normal(size=n),
+        "f3": rng.normal(size=n),
+    })
+    # imbalanced target with enough minority rows for SMOTENC (k_neighbors=5)
+    y = pd.Series([1] * 8 + [0] * 32, name="is_winner")
+    clusters = pd.Series([f"game-{i % 6}" for i in range(n)], name="game_id")
+
+    Xr, yr, cr = apply_resampling(X, y, clusters, method="oversample", random_state=42)
+
+    assert list(Xr.columns) == list(X.columns)      # __cluster_id__ removed, order kept
+    assert len(Xr) == len(yr) == len(cr)
+    assert cr.name == "game_id"
+    # Synthetic rows inherit a real neighbour's game (never a rounded/encoder value).
+    assert set(cr.unique()) <= set(clusters.unique())
+    assert int(yr.sum()) > int(y.sum())             # minority class was oversampled
+
+
+def test_apply_resampling_none_is_identity():
+    X = pd.DataFrame({"f1": [1.0, 2.0]})
+    y = pd.Series([0, 1])
+    clusters = pd.Series(["g0", "g1"])
+    Xr, yr, cr = apply_resampling(X, y, clusters, method=None)
+    assert Xr is X and yr is y and cr is clusters

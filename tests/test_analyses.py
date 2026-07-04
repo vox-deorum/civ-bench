@@ -888,3 +888,115 @@ def test_ratings_with_bootstrap_player_type(env, monkeypatch):
             {"tables": ["strength"]})
     tbl = pd.read_csv(r.table_paths["ratings"])
     assert "ci_lower" in tbl.columns and "ci_upper" in tbl.columns
+
+
+# ── WS4: statistical fixes ────────────────────────────────────────────────────
+def test_matchup_matrix_ties_count_half_and_are_symmetric():
+    from bench.analyses.ratings.matchups import create_matchup_matrix
+
+    df = pd.DataFrame([
+        {"game_id": "g1", "player_type": "A", "adjusted_strength": 0.8},
+        {"game_id": "g1", "player_type": "B", "adjusted_strength": 0.2},
+        {"game_id": "g2", "player_type": "A", "adjusted_strength": 0.5},
+        {"game_id": "g2", "player_type": "B", "adjusted_strength": 0.5},  # exact tie
+    ])
+    prob, count, pval = create_matchup_matrix(df)
+    # A wins g1 (1.0) + ties g2 (0.5) over 2 games = 0.75; ties split ⇒ P+P=1
+    assert prob.loc["A", "B"] == pytest.approx(0.75)
+    assert prob.loc["B", "A"] == pytest.approx(0.25)
+    assert prob.loc["A", "B"] + prob.loc["B", "A"] == pytest.approx(1.0)
+
+
+def test_matchup_pvalue_is_paired_ttest():
+    from scipy.stats import ttest_1samp
+
+    from bench.analyses.ratings.matchups import create_matchup_matrix
+
+    df = pd.DataFrame([
+        {"game_id": f"g{k}", "player_type": pt, "adjusted_strength": v}
+        for k in range(4)
+        for pt, v in (("A", 0.6 + 0.02 * k), ("B", 0.3 + 0.01 * k))
+    ])
+    _, _, pval = create_matchup_matrix(df)
+    # paired t-test on aligned (A, B) pairs == one-sample t-test on the diffs
+    diffs = [0.6 + 0.02 * k - (0.3 + 0.01 * k) for k in range(4)]
+    assert pval.loc["A", "B"] == pytest.approx(ttest_1samp(diffs, 0).pvalue)
+
+
+def _boot_panel() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"game_id": f"g{g}", "experiment": "e", "player_type": pt, "elo": 0.0}
+        for g in range(8) for pt in ("A", "B")
+    ])
+
+
+def _boot_point() -> pd.DataFrame:
+    return pd.DataFrame({"player_type": ["A", "B"], "elo": [1500.0, 1400.0]})
+
+
+def test_run_bootstrap_all_failures_raise_not_silent_nan():
+    from bench.analyses.ratings import bootstrap as boot
+
+    def always_fail(df):
+        raise ValueError("singular fit")
+
+    with pytest.raises(AnalysisError, match="replicates failed"):
+        boot.run_bootstrap(
+            _boot_panel(), _boot_point(), always_fail,
+            group_col="player_type", n=8, seed=1, refit_strength=False,
+        )
+
+
+def test_run_bootstrap_tolerates_minority_failures(capsys):
+    from bench.analyses.ratings import bootstrap as boot
+
+    calls = {"n": 0}
+
+    def sometimes_fail(df):
+        calls["n"] += 1
+        if calls["n"] % 5 == 0:  # ~20% of replicates
+            raise ValueError("occasional singular")
+        return pd.DataFrame({"player_type": ["A", "B"], "elo": [1500.0, 1400.0]})
+
+    out = boot.run_bootstrap(
+        _boot_panel(), _boot_point(), sometimes_fail,
+        group_col="player_type", n=10, seed=1, refit_strength=False,
+        max_failure_rate=0.5,
+    )
+    assert "ci_lower" in out.columns and out["ci_lower"].notna().any()  # real CIs, not all-NaN
+    assert "replicate(s) failed" in capsys.readouterr().err  # counted + warned
+
+
+def test_run_bootstrap_narrow_dropping_reference_still_succeeds():
+    # Regression for the vanished-Vanilla bug: narrowing (which can drop the
+    # reference rows) happens per replicate and must not abort the whole bootstrap.
+    from bench.analyses.ratings import bootstrap as boot
+
+    def calc(df):
+        pts = sorted(df["player_type"].unique())
+        return pd.DataFrame({"player_type": pts, "elo": [1500.0] * len(pts)})
+
+    def narrow(df):
+        return df[df["player_type"] != "B"]  # drop the "reference" every replicate
+
+    out = boot.run_bootstrap(
+        _boot_panel(), _boot_point(), calc,
+        group_col="player_type", n=6, seed=1, refit_strength=False, narrow=narrow,
+    )
+    assert out.loc[out["player_type"] == "A", "ci_lower"].notna().any()
+
+
+def test_fit_civ_effects_is_shared_and_zero_sum(env):
+    from bench.adjust import strength as strength_mod
+    from bench.analyses.ratings import bootstrap as boot
+
+    # The bootstrap refits civ effects with the SAME implementation as the adjust
+    # stage — no diverged private copy (whose ≥2-omitted-civ handling was wrong).
+    assert boot.fit_civ_effects is strength_mod.fit_civ_effects
+
+    df = pd.read_csv(env.cfg.adjust[0].raw["save"])
+    effects, eff_df = strength_mod.fit_civ_effects(df, env.catalog)
+    # every civilization gets an effect; Sum-coding ⇒ the effects (incl. the omitted
+    # level, computed once as −sum(rest)) sum to zero.
+    assert set(effects) == set(df["civilization"].dropna().unique())
+    assert sum(effects.values()) == pytest.approx(0.0, abs=1e-9)

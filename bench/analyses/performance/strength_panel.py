@@ -23,7 +23,6 @@ import pandas as pd
 
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
-from .turn_predicted import _strength_table_id
 
 
 COMPLETENESS_COLUMNS = [
@@ -283,7 +282,7 @@ class PerformanceStrengthPanel(Analysis):
     module = "performance.strength_panel"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        table_id = _strength_table_id(ctx)
+        table_id = ctx.strength_table_id()
         metric = self.params.get("metric", "adjusted_strength")
         by = self.params.get("by", "player_type")
         min_games_prelim = int(self.params.get(

@@ -65,6 +65,14 @@ def _check_domain(value: Any, domain: set, where: str) -> None:
         raise ConfigError(f"{where}: must be one of {sorted(domain)}.")
 
 
+def _require_stage_id(sid: Any, where: str) -> None:
+    """A stage id must be a non-empty string — it keys the DAG and (for adjust
+    stages) doubles as a table name, and ``_topo_sort`` sorts ids alongside the
+    reserved 'extract'/'report' sentinels, which a non-string would break."""
+    if not isinstance(sid, str) or not sid.strip():
+        raise ConfigError(f"{where}.id: must be a non-empty string, got {sid!r}.")
+
+
 def _read_catalog(cfg: RunConfig, which: str, needed_by: str) -> dict:
     """Lazily read a sibling/override catalog json; error only when needed."""
     path = cfg.catalog_path(which)
@@ -100,6 +108,12 @@ def _validate_data(data: dict, presets: dict) -> dict:
     """Validate the `data` block and return the resolved global filter."""
     _require_mapping(data, "data")
     _check_keys(data, S.DATA_KEYS, "data")
+    # A present-but-null ``extract``/``tables`` (JSON ``null``) means "use defaults";
+    # normalize to {} so downstream ``.get(...)`` never sees None (else e.g.
+    # RunConfig.extract_enabled crashes with AttributeError on ``None.get``).
+    for key in ("extract", "tables"):
+        if key in data and data[key] is None:
+            data[key] = {}
     extract = data.get("extract")
     if extract is not None:
         _require_mapping(extract, "data.extract")
@@ -140,6 +154,7 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
     _require_mapping(entry, where)
     _check_keys(entry, S.ESTIMATOR_KEYS, where, required=("id", "model", "fit"))
     sid = entry["id"]
+    _require_stage_id(sid, where)
     where = f"estimators[{idx}] (id={sid!r})"
 
     fit = entry["fit"]
@@ -267,6 +282,17 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
     _require_mapping(entry, where)
     _check_keys(entry, S.ADJUST_KEYS, where, required=("id", "module"))
     sid = entry["id"]
+    _require_stage_id(sid, where)
+    # An adjust stage id doubles as the name of the strength table it emits
+    # (benchmark.md §5). If it collided with a canonical table name, a ratings
+    # analysis referencing that name would read the raw extract table while
+    # ``_check_ratings_strength_ref`` still counts it as satisfied — silently
+    # rating the wrong data. Reject the collision outright.
+    if sid in S.TABLE_NAMES:
+        raise ConfigError(
+            f"{where}.id: '{sid}' collides with a canonical table name "
+            f"{list(S.TABLE_NAMES)}; adjust ids double as table names and must be distinct."
+        )
     where = f"adjust[{idx}] (id={sid!r})"
 
     module = entry["module"]
@@ -311,6 +337,7 @@ def _validate_analysis(
     _require_mapping(entry, where)
     _check_keys(entry, S.ANALYSIS_KEYS, where, required=("id", "module"))
     sid = entry["id"]
+    _require_stage_id(sid, where)
     where = f"analyses[{idx}] (id={sid!r})"
 
     module = entry["module"]
@@ -379,6 +406,7 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
         "by_player_type",
         "by_strategist",
         "include_score_ratio",
+        "emit_seating",
     ):
         if key in params:
             params[key] = coerce_bool(params[key], f"{where}.params.{key}")
