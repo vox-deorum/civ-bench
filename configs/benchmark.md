@@ -91,7 +91,7 @@ Every stage that writes (`estimators` `save_predictions`/`save_model`, `adjust` 
 "data": {
   "extract": {
     "enabled": true,                     // false → reuse existing CSVs, never touch runs/ DBs
-    "runs_dir": "runs/",                 // root searched for *.sqlite game DBs
+    "runs_dir": "runs/",                 // root searched for *.db game DBs
     "outputs": ["turns", "panel", "games", "tokens"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract

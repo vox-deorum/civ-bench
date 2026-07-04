@@ -83,7 +83,7 @@ You will see the stages in dependency order (extract, estimators, adjust, analys
 
 `civ-bench` reads two things:
 
-- **Raw game databases**, the `*.sqlite` files Vox Deorum writes, one per game, sitting somewhere under a `runs_dir` you point at. The **extract** stage turns these into four canonical CSVs in `runs/`:
+- **Raw game databases**, the `*.db` files Vox Deorum writes, one per game, sitting somewhere under a `runs_dir` you point at. The **extract** stage turns these into four canonical CSVs in `runs/`:
   - `turn_data.csv`, one row per player per turn (the features the victory-probability models learn from)
   - `panel_data.csv`, one row per player per game (final outcomes, strategy mix, civilization)
   - `game_data.csv`, one row per game (timestamp, experiment, and the controlled `seed` and `seating_rotation`)
@@ -102,7 +102,7 @@ copy configs\benchmark.pretrained.template.json configs\benchmark.dev.json
 
 Open `configs/benchmark.dev.json` and adjust three things for your machine:
 
-- **`data.extract.runs_dir`**, where your `*.sqlite` game databases live (only matters if extraction is enabled).
+- **`data.extract.runs_dir`**, where your `*.db` game databases live (only matters if extraction is enabled).
 - **`data.tables.*`**, where the canonical CSVs should be written and read (the defaults under `runs/` are usually fine).
 - **`data.filter`**, which experiments to include. The templates filter to `"staff_recent"` (the `2026-staff-standard` experiment). Change the experiment id in the `filters` block to match *your* data, or set `data.filter` to `"llm_only"` to keep all LLM seats across every experiment.
 

@@ -61,7 +61,7 @@ A cycle, an unknown `id`, or a reference to a disabled stage is a validation err
 "data": {
   "extract": {
     "enabled": true,                 // false: reuse existing CSVs, never touch runs/ DBs
-    "runs_dir": "runs/",             // root searched for *.sqlite game DBs
+    "runs_dir": "runs/",             // root searched for *.db game DBs
     "outputs": ["turns", "panel", "games", "tokens"],
     "force_rebuild": false,          // true: rebuild even if outputs are newer than the DBs
     "auto_fix": true                 // true: repair malformed DBs & re-import (CLI --no-fix disables)
