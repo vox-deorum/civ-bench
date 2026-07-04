@@ -9,6 +9,11 @@ stage 2 adds the **load-only** ``estimators`` stage (``fit:"pretrained"`` →
 ``analyses`` modules; stage 5 adds ``report`` rendering. ``run`` executes the full
 resolved DAG (extract → estimators → adjust → analyses → report); the standalone
 ``report`` command re-renders the document from existing analysis artifacts.
+
+``extract`` (standalone and inside ``run``) auto-repairs by default: when a run
+records malformed DBs in ``import_issues.csv`` it repairs them (``civ-bench fix``)
+and re-imports so the ledger reflects the fixed state, before the rest of the DAG
+runs. Disable via ``data.extract.auto_fix: false`` or ``--no-fix``.
 """
 
 from __future__ import annotations
@@ -64,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
                 help="re-extract even when outputs are newer than the DBs "
                      "(overrides data.extract.force_rebuild)",
             )
+            p.add_argument(
+                "--no-fix", dest="no_fix", action="store_true",
+                help="do not auto-repair malformed DBs and re-import "
+                     "(overrides data.extract.auto_fix)",
+            )
 
     # `fix` repairs the malformed DBs recorded in import_issues.csv. It takes no
     # stage selection (--only/--skip are meaningless), so it gets a lean subparser
@@ -92,6 +102,38 @@ def _report_extract_issues(result) -> None:
             f"recorded in {result.issues_path}",
             file=sys.stderr,
         )
+
+
+def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
+    """Run extract; when it records malformed DBs and ``auto_fix`` is on, repair the
+    flagged DBs (``civ-bench fix``) and re-import so the ledger reflects the repaired
+    state. Returns the final :class:`ExtractResult` (the re-import's, when one ran)."""
+    result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
+    if result.skipped:
+        print(f"civ-bench: extract skipped — {result.reason}")
+    _report_extract_issues(result)
+
+    # Only fix when a fresh extract actually recorded issues. A skipped (fresh-outputs)
+    # run has nothing new; genuinely-unrecoverable games from a prior run must not be
+    # re-attempted every invocation — pass --force-rebuild to re-try a stale ledger.
+    if not auto_fix or result.skipped or not result.issues:
+        return result
+
+    from .fix import FixError, run_fix
+
+    try:
+        fix_result = run_fix(cfg)  # prints its own header/summary
+    except FixError as exc:  # a fix failure must never abort the pipeline
+        print(f"civ-bench: auto-fix skipped — {exc}", file=sys.stderr)
+        return result
+    if not fix_result.repaired:  # nothing repairable → the re-import would be a no-op
+        return result
+
+    print("civ-bench: re-importing repaired databases …")
+    catalog = catalog or Catalog.from_run_config(cfg)
+    result = run_extract(cfg, catalog=catalog, force_rebuild=True)
+    _report_extract_issues(result)
+    return result
 
 
 def _is_dry(args: argparse.Namespace) -> bool:
@@ -133,7 +175,7 @@ def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
     return [nid for nid in dag.order if nid in keep]
 
 
-def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
+def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fix: bool) -> int:
     """Execute every stage in ``subset`` (topo order).
 
     Every stage kind is now implemented (extract → estimators → adjust → analyses
@@ -151,10 +193,9 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool) -> int:
         if catalog is None:
             catalog = Catalog.from_run_config(cfg)
         if node.kind == "extract":
-            result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
-            if result.skipped:
-                print(f"civ-bench: extract skipped — {result.reason}")
-            _report_extract_issues(result)
+            _extract_with_autofix(
+                cfg, catalog, force_rebuild=force_rebuild, auto_fix=auto_fix
+            )
         elif node.kind == "estimators":
             from .estimators import run_estimator  # lazy: pulls torch/xgboost
 
@@ -248,16 +289,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     force_rebuild = getattr(args, "force_rebuild", False)
+    # Auto-fix default lives in config (data.extract.auto_fix, default on); --no-fix is
+    # a per-invocation override. Ignored by report/fix (no --no-fix, no extract stage).
+    extract_cfg = cfg.data.get("extract", {}) or {}
+    auto_fix = bool(extract_cfg.get("auto_fix", True)) and not getattr(args, "no_fix", False)
 
     if args.command == "extract":
         try:
-            result = run_extract(cfg, force_rebuild=force_rebuild)
+            _extract_with_autofix(cfg, None, force_rebuild=force_rebuild, auto_fix=auto_fix)
         except (ConfigError, ExtractError) as exc:
             print(f"civ-bench: extract error: {exc}", file=sys.stderr)
             return 2
-        if result.skipped:
-            print(f"civ-bench: extract skipped — {result.reason}")
-        _report_extract_issues(result)
         return 0
 
     if args.command == "report":
@@ -287,7 +329,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
-        return _run_pipeline(cfg, dag, subset, force_rebuild)
+        return _run_pipeline(cfg, dag, subset, force_rebuild, auto_fix)
     except (ConfigError, ExtractError) as exc:
         print(f"civ-bench: run error: {exc}", file=sys.stderr)
         return 2

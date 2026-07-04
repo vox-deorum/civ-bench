@@ -63,7 +63,8 @@ A cycle, an unknown `id`, or a reference to a disabled stage is a validation err
     "enabled": true,                 // false: reuse existing CSVs, never touch runs/ DBs
     "runs_dir": "runs/",             // root searched for *.sqlite game DBs
     "outputs": ["turns", "panel", "games", "tokens"],
-    "force_rebuild": false           // true: rebuild even if outputs are newer than the DBs
+    "force_rebuild": false,          // true: rebuild even if outputs are newer than the DBs
+    "auto_fix": true                 // true: repair malformed DBs & re-import (CLI --no-fix disables)
   },
   "tables": {
     "turns":  "runs/turn_data.csv",          // per-player per-turn features
@@ -77,6 +78,7 @@ A cycle, an unknown `id`, or a reference to a disabled stage is a validation err
 
 - Set `extract.enabled: false` (or pass `--skip extract`) when you already have the four CSVs and just want to analyze them.
 - Extraction is **skipped automatically** when every output CSV exists and is newer than the game DBs, unless `force_rebuild` is set.
+- When a fresh extract records malformed DBs, they are **auto-repaired and re-imported** (extract → `fix` → re-import) before the rest of the run. Turn this off with `auto_fix: false` or the CLI `--no-fix` flag.
 - The global `data.filter` is inherited by every stage. A stage may *narrow* it but never *widen* it.
 
 ### Filters: named, reusable, composable

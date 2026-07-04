@@ -39,6 +39,7 @@ EXTRACT_KEYS = {
     "max_dbs",
     "prune_missing",
     "force_rebuild",
+    "auto_fix",
     "issues_path",
 }
 TABLE_NAMES = ("turns", "panel", "games", "tokens")

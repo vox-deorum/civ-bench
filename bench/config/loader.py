@@ -113,7 +113,7 @@ def _validate_data(data: dict, presets: dict) -> dict:
                     f"data.extract.outputs: unknown table name(s) {bad}. "
                     f"Allowed: {list(S.TABLE_NAMES)}."
                 )
-        for key in ("enabled", "prune_missing", "force_rebuild"):
+        for key in ("enabled", "prune_missing", "force_rebuild", "auto_fix"):
             if key in extract:
                 extract[key] = coerce_bool(extract[key], f"data.extract.{key}")
         for key in ("runs_dir", "issues_path"):

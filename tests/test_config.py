@@ -120,6 +120,7 @@ def _mutations():
         "report_sections_not_list": lambda c: c["report"].__setitem__("sections", "bt_main"),
         "report_out_dir_not_string": lambda c: c["report"].__setitem__("out_dir", 7),
         "extract_max_dbs_zero": lambda c: c["data"]["extract"].__setitem__("max_dbs", 0),
+        "extract_auto_fix_not_bool": lambda c: c["data"]["extract"].__setitem__("auto_fix", "yes"),
         "extract_issues_path_not_string": lambda c: c["data"]["extract"].__setitem__("issues_path", 7),
         "tables_path_not_string": lambda c: c["data"]["tables"].__setitem__("turns", 7),
         "stage_filter_widens_global": lambda c: (
@@ -150,6 +151,13 @@ def test_extract_issues_path_override_loads(dev_spec, write_spec):
     dev_spec["data"]["extract"]["issues_path"] = "runs/custom_issues.csv"
     cfg = load_config(write_spec(dev_spec))
     assert cfg.data["extract"]["issues_path"] == "runs/custom_issues.csv"
+
+
+def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
+    """data.extract.auto_fix is an accepted bool (coerced from a string like the siblings)."""
+    dev_spec["data"]["extract"]["auto_fix"] = "FALSE"
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.data["extract"]["auto_fix"] is False
 
 
 @pytest.mark.parametrize("value", ["none", None, "game_leader"])
