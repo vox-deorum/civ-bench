@@ -205,13 +205,28 @@
       "pricing": { "input_per_million": 0.75, "output_per_million": 4.5 }
     },
     {
-      "id": "GPT-5.4",
+      "id": "GPT-5.6-Luna",
       "aliases": [
-        "gpt-5.4",
-        "openai-compatible/gpt-5.4"
+        "gpt-5.6-luna"
       ],
       "color": "#FF6347",
-      "pricing": { "input_per_million": 2.5, "output_per_million": 15 }
+      "pricing": { "input_per_million": 0.2, "output_per_million": 1.2 }
+    },
+    {
+      "id": "GPT-5.6-Terra",
+      "aliases": [
+        "gpt-5.6-terra"
+      ],
+      "color": "#FF6347",
+      "pricing": { "input_per_million": 2, "output_per_million": 12 }
+    },
+    {
+      "id": "GPT-5.6-Sol",
+      "aliases": [
+        "gpt-5.6-sol"
+      ],
+      "color": "#FF6347",
+      "pricing": { "input_per_million": 5, "output_per_million": 30 }
     },
     {
       "id": "Nemotron-3-Super",
