@@ -805,13 +805,17 @@ def test_paired_token_costs_declared_missing_rating_is_loud(env):
         )
 
 
-def test_cost_vs_rating_outputs_and_excludes_baseline(env):
+def test_cost_vs_rating_outputs_and_excludes_baseline(env, monkeypatch):
     env.cfg.presentation = {"condition_pairing": {"enabled": True}}
     _write_ratings_artifact(env, [
         {"player_type": "Vanilla", "elo": 1500, "se_elo": 20},
         {"player_type": "GPT-OSS-120B", "elo": 1600, "se_elo": 30},
         {"player_type": "Kimi-K2.5", "elo": 1700, "se_elo": 25},
     ])
+    def fail_on_errorbar(*args, **kwargs):
+        raise AssertionError("cost-vs-rating must not render CI/SE error bars")
+
+    monkeypatch.setattr("matplotlib.axes.Axes.errorbar", fail_on_errorbar)
     r = env(
         "exploratory.cost_vs_rating",
         {"currency": "usd", "log_x": True, "annotate": True},

@@ -19,6 +19,8 @@ import pytest
 
 from bench.config import load_config
 from bench.estimators import EstimatorError, run_estimator
+from bench.estimators.environment import _sole_default_target
+from bench.estimators import features as feature_module
 from bench.estimators.features import (
     build_feature_frame,
     needs_variant_columns,
@@ -145,6 +147,25 @@ def test_build_feature_frame_has_selected_features(turns_csv):
         assert col in df.columns
     # turn_progress is the UNROUNDED feature (turn / max_turn), not loaders' rounded one.
     assert df["turn_progress"].between(0.0, 1.0).all()
+
+
+def test_build_feature_frame_disables_chunked_dtype_inference(turns_csv, monkeypatch):
+    original = feature_module.pd.read_csv
+    calls = []
+
+    def read_csv_spy(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(feature_module.pd, "read_csv", read_csv_spy)
+    build_feature_frame(str(turns_csv))
+    assert calls[0]["low_memory"] is False
+
+
+def test_rocm_default_override_requires_one_unambiguous_target():
+    assert _sole_default_target("custom", ["custom"]) == "custom"
+    assert _sole_default_target("gfx110X", ["gfx110X", "gfx120X"]) is None
+    assert _sole_default_target("custom", ["gfx110X"]) is None
 
 
 def test_needs_variant_columns():

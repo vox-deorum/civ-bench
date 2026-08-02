@@ -122,18 +122,9 @@ class ExploratoryCostVsRating(Analysis):
             color = get_player_color(ctx.catalog, str(row.base_identity))
             marker = condition_marker(spec, condition)
             face = color if condition == "base" else "none"
-            lo = getattr(row, "ci_lower")
-            hi = getattr(row, "ci_upper")
-            if pd.notna(lo) and pd.notna(hi):
-                yerr = [[max(0.0, row.elo - lo)], [max(0.0, hi - row.elo)]]
-            elif pd.notna(getattr(row, "se_elo")):
-                yerr = abs(float(row.se_elo))
-            else:
-                yerr = None
-            ax.errorbar(
-                row.avg_cost_per_game, row.elo, yerr=yerr, fmt=marker,
-                color=color, ecolor=color, markerfacecolor=face,
-                markeredgecolor=color, markersize=8, capsize=3, zorder=3,
+            ax.scatter(
+                row.avg_cost_per_game, row.elo, marker=marker, s=64,
+                facecolors=face, edgecolors=color, linewidths=1.2, zorder=3,
             )
             present_conditions.add(condition)
 
@@ -150,7 +141,7 @@ class ExploratoryCostVsRating(Analysis):
             ax.set_xscale("log")
         ax.axhline(1500, color="gray", linestyle="--", linewidth=1)
         ax.set_xlabel(f"Average cost per complete game ({currency.upper()})")
-        ax.set_ylabel("Elo rating (error bars: CI or +/-1 SE)")
+        ax.set_ylabel("Elo rating")
         ax.set_title("Token cost versus strategist rating", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.25)
         handles = []
@@ -167,4 +158,3 @@ class ExploratoryCostVsRating(Analysis):
         ax.legend(handles=handles, fontsize=9)
         fig.tight_layout()
         return fig
-

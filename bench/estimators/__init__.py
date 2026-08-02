@@ -11,11 +11,19 @@ from the CLI run path — never from the import-light config/pipeline layers.
 
 from __future__ import annotations
 
+# This must run before registry/model imports pull in torch. On affected Windows
+# ROCm wheels it selects the sole installed target and bypasses a broken path probe.
+from .environment import configure_rocm_sdk_target
+
+configure_rocm_sdk_target()
+
 from .errors import EstimatorError
 from .features import build_feature_frame, needs_variant_columns, prepare_features
 from .registry import MODEL_REGISTRY, get_model, list_models, load_model, register_model
 from .runner import EstimatorResult, run_estimator
 from .training import TrainResult, run_cross_val, run_full_train
+
+del configure_rocm_sdk_target
 
 __all__ = [
     "EstimatorError",

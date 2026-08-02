@@ -272,7 +272,10 @@ def build_feature_frame(
     if preloaded_df is not None:
         df = preloaded_df.copy()
     else:
-        df = pd.read_csv(turns_csv)
+        # The canonical turns table is wide and can contain mixed telemetry
+        # payload columns. Infer against the whole file so pandas does not assign
+        # conflicting per-chunk dtypes (and emit DtypeWarning) on large runs.
+        df = pd.read_csv(turns_csv, low_memory=False)
     if "experiment" in df.columns and "condition" not in df.columns:
         df["condition"] = df["experiment"]
 
