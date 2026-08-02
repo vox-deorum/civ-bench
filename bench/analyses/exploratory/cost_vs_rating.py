@@ -97,6 +97,7 @@ class ExploratoryCostVsRating(Analysis):
     def _plot(table, ctx, spec, currency, log_x, annotate):
         import matplotlib.pyplot as plt
         from matplotlib.lines import Line2D
+        from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
         from ...plotting.pairing import condition_marker
         from ...plotting.styles import get_player_color
@@ -139,6 +140,15 @@ class ExploratoryCostVsRating(Analysis):
 
         if log_x:
             ax.set_xscale("log")
+            # Label 1x, 2x, and 5x within each decade. The default log formatter
+            # labels only powers of ten, which is too sparse for the observed
+            # per-game cost range.
+            ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value:g}"))
+            ax.xaxis.set_minor_locator(
+                LogLocator(base=10, subs=(3.0, 4.0, 6.0, 7.0, 8.0, 9.0))
+            )
+            ax.xaxis.set_minor_formatter(NullFormatter())
         ax.axhline(1500, color="gray", linestyle="--", linewidth=1)
         ax.set_xlabel(f"Average cost per complete game ({currency.upper()})")
         ax.set_ylabel("Elo rating")
