@@ -78,6 +78,10 @@ class Stage:
         return list(self.raw.get("uses", {}).get("tables", []) or [])
 
     @property
+    def uses_analyses(self) -> list[str]:
+        return list(self.raw.get("uses", {}).get("analyses", []) or [])
+
+    @property
     def needs(self) -> list[str]:
         return list(self.raw.get("needs", []) or [])
 
@@ -92,6 +96,7 @@ class RunConfig:
     raw: dict
     output: OutputConfig
     description: str = ""
+    presentation: dict = field(default_factory=dict)
     filters: dict = field(default_factory=dict)
     groupings: dict = field(default_factory=dict)
     data: dict = field(default_factory=dict)

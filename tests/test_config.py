@@ -59,6 +59,85 @@ def test_cross_template_redirects_and_trains_non_llm(configs_dir):
     assert subsets == {"score": "non_llm", "attention": "non_llm", "xgboost_cv": "non_llm"}
 
 
+def test_full_template_loads_with_disabled_cost_vs_rating(configs_dir):
+    cfg = load_config(configs_dir / "benchmark.full.template.json")
+    stage = next(a for a in cfg.analyses if a.id == "explore_cost_vs_rating")
+    assert stage.enabled is False
+    assert stage.uses_analyses == ["bt_main"]
+
+
+def test_presentation_validates_and_is_exposed(dev_spec, write_spec):
+    dev_spec["presentation"] = {
+        "condition_pairing": {
+            "enabled": True,
+            "suffixes": ["-Per-5"],
+            "base_label": "Every-turn",
+            "sort_condition": "-Per-5",
+        },
+        "matchup_display": "vs_reference",
+    }
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.presentation["condition_pairing"]["enabled"] is True
+    assert cfg.presentation["matchup_display"] == "vs_reference"
+
+
+@pytest.mark.parametrize(
+    "presentation",
+    [
+        {"bogus": True},
+        {"condition_pairing": {"suffixes": []}},
+        {"condition_pairing": {"suffixes": ["Per-5"]}},
+        {"condition_pairing": {"suffixes": ["-Per-5"], "sort_condition": "-Other"}},
+        {"matchup_display": "bars"},
+    ],
+)
+def test_bad_presentation_is_loud(dev_spec, write_spec, presentation):
+    dev_spec["presentation"] = presentation
+    with pytest.raises(ConfigError):
+        load_config(write_spec(dev_spec))
+
+
+def test_presentation_stage_overrides_only_on_supported_modules(dev_spec, write_spec):
+    _analysis(dev_spec, "bt_main")["params"]["condition_pairing"] = {
+        "enabled": True, "suffixes": ["-Per-5"], "sort_condition": "-Per-5",
+    }
+    _analysis(dev_spec, "matchup_strength")["params"]["display"] = "vs_reference"
+    assert load_config(write_spec(dev_spec)) is not None
+
+    dev_spec["analyses"][6]["params"]["condition_pairing"] = True
+    with pytest.raises(ConfigError, match="unknown key"):
+        load_config(write_spec(dev_spec))
+
+
+def test_uses_analyses_orders_consumer_after_producer(dev_spec, write_spec):
+    _analysis(dev_spec, "explore_token_costs")["uses"]["analyses"] = ["bt_main"]
+    cfg = load_config(write_spec(dev_spec))
+    dag = build_dag(cfg)
+    assert "bt_main" in dag.nodes["explore_token_costs"].deps
+    assert dag.order.index("bt_main") < dag.order.index("explore_token_costs")
+
+
+@pytest.mark.parametrize("kind", ["unknown", "disabled", "self"])
+def test_uses_analyses_reference_errors(dev_spec, write_spec, kind):
+    consumer = _analysis(dev_spec, "explore_token_costs")
+    if kind == "unknown":
+        consumer["uses"]["analyses"] = ["ghost"]
+    elif kind == "disabled":
+        _analysis(dev_spec, "bt_main")["enabled"] = False
+        consumer["uses"]["analyses"] = ["bt_main"]
+    else:
+        consumer["uses"]["analyses"] = ["explore_token_costs"]
+    with pytest.raises(ConfigError):
+        load_config(write_spec(dev_spec))
+
+
+def test_uses_analyses_cycle_is_loud(dev_spec, write_spec):
+    _analysis(dev_spec, "bt_main")["uses"]["analyses"] = ["pl_main"]
+    _analysis(dev_spec, "pl_main")["uses"]["analyses"] = ["bt_main"]
+    with pytest.raises(ConfigError, match="cycle"):
+        load_config(write_spec(dev_spec))
+
+
 # ── output root resolution (§2.1) ───────────────────────────────────────────
 def test_output_resolve_default_passthrough():
     out = OutputConfig(root="reports", suffix="")

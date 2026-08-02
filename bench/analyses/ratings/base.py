@@ -438,6 +438,28 @@ class RatingsAnalysis(Analysis):
 
         df = ratings.sort_values("elo", ascending=True).reset_index(drop=True)
         has_ci = "ci_lower" in df.columns and df["ci_lower"].notna().any()
+        pairing = ctx.condition_pairing() if identity_col == "player_type" else None
+        if pairing is not None:
+            from ...plotting.pairing import plot_paired_rows
+
+            return plot_paired_rows(
+                ratings,
+                catalog=ctx.catalog,
+                spec=pairing,
+                value_col="elo",
+                lo_col="ci_lower" if has_ci else None,
+                hi_col="ci_upper" if has_ci else None,
+                err_col=None if has_ci else "se_elo",
+                identity_col=identity_col,
+                ref_line=1500,
+                ascending=False,
+                xlabel=(
+                    "Elo rating (error bars: bootstrap CI)" if has_ci
+                    else "Elo rating (error bars: +/-1 SE)"
+                ),
+                title=f"{self.module} ratings",
+                provenance_note=self._provenance_text(metadata),
+            )
         fig, ax = plt.subplots(figsize=(10, max(4, 0.42 * len(df) + 1.5)))
         for i, row in df.iterrows():
             name = str(row[identity_col])
@@ -470,14 +492,14 @@ class RatingsAnalysis(Analysis):
         return fig
 
     @staticmethod
-    def _add_provenance_note(fig, metadata: dict) -> None:
+    def _provenance_text(metadata: dict) -> str:
         est = metadata.get("strength_estimator")
         model = metadata.get("estimator_model")
         fit = metadata.get("estimator_fit")
         predict = metadata.get("estimator_predict")
         block = metadata.get("adjust_block")
         if not est and not block:
-            return
+            return ""
         bits = []
         if est:
             model_part = f" ({model}" if model else ""
@@ -488,5 +510,12 @@ class RatingsAnalysis(Analysis):
             bits.append(f"strength estimator: {est}{model_part}")
         if block:
             bits.append(f"adjust block: {block}")
-        fig.text(0.01, 0.01, "; ".join(bits), ha="left", va="bottom",
+        return "; ".join(bits)
+
+    @classmethod
+    def _add_provenance_note(cls, fig, metadata: dict) -> None:
+        note = cls._provenance_text(metadata)
+        if not note:
+            return
+        fig.text(0.01, 0.01, note, ha="left", va="bottom",
                  fontsize=8, color="#666666")

@@ -422,6 +422,24 @@ class PerformanceStrengthPanel(Analysis):
 
         if tbl.empty:
             return None
+        pairing = ctx.condition_pairing() if by == "player_type" else None
+        if pairing is not None:
+            from ...plotting.pairing import plot_paired_rows
+
+            return plot_paired_rows(
+                tbl,
+                catalog=ctx.catalog,
+                spec=pairing,
+                value_col="mean",
+                lo_col="ci_lower",
+                hi_col="ci_upper",
+                identity_col=by,
+                ref_line=0 if center_zero else None,
+                preliminary_col="preliminary",
+                ascending=False,
+                xlabel=xlabel,
+                title=title,
+            )
         n = len(tbl)
         fig, ax = plt.subplots(figsize=(8, max(3, 0.4 * n + 1.5)))
         order = tbl.iloc[::-1]  # highest at top

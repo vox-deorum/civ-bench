@@ -118,3 +118,28 @@ def test_player_color_resolution(catalog):
     assert get_player_color(catalog, "Nemotron-3-Super-Briefed-Per-5") == nemo
     # an unrecognized full-override label falls through to black
     assert get_player_color(catalog, "Custom-Thing") == "#000000"
+
+
+def test_condition_suffix_helpers_include_slot_values_and_exclude_overrides():
+    cat = Catalog(
+        {"vanilla_label": "Vanilla", "null_label": "Null"},
+        {"player_type_labels": {
+            "direct": "-Per-5",
+            "slots": {"0": "-Long-Condition", "_default": "Custom Override"},
+            "override": "Renamed Identity",
+        }},
+    )
+    assert cat.condition_suffixes() == ["-Long-Condition", "-Per-5"]
+
+
+def test_split_condition_suffix_longest_baselines_and_explicit_restriction():
+    cat = Catalog(
+        {"vanilla_label": "Vanilla", "null_label": "Null"},
+        {"player_type_labels": {"a": "-Per-5", "b": "-5"}},
+    )
+    assert cat.split_condition_suffix("Model-Simple-Per-5") == ("Model-Simple", "-Per-5")
+    assert cat.split_condition_suffix("Vanilla") == ("Vanilla", "")
+    assert cat.split_condition_suffix("Null") == ("Null", "")
+    assert cat.split_condition_suffix("Model-Simple-Per-5", ["-5"]) == (
+        "Model-Simple-Per", "-5"
+    )

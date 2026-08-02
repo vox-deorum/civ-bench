@@ -21,7 +21,7 @@ from .calibration import (
     CalibrationReliability,
 )
 from .errors import AnalysisError
-from .exploratory import ExploratoryModelTokenCosts
+from .exploratory import ExploratoryCostVsRating, ExploratoryModelTokenCosts
 from .performance import (
     PerformanceExperimentCompleteness,
     PerformanceScoreRatio,
@@ -57,6 +57,7 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "performance.turn_predicted": PerformanceTurnPredicted,
     # exploratory.*
     "exploratory.model_token_costs": ExploratoryModelTokenCosts,
+    "exploratory.cost_vs_rating": ExploratoryCostVsRating,
 }
 
 

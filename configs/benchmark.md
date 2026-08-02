@@ -24,11 +24,11 @@ Each stage has a stable **`id`**. Edges come from three places, all resolved int
 
 1. **Kind ordering (implicit).** `extract` → `estimators` → `adjust` → `analyses` → `report`, always.
 2. **`needs` (explicit).** A stage may list other stage `id`s it must run after. Use this to force ordering the harness can't infer (e.g. one analysis consuming another's CSV).
-3. **`uses` (referential).** When a stage references an estimator `id` or a named table in its `uses` block, an edge is created automatically — you don't also have to write `needs`. A `uses.tables` name may be a canonical table from `data.tables` **or** a table produced by an `adjust` stage (§5); referencing it creates an edge to that stage.
+3. **`uses` (referential).** When a stage references an estimator `id`, a named table, or another analysis stage in its `uses` block, an edge is created automatically — you don't also have to write `needs`. A `uses.tables` name may be a canonical table from `data.tables` **or** a table produced by an `adjust` stage (§5); `uses.analyses` names analysis ids whose persisted artifacts the consumer reads.
 
 A cycle, an unknown `id`, or a reference to a disabled stage is a validation error. Disabled stages (`"enabled": false`) are dropped from the graph, and anything that *needed* one is a validation error. There is **no graceful degradation for missing dependencies**: if a stage needs `torch` / `xgboost` / `optuna` / R and it isn't installed, the run **fails loud** — install everything first (see [AGENTS.md](../AGENTS.md#dependencies) and `scripts/install`).
 
-The dependency graph is resolved once at config-load time and then reused by the dry-run printer and runner. Validation and execution therefore share the same interpretation of `needs`, `uses.estimators`, and `uses.tables`. For analysis modules that opt in to the all-estimator default, omitted or empty `uses.estimators` means "all enabled estimators"; listing ids is an explicit subset override.
+The dependency graph is resolved once at config-load time and then reused by the dry-run printer and runner. Validation and execution therefore share the same interpretation of `needs`, `uses.estimators`, `uses.tables`, and `uses.analyses`. For analysis modules that opt in to the all-estimator default, omitted or empty `uses.estimators` means "all enabled estimators"; listing ids is an explicit subset override.
 
 **Determinism.** The top-level `seed` is threaded into every stage that uses randomness (CV splits, torch init, resampling, bootstrap). Same `benchmark.json` + same `runs/` ⇒ byte-stable outputs.
 
@@ -43,6 +43,7 @@ The dependency graph is resolved once at config-load time and then reused by the
   "seed": 42,                            // required: global RNG seed (determinism)
 
   "output":     { /* §2.1 */ },          // optional: run output root + variant suffix (→ reports/, reports-cross/)
+  "presentation": { /* §2.2 */ },        // optional: paired-condition and matchup figure display
 
   "catalogs": {                          // optional: override lazily loaded sibling config files
     "paths":       "configs/paths.json",
@@ -61,7 +62,7 @@ The dependency graph is resolved once at config-load time and then reused by the
 }
 ```
 
-Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate.
+Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `presentation`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate.
 
 **`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this run-spec file** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
 
@@ -80,6 +81,40 @@ Every stage that writes (`estimators` `save_predictions`/`save_model`, `adjust` 
 - **Only save-paths are re-rooted — input paths are read as-authored.** `estimators.pretrained.model_dir` (§4.6), `data.tables.*`, and `data.extract.runs_dir` are inputs the run *reads*; the suffix never rewrites them. This is what lets the tracked `pretrained/<model_id>/` store feed every variant: a `-dev` run loads the same `pretrained/score/` but writes its predictions under `reports-dev/`.
 - The **cross variant is otherwise an ordinary `fit: train` run** with `train.train_subset: "non_llm"` (§4.4) — there is no separate "cross" estimator kind and no special prediction-loading path. Pair the non-LLM training subset with `output.suffix: "-cross"` (typically as its own config, e.g. `benchmark.cross.json`, or a CLI suffix override) so the two variants coexist on disk.
 - `output` is optional; omit it for the default `reports/` root and no suffix.
+
+### 2.2 `presentation` — condition pairing and matchup display
+
+`presentation` changes figures only; analysis fits and existing result tables are
+unchanged. Omitting the block guarantees the legacy figures: independent
+player-type rows and N×N matchup matrices.
+
+```jsonc
+"presentation": {
+  "condition_pairing": {
+    "enabled": true,             // default false
+    "suffixes": null,            // derive suffix labels from experiments.json
+    "base_label": "Every-turn", // legend label; default "Base"
+    "sort_condition": "-Per-5"  // "base" or an effective suffix
+  },
+  "matchup_display": "vs_reference" // "matrix" (default) | "vs_reference"
+}
+```
+
+With pairing enabled, suffix-style values from `experiments.json`
+`player_type_labels` (§3.3), including per-slot dictionary values, define the
+conditions. For example, `"*-per-5": "-Per-5"` pairs
+`GLM-5.2-Simple` and `GLM-5.2-Simple-Per-5` on one row. `suffixes:null`
+derives all such values; an explicit non-empty list restricts them. Vanilla and
+Null remain unsplit. Rows sort by `sort_condition`, falling back to whichever
+condition has a value for incomplete pairs; all-NaN identities sort last.
+
+The fitted-rating forests, player-type strength panels, score-ratio effects, and
+token-cost view accept `params.condition_pairing` as either a boolean or an
+object containing `enabled`, `suffixes`, and `sort_condition`. The stage value
+overrides the global block. Matchup modules accept `params.display`; in
+`vs_reference` mode they retain their matrix CSVs but render row-vs-Vanilla
+points (paired when pairing is enabled). If Vanilla is absent, they warn and
+render the matrix instead.
 
 ---
 
@@ -390,7 +425,8 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
   "needs": [],                           // optional explicit deps
   "uses": {                              // optional artifact references (create auto-edges)
     "estimators": ["attention", "score"],   // estimator ids → their predictions.csv
-    "tables": ["panel", "strength"]          // canonical (data.tables) OR an adjust stage's table (§5)
+    "tables": ["panel", "strength"],         // canonical (data.tables) OR an adjust stage's table (§5)
+    "analyses": ["bt_main"]                  // analysis ids → persisted table/figure artifacts
   },
   "filter": "late_game",                 // optional: preset name, inline object, or list (§3.1);
                                          //   NARROWS the global filter for this stage
@@ -400,6 +436,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 
 - `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
+- `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `exploratory.cost_vs_rating`, for example, reads `ratings.csv` from the first declared ratings stage.
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
 
 ### 6.2 Module params catalog
@@ -437,12 +474,13 @@ Diplomatic, Science), and annotations include Elo, SE, and game support.
 // ratings.matchups — adjusted-strength head-to-head matrices + OLS validation
 { "module": "ratings.matchups",
   "uses": { "tables": ["strength"] },
-  "params": { "mode": "both", "validate_ols": true } }  // mean | winrate | both
+  "params": { "mode": "both", "validate_ols": true,
+              "display": "matrix" } }  // display: matrix | vs_reference
 
 // ratings.outcome_matchups — observed win rates + score_ratio margins
 { "module": "ratings.outcome_matchups",
   "uses": { "tables": ["panel"] },
-  "params": { "include_score_ratio": true } }
+  "params": { "include_score_ratio": true, "display": "matrix" } }
 ```
 
 **Optional `ratings.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
@@ -558,10 +596,16 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 #### `exploratory.*` — dataset descriptives
 
 ```jsonc
-// model_token_costs uses tokens table + pricing from models.json (cost-efficiency is a benchmark axis).
-// by_player_type defaults to true: emit player_type+model costs first, plus model-only totals.
+// model_token_costs uses tokens table + pricing from models.json. Its tables retain total cost
+// and add complete_games + avg_cost_per_game. Pairing switches its figure to average $/game;
+// uses.analyses supplies the BT row order.
 { "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
   "params": { "currency": "usd", "by_player_type": true } }
+
+// cost_vs_rating joins per-identity average $/game to a fitted ratings table.
+{ "module": "exploratory.cost_vs_rating",
+  "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
+  "params": { "currency": "usd", "log_x": true, "annotate": true } }
 ```
 
 Set `by_player_type:false` to render only the legacy model-level aggregate. The
@@ -607,8 +651,8 @@ The report walks each produced `AnalysisResult` (tables + figures + summary) and
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
-2. **No unknown keys** at any level — typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `group_by`, extract `outputs`, report `formats`, etc.) must be JSON arrays of strings; a bare string is an error.
-3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
+2. **No unknown keys** at any level — typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, etc.) must be JSON arrays of strings; a bare string is an error.
+3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. `uses.analyses` additionally rejects self references. These checks apply to disabled stages too, so optional template stages cannot contain stale references. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
 6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust` `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves in `catalogs.models` `prediction_models`.
@@ -620,3 +664,4 @@ The report walks each produced `AnalysisResult` (tables + figures + summary) and
 12. **Output root** (§2.1): `output`, when present, accepts only `root` (string) and `suffix` (string); both optional, defaulting to `"reports"` and `""`. Every stage save-path resolves under `<root><suffix>/`; two runs that differ only in `suffix` must not write to the same directory.
 13. **Strength controlled-design params** (§5.1): `turn_progress_min` is numeric in `[0, 1]`; `weight ∈ {turn_progress, uniform}`; `relative_to ∈ {game_leader}`; `enforce_winner` is boolean; `civ_adjust ∈ {none, ols_logit}`; `block ∈ {none, start_cell, auto}`; `post_cell_normalize ∈ {none, relative_to_leader}`; `baseline_experiment` is null or a string experiment id. The id need not be listed in `experiments.json`; the adjust stage resolves it from extracted data. A `block` other than `none` affects only rows from the controlled subset (`seed != -1 and seating_rotation != -1`); uncontrolled rows always use `civ_adjust`. Missing cells in the selected implicit pathway and missing source rows for the selected explicit pathway are fatal; non-selected-pathway gaps, per-model gaps, disconnected models, and incomplete cycles warn.
 14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured `configuredSyncRandSeed` must equal `configuredMapRandSeed` — a mismatch **aborts extraction** with a policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1` — `0` is Civ's "pick random" and rejected for controlled runs — and rotations are `≥ 0`). Per-player `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.
+15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"` or a `-`-prefixed suffix and, with an explicit list, must be a member. `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.

@@ -212,6 +212,13 @@
       "enabled": true,
       "uses": { "tables": ["tokens"] },
       "params": { "currency": "usd", "by_player_type": true }
+    },
+    {
+      "id": "explore_cost_vs_rating",
+      "module": "exploratory.cost_vs_rating",
+      "enabled": false,
+      "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
+      "params": { "currency": "usd", "log_x": true, "annotate": true }
     }
   ],
 

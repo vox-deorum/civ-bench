@@ -103,6 +103,62 @@ def _parse_output(raw: dict) -> OutputConfig:
     return OutputConfig(root=root, suffix=suffix)
 
 
+def _validate_condition_pairing(
+    block: Any,
+    where: str,
+    *,
+    override: bool = False,
+) -> None:
+    """Validate a global condition-pairing block or a per-stage override."""
+    if override and isinstance(block, bool):
+        return
+    _require_mapping(block, where)
+    allowed = (
+        S.CONDITION_PAIRING_OVERRIDE_KEYS if override else S.CONDITION_PAIRING_KEYS
+    )
+    _check_keys(block, allowed, where)
+    if "enabled" in block:
+        block["enabled"] = coerce_bool(block["enabled"], f"{where}.enabled")
+    suffixes = block.get("suffixes")
+    if suffixes is not None:
+        suffixes = _check_string_list(suffixes, f"{where}.suffixes", allow_empty=False)
+        if any(not suffix.startswith("-") for suffix in suffixes):
+            raise ConfigError(
+                f"{where}.suffixes: every suffix must start with '-'."
+            )
+    if not override and "base_label" in block:
+        _check_type(block["base_label"], (str,), f"{where}.base_label")
+    sort_condition = block.get("sort_condition")
+    if sort_condition is not None:
+        if not isinstance(sort_condition, str) or (
+            sort_condition != "base" and not sort_condition.startswith("-")
+        ):
+            raise ConfigError(
+                f"{where}.sort_condition: must be 'base' or a '-' prefixed suffix."
+            )
+        if suffixes is not None and sort_condition != "base" and sort_condition not in suffixes:
+            raise ConfigError(
+                f"{where}.sort_condition: '{sort_condition}' is not in the explicit "
+                f"suffixes list {suffixes}."
+            )
+
+
+def _validate_presentation(presentation: Any) -> None:
+    if presentation is None:
+        return
+    _require_mapping(presentation, "presentation")
+    _check_keys(presentation, S.PRESENTATION_KEYS, "presentation")
+    pairing = presentation.get("condition_pairing")
+    if pairing is not None:
+        _validate_condition_pairing(pairing, "presentation.condition_pairing")
+    if "matchup_display" in presentation:
+        _check_domain(
+            presentation["matchup_display"],
+            S.MATCHUP_DISPLAY,
+            "presentation.matchup_display",
+        )
+
+
 # ── data (§3) ───────────────────────────────────────────────────────────────
 def _validate_data(data: dict, presets: dict) -> dict:
     """Validate the `data` block and return the resolved global filter."""
@@ -230,7 +286,7 @@ def _validate_uses(uses: Any, where: str) -> None:
         return
     _require_mapping(uses, where)
     _check_keys(uses, S.USES_KEYS, where)
-    for key in ("estimators", "tables"):
+    for key in ("estimators", "tables", "analyses"):
         if key in uses:
             _check_string_list(uses[key], f"{where}.{key}")
 
@@ -386,6 +442,19 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
             )
     if module == "ratings.matchups" and "mode" in params:
         _check_domain(params["mode"], S.MATCHUPS_MODE, f"{where}.params.mode")
+    if "display" in params:
+        _check_domain(params["display"], S.MATCHUP_DISPLAY, f"{where}.params.display")
+    if "condition_pairing" in params:
+        if not isinstance(params["condition_pairing"], dict):
+            params["condition_pairing"] = coerce_bool(
+                params["condition_pairing"],
+                f"{where}.params.condition_pairing",
+            )
+        _validate_condition_pairing(
+            params["condition_pairing"],
+            f"{where}.params.condition_pairing",
+            override=True,
+        )
     if module == "performance.turn_predicted" and "aggregate" in params:
         _check_domain(params["aggregate"], S.TURN_PREDICTED_AGGREGATE, f"{where}.params.aggregate")
     if "predictors" in params:
@@ -407,6 +476,8 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
         "by_strategist",
         "include_score_ratio",
         "emit_seating",
+        "log_x",
+        "annotate",
     ):
         if key in params:
             params[key] = coerce_bool(params[key], f"{where}.params.{key}")
@@ -543,6 +614,7 @@ def load_config(path: str | Path) -> RunConfig:
         _validate_groupings(groupings)
 
     output = _parse_output(raw)
+    _validate_presentation(raw.get("presentation"))
     global_filter = _validate_data(raw["data"], presets)
     _validate_report(raw["report"])
 
@@ -553,6 +625,7 @@ def load_config(path: str | Path) -> RunConfig:
         raw=raw,
         output=output,
         description=raw.get("description", ""),
+        presentation=raw.get("presentation") or {},
         filters=presets,
         groupings=groupings,
         data=raw["data"],

@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from ..catalog import Catalog  # noqa: E402
 from ..config import RunConfig  # noqa: E402
-from .base import AnalysisContext, AnalysisResult  # noqa: E402
+from .base import AnalysisContext, AnalysisResult, analyses_out_dir  # noqa: E402
 from .errors import AnalysisError  # noqa: E402
 from .registry import get_analysis  # noqa: E402
 
@@ -53,8 +53,7 @@ class AnalysisRunResult:
 
 
 def _analyses_out_dir(cfg: RunConfig, stage_id: str) -> Path:
-    authored = f"{cfg.output.root}/analyses/{stage_id}"
-    return Path(cfg.output.resolve(authored))
+    return analyses_out_dir(cfg, stage_id)
 
 
 def run_analysis(

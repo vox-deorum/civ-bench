@@ -193,7 +193,7 @@ def test_registry_has_all_core_modules():
         "calibration.civ_effects", "calibration.cell_baseline",
         "performance.experiment_completeness",
         "performance.score_ratio", "performance.strength_panel", "performance.turn_predicted",
-        "exploratory.model_token_costs",
+        "exploratory.model_token_costs", "exploratory.cost_vs_rating",
     }
     assert expected <= set(list_analyses())
 
@@ -388,6 +388,24 @@ def test_performance_strength_panel(env):
     assert {"player_type", "mean", "ci_lower", "ci_upper", "preliminary"} <= set(adv.columns)
     assert adv["mean"].notna().all()
     assert set(adv["player_type"]) == set(tbl["player_type"])  # same identities, just re-scaled
+
+
+def test_paired_performance_player_type_figures_smoke(env):
+    env.cfg.presentation = {"condition_pairing": {"enabled": True}}
+    strength = env(
+        "performance.strength_panel",
+        {"metric": "adjusted_strength", "by": "player_type", "bootstrap_n": 20},
+        {"tables": ["strength"]},
+        sid="paired_strength",
+    )
+    score = env(
+        "performance.score_ratio",
+        {"target": "score_ratio", "predictors": ["player_type", "civilization"]},
+        sid="paired_score",
+    )
+    assert "strength" in strength.figure_paths
+    assert "logit_advantage" in strength.figure_paths
+    assert "player_type_effects" in score.figure_paths
 
 
 def test_performance_strength_panel_logit_advantage_uncontrolled_gate(env):
@@ -691,7 +709,10 @@ def test_exploratory_model_token_costs(env):
     r = env("exploratory.model_token_costs", {"currency": "usd"}, {"tables": ["tokens"]})
     assert "token_costs_by_player_type" in r.table_paths
     by_player = pd.read_csv(r.table_paths["token_costs_by_player_type"])
-    assert {"player_type", "model", "total_cost", "games"} <= set(by_player.columns)
+    assert {
+        "player_type", "model", "total_cost", "games", "complete_games",
+        "avg_cost_per_game",
+    } <= set(by_player.columns)
 
     tbl = pd.read_csv(r.table_paths["token_costs"])
     assert "player_type" not in tbl.columns
@@ -724,6 +745,91 @@ def test_exploratory_model_token_costs_accepts_by_strategist_alias(env):
     assert {"player_type", "model"} <= set(tbl.columns)
 
 
+def _write_ratings_artifact(env, rows):
+    from bench.analyses.base import analyses_out_dir
+
+    out = analyses_out_dir(env.cfg, "bt_main")
+    out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(out / "ratings.csv", index=False)
+
+
+def test_paired_sort_order_uses_requested_condition_fallback_and_nan_last():
+    from bench.plotting.pairing import PairingSpec, paired_sort_order
+
+    spec = PairingSpec(("-Per-5",), "-Per-5", "Every-turn")
+    frame = pd.DataFrame([
+        {"base_identity": "A", "condition": "base", "value": 1.0},
+        {"base_identity": "A", "condition": "-Per-5", "value": 3.0},
+        {"base_identity": "B", "condition": "base", "value": 2.0},
+        {"base_identity": "Vanilla", "condition": "base", "value": 2.5},
+        {"base_identity": "C", "condition": "base", "value": np.nan},
+    ])
+    assert paired_sort_order(frame, spec, "value", ascending=False) == [
+        "A", "Vanilla", "B", "C",
+    ]
+
+
+def test_paired_token_costs_follow_ratings_order(env, monkeypatch):
+    env.cfg.presentation = {
+        "condition_pairing": {"enabled": True, "sort_condition": "-Per-5"}
+    }
+    _write_ratings_artifact(env, [
+        {"player_type": "GPT-OSS-120B", "elo": 1700},
+        {"player_type": "Kimi-K2.5", "elo": 1600},
+        {"player_type": "Vanilla", "elo": 1500},
+    ])
+    captured = {}
+
+    def fake_plot(*args, **kwargs):
+        import matplotlib.pyplot as plt
+
+        captured["order"] = kwargs["row_order"]
+        return plt.subplots()[0]
+
+    monkeypatch.setattr("bench.plotting.pairing.plot_paired_rows", fake_plot)
+    env(
+        "exploratory.model_token_costs",
+        {"currency": "usd"},
+        {"tables": ["tokens"], "analyses": ["bt_main"]},
+    )
+    assert captured["order"][:3] == ["GPT-OSS-120B", "Kimi-K2.5", "Vanilla"]
+
+
+def test_paired_token_costs_declared_missing_rating_is_loud(env):
+    env.cfg.presentation = {"condition_pairing": {"enabled": True}}
+    with pytest.raises(AnalysisError, match="run stage 'bt_main' first"):
+        env(
+            "exploratory.model_token_costs",
+            {"currency": "usd"},
+            {"tables": ["tokens"], "analyses": ["bt_main"]},
+        )
+
+
+def test_cost_vs_rating_outputs_and_excludes_baseline(env):
+    env.cfg.presentation = {"condition_pairing": {"enabled": True}}
+    _write_ratings_artifact(env, [
+        {"player_type": "Vanilla", "elo": 1500, "se_elo": 20},
+        {"player_type": "GPT-OSS-120B", "elo": 1600, "se_elo": 30},
+        {"player_type": "Kimi-K2.5", "elo": 1700, "se_elo": 25},
+    ])
+    r = env(
+        "exploratory.cost_vs_rating",
+        {"currency": "usd", "log_x": True, "annotate": True},
+        {"tables": ["tokens"], "analyses": ["bt_main"]},
+        sid="cost_rating",
+    )
+    assert "cost_vs_rating" in r.table_paths
+    assert "cost_vs_rating" in r.figure_paths
+    table = pd.read_csv(r.table_paths["cost_vs_rating"])
+    assert "Vanilla" not in set(table["player_type"])
+    assert {"base_identity", "condition", "avg_cost_per_game", "elo"} <= set(table.columns)
+
+
+def test_cost_vs_rating_requires_analysis_dependency(env):
+    with pytest.raises(AnalysisError, match="requires the ratings stage"):
+        env("exploratory.cost_vs_rating", {}, {"tables": ["tokens"]})
+
+
 # ── ratings (R fit monkeypatched) ─────────────────────────────────────────────────
 def _fake_bt(strength_df, margin=None, reference="Vanilla"):
     means = strength_df.groupby("player_type")["adjusted_strength"].mean()
@@ -745,6 +851,19 @@ def test_ratings_player_type(env, monkeypatch):
     tbl = pd.read_csv(r.table_paths["ratings"])
     assert {"player_type", "elo"} <= set(tbl.columns)
     assert set(tbl["player_type"]) >= set(PLAYER_TYPES)
+
+
+def test_paired_bt_forest_keeps_ratings_table_shape(env, monkeypatch):
+    monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", _fake_bt)
+    env.cfg.presentation = {"condition_pairing": {"enabled": True}}
+    r = env(
+        "ratings.bradley_terry",
+        {"group_by": ["player_type"], "ref": "Vanilla"},
+        {"tables": ["strength"]},
+    )
+    table = pd.read_csv(r.table_paths["ratings"])
+    assert "base_identity" not in table.columns
+    assert "ratings" in r.figure_paths
 
 
 def test_ratings_strategy_group_by(env, monkeypatch):
@@ -773,6 +892,28 @@ def test_ratings_matchups_no_r(env):
     assert r.metadata["strength_estimator"] == "est"
 
 
+def test_ratings_matchups_vs_reference_matches_vanilla_matrix(env):
+    env.cfg.presentation = {"matchup_display": "vs_reference"}
+    r = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    matrix = pd.read_csv(r.table_paths["strength_mean"]).set_index("player_type")
+    vs = pd.read_csv(r.table_paths["vs_reference"]).set_index("player_type")
+    for identity in vs.index:
+        assert vs.loc[identity, "mean_diff_vs_ref"] == pytest.approx(
+            matrix.loc[identity, "Vanilla"]
+        )
+    assert {"strength_mean", "strength_winrate"} <= set(r.figure_paths)
+
+
+def test_matchups_vs_reference_falls_back_when_vanilla_absent(env):
+    path = Path(env.cfg.adjust[0].raw["save"])
+    panel = pd.read_csv(path)
+    panel[panel["player_type"] != "Vanilla"].to_csv(path, index=False)
+    env.cfg.presentation = {"matchup_display": "vs_reference"}
+    r = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    assert "vs_reference" not in r.table_paths
+    assert "rendered matrix figures instead" in r.summary
+
+
 def test_outcome_matchups_outputs(env):
     r = env("ratings.outcome_matchups", {"include_score_ratio": True}, {"tables": ["panel"]})
     assert {"win_rate", "score_ratio_margin", "counts"} <= set(r.table_paths)
@@ -780,6 +921,17 @@ def test_outcome_matchups_outputs(env):
     margin = pd.read_csv(r.table_paths["score_ratio_margin"])
     assert set(PLAYER_TYPES) <= set(win["player_type"])
     assert set(PLAYER_TYPES) <= set(margin["player_type"])
+
+
+def test_outcome_matchups_vs_reference_matches_vanilla_matrix(env):
+    env.cfg.presentation = {"matchup_display": "vs_reference"}
+    r = env("ratings.outcome_matchups", {"include_score_ratio": True}, {"tables": ["panel"]})
+    matrix = pd.read_csv(r.table_paths["win_rate"]).set_index("player_type")
+    vs = pd.read_csv(r.table_paths["vs_reference"]).set_index("player_type")
+    for identity in vs.index:
+        assert vs.loc[identity, "win_rate_vs_ref"] == pytest.approx(
+            matrix.loc[identity, "Vanilla"]
+        )
 
 
 def test_outcome_matchups_dedupes_repeated_opponent_type():

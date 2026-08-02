@@ -46,7 +46,7 @@ class PerformanceScoreRatio(Analysis):
         if "player_type" in predictors:
             effects = deviation_coefficients(result.fit, vanilla)
             tables["player_type_effects"] = effects
-            figures["player_type_effects"] = self._forest(effects, target)
+            figures["player_type_effects"] = self._forest(effects, target, ctx)
 
         coef = pd.DataFrame({
             "term": result.params.index,
@@ -65,9 +65,28 @@ class PerformanceScoreRatio(Analysis):
             metadata={"formula": formula, "n": result.nobs, "r2": result.rsquared},
         )
 
-    def _forest(self, effects: pd.DataFrame, target: str):
+    def _forest(self, effects: pd.DataFrame, target: str, ctx: AnalysisContext):
         """Forest plot of the per-player_type deviation effects (with 95% CIs)."""
         import matplotlib.pyplot as plt
+
+        pairing = ctx.condition_pairing()
+        if pairing is not None:
+            from ...plotting.pairing import plot_paired_rows
+
+            return plot_paired_rows(
+                effects,
+                catalog=ctx.catalog,
+                spec=pairing,
+                value_col="Effect",
+                lo_col="CI_Low",
+                hi_col="CI_High",
+                identity_col="Name",
+                ref_line=0,
+                annotate_col="Sig",
+                ascending=False,
+                xlabel=f"Effect on {target} (deviation from grand mean)",
+                title=f"Effect of strategist on {target}",
+            )
 
         df = effects.sort_values("Effect").reset_index(drop=True)
         fig, ax = plt.subplots(figsize=(9, max(3, 0.42 * len(df) + 1.5)))

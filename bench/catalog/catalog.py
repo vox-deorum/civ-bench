@@ -298,6 +298,39 @@ class Catalog:
                 return {"model_id": resolved_id, "variant": variant_name}
         return {"model_id": player_type, "variant": None}
 
+    def condition_suffixes(self) -> list[str]:
+        """Return configured suffix-style condition labels, longest first.
+
+        Both direct ``player_type_labels`` values and per-slot dictionary values
+        participate. Full-identity overrides are deliberately excluded.
+        """
+        suffixes: set[str] = set()
+        for entry in self._labels.values():
+            values = entry.values() if isinstance(entry, dict) else (entry,)
+            for value in values:
+                if isinstance(value, str) and value.startswith("-"):
+                    suffixes.add(value)
+        return sorted(suffixes, key=lambda value: (-len(value), value))
+
+    def split_condition_suffix(
+        self,
+        player_type: Optional[str],
+        suffixes: Optional[list[str]] = None,
+    ) -> tuple[Optional[str], str]:
+        """Split a display-condition suffix from an orthodox player identity.
+
+        Vanilla and Null are pooled baselines and therefore never split. An
+        explicit ``suffixes`` list restricts recognition; otherwise suffixes are
+        derived from the experiment catalog. Longest suffix wins.
+        """
+        if not player_type or player_type in (self.vanilla_label, self.null_label):
+            return player_type, ""
+        effective = self.condition_suffixes() if suffixes is None else list(suffixes)
+        for suffix in sorted(set(effective), key=lambda value: (-len(value), value)):
+            if suffix and player_type.endswith(suffix) and len(player_type) > len(suffix):
+                return player_type[: -len(suffix)], suffix
+        return player_type, ""
+
     # ── pricing + colors (ported) ───────────────────────────────────────────
     def pricing_per_million(self) -> dict:
         pricing: dict = {}

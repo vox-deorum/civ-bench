@@ -14,6 +14,7 @@ TOP_LEVEL_REQUIRED = ("name", "seed", "data", "analyses", "report")
 TOP_LEVEL_OPTIONAL = (
     "description",
     "output",
+    "presentation",
     "catalogs",
     "filters",
     "groupings",
@@ -26,6 +27,12 @@ TOP_LEVEL_KEYS = set(TOP_LEVEL_REQUIRED) | set(TOP_LEVEL_OPTIONAL)
 OUTPUT_KEYS = {"root", "suffix"}
 DEFAULT_OUTPUT_ROOT = "reports"
 DEFAULT_OUTPUT_SUFFIX = ""
+
+# ── presentation (§2.2) ─────────────────────────────────────────────────
+PRESENTATION_KEYS = {"condition_pairing", "matchup_display"}
+CONDITION_PAIRING_KEYS = {"enabled", "suffixes", "base_label", "sort_condition"}
+CONDITION_PAIRING_OVERRIDE_KEYS = {"enabled", "suffixes", "sort_condition"}
+MATCHUP_DISPLAY = {"matrix", "vs_reference"}
 
 # ── catalogs ───────────────────────────────────────────────────────────────
 CATALOG_KEYS = {"paths", "models", "experiments"}
@@ -103,7 +110,7 @@ PRETRAINED_KEYS = {"model_dir"}
 # ── adjust (§5) ────────────────────────────────────────────────────────────
 ADJUST_KEYS = {"id", "module", "enabled", "uses", "save", "needs", "params"}
 ADJUST_MODULES = {"strength"}
-USES_KEYS = {"estimators", "tables"}
+USES_KEYS = {"estimators", "tables", "analyses"}
 # strength params (§5.1) — enum domains validated in stage 0
 STRENGTH_PARAM_KEYS = {
     "turn_progress_min",
@@ -157,6 +164,7 @@ ANALYSIS_MODULES = {
     "performance.permutation_importance",
     # exploratory.*
     "exploratory.model_token_costs",
+    "exploratory.cost_vs_rating",
     "exploratory.panel",
     "exploratory.turn",
     "exploratory.strategy_profiles",
@@ -172,10 +180,10 @@ STRENGTH_RATING_MODULES = {
 # Allowed param keys per core module. Cross-cutting `group_by`/`bootstrap` (ratings)
 # are validated separately. A module absent here accepts no params (empty schema).
 ANALYSIS_PARAM_KEYS = {
-    "ratings.bradley_terry": {"group_by", "bootstrap", "weighted", "ref", "min_games", "only_llm"},
-    "ratings.plackett_luce": {"group_by", "bootstrap", "ref", "min_games", "only_llm"},
-    "ratings.matchups": {"mode", "validate_ols"},
-    "ratings.outcome_matchups": {"include_score_ratio"},
+    "ratings.bradley_terry": {"group_by", "bootstrap", "weighted", "ref", "min_games", "only_llm", "condition_pairing"},
+    "ratings.plackett_luce": {"group_by", "bootstrap", "ref", "min_games", "only_llm", "condition_pairing"},
+    "ratings.matchups": {"mode", "validate_ols", "display"},
+    "ratings.outcome_matchups": {"include_score_ratio", "display"},
     "prediction.evaluate": {"metrics"},
     "prediction.compare": set(),
     "calibration.reliability": {"n_bins"},
@@ -183,12 +191,16 @@ ANALYSIS_PARAM_KEYS = {
     "calibration.civ_effects": set(),
     "calibration.cell_baseline": set(),
     "performance.experiment_completeness": {"emit_seating"},
-    "performance.score_ratio": {"target", "predictors"},
+    "performance.score_ratio": {"target", "predictors", "condition_pairing"},
     "performance.strength_panel": {
         "metric", "by", "min_games_preliminary", "bootstrap_n", "ci_level",
+        "condition_pairing",
     },
     "performance.turn_predicted": {"aggregate", "by"},
-    "exploratory.model_token_costs": {"currency", "by_player_type", "by_strategist"},
+    "exploratory.model_token_costs": {
+        "currency", "by_player_type", "by_strategist", "condition_pairing",
+    },
+    "exploratory.cost_vs_rating": {"currency", "log_x", "annotate", "condition_pairing"},
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}

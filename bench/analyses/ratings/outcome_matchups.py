@@ -89,24 +89,127 @@ class RatingsOutcomeMatchups(Analysis):
             panel, include_score_ratio=include_score_ratio
         )
         metadata = {"table": table_id, "include_score_ratio": include_score_ratio}
+        display = ctx.matchup_display()
+        reference = ctx.catalog.vanilla_label
+        reference_available = reference in win_rate.columns
+        use_vs_reference = display == "vs_reference" and reference_available
         tables = {
             "win_rate": win_rate.reset_index(),
             "counts": counts.reset_index(),
         }
-        figures = {
-            "win_rate": self._plot_win_rate(win_rate, counts),
-        }
+        figures = {}
+        if not use_vs_reference:
+            figures["win_rate"] = self._plot_win_rate(win_rate, counts)
         if include_score_ratio:
             tables["score_ratio_margin"] = score_margin.reset_index()
-            figures["score_ratio_margin"] = self._plot_margin(score_margin)
+            if not use_vs_reference:
+                figures["score_ratio_margin"] = self._plot_margin(score_margin)
+
+        if use_vs_reference:
+            vs = self._vs_reference_table(
+                ctx, panel, reference, win_rate, score_margin, counts,
+                include_score_ratio,
+            )
+            tables["vs_reference"] = vs
+            plot_vs = vs.copy()
+            plot_vs["n_label"] = plot_vs["n"].map(
+                lambda n: f"n={int(n)}" if pd.notna(n) else ""
+            )
+            from ...plotting.pairing import PairingSpec, plot_paired_rows
+
+            pairing = ctx.condition_pairing()
+            plot_spec = pairing or PairingSpec((), "base", "Identity")
+            figures["win_rate"] = plot_paired_rows(
+                plot_vs,
+                catalog=ctx.catalog,
+                spec=plot_spec,
+                value_col="win_rate_vs_ref",
+                identity_col="player_type",
+                ref_line=0.5,
+                annotate_col="n_label",
+                ascending=False,
+                xlabel=f"Observed win rate vs {reference}",
+                title=f"Observed matchup win rates vs {reference}",
+            )
+            if include_score_ratio:
+                figures["score_ratio_margin"] = plot_paired_rows(
+                    plot_vs,
+                    catalog=ctx.catalog,
+                    spec=plot_spec,
+                    value_col="score_ratio_margin_vs_ref",
+                    identity_col="player_type",
+                    ref_line=0,
+                    annotate_col="n_label",
+                    ascending=False,
+                    xlabel=f"Mean score-ratio margin vs {reference}",
+                    title=f"Observed score-ratio margins vs {reference}",
+                )
 
         summary = (
-            f"Observed matchup win rates over {len(win_rate)} player types, "
+            f"Observed matchup {'vs-reference display' if use_vs_reference else 'matrix'} "
+            f"win rates over {len(win_rate)} player types, "
             f"{panel['game_id'].nunique()} games."
         )
         if include_score_ratio:
             summary += " Score-ratio margins are row minus column."
+        if display == "vs_reference" and not reference_available:
+            summary += f" Reference '{reference}' is absent; rendered matrix figures instead."
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
+
+    @staticmethod
+    def _vs_reference_table(
+        ctx,
+        panel,
+        reference,
+        win_rate,
+        score_margin,
+        counts,
+        include_score_ratio,
+    ):
+        from scipy.stats import binomtest, ttest_1samp
+
+        from ...plotting.pairing import PairingSpec, attach_pair_columns
+
+        score_samples: dict[str, list[float]] = {}
+        if include_score_ratio:
+            for _, game in panel.groupby("game_id", sort=False):
+                ref_rows = game[game["player_type"].astype(str) == reference]
+                ref_mean = pd.to_numeric(ref_rows["score_ratio"], errors="coerce").mean()
+                if pd.isna(ref_mean):
+                    continue
+                for row in game[game["player_type"].astype(str) != reference].itertuples(index=False):
+                    value = pd.to_numeric(pd.Series([getattr(row, "score_ratio")]), errors="coerce").iloc[0]
+                    if pd.notna(value):
+                        score_samples.setdefault(str(getattr(row, "player_type")), []).append(
+                            float(value) - float(ref_mean)
+                        )
+
+        rows = []
+        for identity in sorted(set(win_rate.index.astype(str)) - {reference}):
+            value = win_rate.loc[identity, reference]
+            n = counts.loc[identity, reference]
+            wins = int(round(float(value) * float(n))) if pd.notna(value) and n else 0
+            row = {
+                "player_type": identity,
+                "win_rate_vs_ref": value,
+                "n": n,
+                "p_value_win_rate": (
+                    binomtest(wins, int(n), p=0.5).pvalue if pd.notna(n) and n > 0 else np.nan
+                ),
+            }
+            if include_score_ratio:
+                samples = score_samples.get(identity, [])
+                row["score_ratio_margin_vs_ref"] = score_margin.loc[identity, reference]
+                row["p_value_score_ratio"] = (
+                    ttest_1samp(samples, 0).pvalue if len(samples) > 1 else np.nan
+                )
+            rows.append(row)
+        out = pd.DataFrame(rows)
+        pairing = ctx.condition_pairing()
+        spec = pairing or PairingSpec((), "base", "Identity")
+        return attach_pair_columns(out, ctx.catalog, spec, "player_type").drop(
+            columns="is_baseline"
+        )
 
     def _plot_win_rate(self, matrix: pd.DataFrame, counts: pd.DataFrame):
         import matplotlib.pyplot as plt

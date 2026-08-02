@@ -126,32 +126,41 @@ class RatingsMatchups(Analysis):
         tables = {}
         figures = {}
         count_for_summary = None
+        mean = mean_pval = winrate = winrate_pval = None
+        display = ctx.matchup_display()
+        reference = ctx.catalog.vanilla_label
+        reference_available = reference in set(panel["player_type"].astype(str))
+        use_vs_reference = display == "vs_reference" and reference_available
 
         if mode in ("mean", "both"):
             mean, count, pval = create_mean_matchup_matrix(panel)
+            mean_pval = pval
             count_for_summary = count
             table_name = "matchup" if mode == "mean" else "strength_mean"
             pval_name = "pvalues" if mode == "mean" else "pvalues_mean"
             figure_name = "matchup" if mode == "mean" else "strength_mean"
             tables[table_name] = mean.reset_index(names="player_type")
             tables[pval_name] = pval.reset_index(names="player_type")
-            figures[figure_name] = self._plot(
-                mean, 0.0, None, None, "mean(row - col) adjusted strength",
-                "RdBu_r", "strength mean", metadata,
-            )
+            if not use_vs_reference:
+                figures[figure_name] = self._plot(
+                    mean, 0.0, None, None, "mean(row - col) adjusted strength",
+                    "RdBu_r", "strength mean", metadata,
+                )
 
         if mode in ("winrate", "both"):
             winrate, count, pval = create_matchup_matrix(panel)
+            winrate_pval = pval
             count_for_summary = count if count_for_summary is None else count_for_summary
             table_name = "matchup" if mode == "winrate" else "strength_winrate"
             pval_name = "pvalues" if mode == "winrate" else "pvalues_winrate"
             figure_name = "matchup" if mode == "winrate" else "strength_winrate"
             tables[table_name] = winrate.reset_index(names="player_type")
             tables[pval_name] = pval.reset_index(names="player_type")
-            figures[figure_name] = self._plot(
-                winrate, 0.5, 0.0, 1.0, "P(row stronger than col)",
-                "RdBu_r", "strength win rate", metadata, percent=True, counts=count,
-            )
+            if not use_vs_reference:
+                figures[figure_name] = self._plot(
+                    winrate, 0.5, 0.0, 1.0, "P(row stronger than col)",
+                    "RdBu_r", "strength win rate", metadata, percent=True, counts=count,
+                )
 
         if count_for_summary is not None:
             tables["counts"] = count_for_summary.reset_index(names="player_type")
@@ -159,11 +168,87 @@ class RatingsMatchups(Analysis):
         if bool(self.params.get("validate_ols", False)):
             tables["ols_validation"] = self._ols_validation(panel, ctx.catalog.vanilla_label)
 
+        if use_vs_reference:
+            vs = self._vs_reference_table(
+                ctx, reference, count_for_summary, mean, mean_pval, winrate, winrate_pval
+            )
+            tables["vs_reference"] = vs
+            plot_vs = vs.copy()
+            plot_vs["n_label"] = plot_vs["n"].map(
+                lambda n: f"n={int(n)}" if pd.notna(n) else ""
+            )
+            pairing = ctx.condition_pairing()
+            from ...plotting.pairing import PairingSpec, plot_paired_rows
+
+            plot_spec = pairing or PairingSpec((), "base", "Identity")
+            note = self._provenance_text(metadata)
+            if mode in ("mean", "both"):
+                slug = "matchup" if mode == "mean" else "strength_mean"
+                figures[slug] = plot_paired_rows(
+                    plot_vs,
+                    catalog=ctx.catalog,
+                    spec=plot_spec,
+                    value_col="mean_diff_vs_ref",
+                    identity_col="player_type",
+                    ref_line=0,
+                    annotate_col="n_label",
+                    ascending=False,
+                    xlabel=f"Mean adjusted-strength difference vs {reference}",
+                    title=f"Adjusted strength vs {reference}",
+                    provenance_note=note,
+                )
+            if mode in ("winrate", "both"):
+                slug = "matchup" if mode == "winrate" else "strength_winrate"
+                figures[slug] = plot_paired_rows(
+                    plot_vs,
+                    catalog=ctx.catalog,
+                    spec=plot_spec,
+                    value_col="winrate_vs_ref",
+                    identity_col="player_type",
+                    ref_line=0.5,
+                    annotate_col="n_label",
+                    ascending=False,
+                    xlabel=f"P(row stronger than {reference})",
+                    title=f"Adjusted-strength win rate vs {reference}",
+                    provenance_note=note,
+                )
+
         summary = (
-            f"Strength matchup matrix ({mode}) over "
-            f"{panel['player_type'].nunique()} player types, {panel['game_id'].nunique()} games."
+            f"Strength matchup {'vs-reference display' if use_vs_reference else 'matrix'} "
+            f"({mode}) over {panel['player_type'].nunique()} player types, "
+            f"{panel['game_id'].nunique()} games."
         )
+        if display == "vs_reference" and not reference_available:
+            summary += f" Reference '{reference}' is absent; rendered matrix figures instead."
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
+
+    @staticmethod
+    def _vs_reference_table(ctx, reference, counts, mean, mean_pval, winrate, winrate_pval):
+        from ...plotting.pairing import PairingSpec, attach_pair_columns
+
+        identities = sorted(
+            set().union(
+                *(set(matrix.index.astype(str)) for matrix in (mean, winrate) if matrix is not None)
+            ) - {reference}
+        )
+        rows = []
+        for identity in identities:
+            row = {"player_type": identity}
+            if mean is not None:
+                row["mean_diff_vs_ref"] = mean.loc[identity, reference]
+                row["p_value_mean"] = mean_pval.loc[identity, reference]
+            if winrate is not None:
+                row["winrate_vs_ref"] = winrate.loc[identity, reference]
+                row["p_value_winrate"] = winrate_pval.loc[identity, reference]
+            n = counts.loc[identity, reference] if counts is not None else np.nan
+            row["n"] = n
+            rows.append(row)
+        out = pd.DataFrame(rows)
+        pairing = ctx.condition_pairing()
+        spec = pairing or PairingSpec((), "base", "Identity")
+        return attach_pair_columns(out, ctx.catalog, spec, "player_type").drop(
+            columns="is_baseline"
+        )
 
     def _ols_validation(self, panel: pd.DataFrame, vanilla: str) -> pd.DataFrame:
         from ...plotting.coefficients import deviation_coefficients
@@ -204,7 +289,7 @@ class RatingsMatchups(Analysis):
         return fig
 
     @staticmethod
-    def _add_provenance_note(fig, metadata: dict) -> None:
+    def _provenance_text(metadata: dict) -> str:
         est = metadata.get("strength_estimator")
         model = metadata.get("estimator_model")
         block = metadata.get("adjust_block")
@@ -213,6 +298,11 @@ class RatingsMatchups(Analysis):
             bits.append(f"strength estimator: {est}" + (f" ({model})" if model else ""))
         if block:
             bits.append(f"adjust block: {block}")
-        if bits:
-            fig.text(0.01, 0.01, "; ".join(bits), ha="left", va="bottom",
+        return "; ".join(bits)
+
+    @classmethod
+    def _add_provenance_note(cls, fig, metadata: dict) -> None:
+        note = cls._provenance_text(metadata)
+        if note:
+            fig.text(0.01, 0.01, note, ha="left", va="bottom",
                      fontsize=8, color="#666666")

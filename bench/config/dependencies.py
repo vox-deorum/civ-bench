@@ -32,6 +32,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
     """Validate stage refs and return enabled nodes with resolved dependencies."""
     estimator_ids = {s.id for s in cfg.estimators}
     adjust_ids = {s.id for s in cfg.adjust}
+    analysis_ids = {s.id for s in cfg.analyses}
     table_keys = set(cfg.table_names)
 
     seen = _validate_unique_ids(cfg)
@@ -44,6 +45,8 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
     for stage in cfg.adjust:
         for est in stage.uses_estimators:
             _check_estimator_ref(stage, est, estimator_ids, enabled_ids, "adjust")
+        for analysis_id in stage.uses_analyses:
+            _check_analysis_ref(stage, analysis_id, analysis_ids, enabled_ids)
 
     # Strength tables are named by the *id* of any enabled strength-module
     # adjust stage (the id doubles as the table name — benchmark.md §5), not
@@ -68,6 +71,8 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             )
         for tbl in stage.uses_tables:
             _check_table_ref(stage, tbl, table_keys, adjust_ids, enabled_adjust_ids)
+        for analysis_id in stage.uses_analyses:
+            _check_analysis_ref(stage, analysis_id, analysis_ids, enabled_ids)
         if stage.enabled and stage.module in S.STRENGTH_RATING_MODULES:
             _check_ratings_strength_ref(stage, strength_table_ids)
 
@@ -113,6 +118,24 @@ def _check_estimator_ref(
         raise ConfigError(f"{kind_label} '{stage.id}' uses unknown estimator '{est}'.")
     if est not in enabled_ids:
         raise ConfigError(f"{kind_label} '{stage.id}' uses disabled estimator '{est}'.")
+
+
+def _check_analysis_ref(
+    stage: Stage,
+    analysis_id: str,
+    analysis_ids: set[str],
+    enabled_ids: set[str],
+) -> None:
+    if analysis_id == stage.id:
+        raise ConfigError(f"stage '{stage.id}' cannot use itself via uses.analyses.")
+    if analysis_id not in analysis_ids:
+        raise ConfigError(
+            f"stage '{stage.id}' uses unknown analysis '{analysis_id}'."
+        )
+    if analysis_id not in enabled_ids:
+        raise ConfigError(
+            f"stage '{stage.id}' uses disabled analysis '{analysis_id}'."
+        )
 
 
 def _check_table_ref(
@@ -178,6 +201,7 @@ def _build_enabled_nodes(cfg: RunConfig, table_keys: set[str]) -> dict[str, Reso
         if extract_enabled:
             node.deps.add(EXTRACT_ID)
         node.deps.update(stage.uses_estimators)
+        node.deps.update(stage.uses_analyses)
         node.deps.update(_resolve_needs(stage.needs, extract_enabled))
         nodes[stage.id] = node
 
@@ -186,6 +210,7 @@ def _build_enabled_nodes(cfg: RunConfig, table_keys: set[str]) -> dict[str, Reso
             continue
         node = ResolvedNode(id=stage.id, kind="analyses", raw=stage.raw)
         node.deps.update(_analysis_estimator_deps(stage, cfg))
+        node.deps.update(stage.uses_analyses)
         for tbl in stage.uses_tables:
             if tbl in enabled_adjust_ids:
                 node.deps.add(tbl)

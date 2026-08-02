@@ -22,6 +22,86 @@ def _complete_sum(s: pd.Series) -> float:
     return float(s.sum()) if s.notna().all() else float("nan")
 
 
+def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
+    """Price token rows and aggregate them to complete per-player-game costs."""
+    pricing = catalog.pricing_per_million()
+    df = tokens_df.copy()
+    df["model"] = df["model_name"].apply(catalog.canonicalize_model_name)
+
+    def numeric_column(name: str) -> pd.Series:
+        if name not in df.columns:
+            return pd.Series(0.0, index=df.index)
+        return pd.to_numeric(df[name], errors="coerce")
+
+    df["combined_output_tokens"] = (
+        numeric_column("reasoning_tokens").fillna(0)
+        + numeric_column("output_tokens").fillna(0)
+    )
+    df["input_tokens"] = numeric_column("input_tokens")
+    df["input_per_million"] = df["model"].map(
+        lambda model: pricing.get(model, {}).get("input_per_million")
+    )
+    df["output_per_million"] = df["model"].map(
+        lambda model: pricing.get(model, {}).get("output_per_million")
+    )
+    df["row_cost"] = (
+        df["input_tokens"] / 1_000_000 * df["input_per_million"]
+        + df["combined_output_tokens"] / 1_000_000 * df["output_per_million"]
+    )
+    identity_cols = ["game_id"]
+    if "player_type" in df.columns:
+        identity_cols.append("player_type")
+    identity_cols.append("model")
+    per_game = df.groupby(identity_cols, as_index=False).agg(
+        input_tokens=("input_tokens", _complete_sum),
+        combined_output_tokens=("combined_output_tokens", _complete_sum),
+        total_cost=("row_cost", _complete_sum),
+        input_per_million=("input_per_million", "first"),
+        output_per_million=("output_per_million", "first"),
+    )
+    per_game["available"] = per_game[
+        ["input_tokens", "combined_output_tokens", "total_cost"]
+    ].notna().all(axis=1)
+    return per_game
+
+
+def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    """Summarize per-game costs with explicit complete-game denominators."""
+    per_game = per_identity_game.groupby(["game_id", *group_cols], as_index=False).agg(
+        input_tokens=("input_tokens", _complete_sum),
+        combined_output_tokens=("combined_output_tokens", _complete_sum),
+        total_cost=("total_cost", _complete_sum),
+    )
+    per_game["available"] = per_game[
+        ["input_tokens", "combined_output_tokens", "total_cost"]
+    ].notna().all(axis=1)
+    valid = per_game[per_game["available"]]
+    games = per_game.groupby(group_cols, as_index=False).agg(
+        games=("game_id", "nunique"),
+        na_games=("available", lambda values: int((~values).sum())),
+    )
+    averages = valid.groupby(group_cols, as_index=False).agg(
+        avg_input=("input_tokens", "mean"),
+        avg_output=("combined_output_tokens", "mean"),
+        total_cost=("total_cost", "sum"),
+    )
+    summary_tbl = games.merge(averages, on=group_cols, how="left")
+    summary_tbl["complete_games"] = summary_tbl["games"] - summary_tbl["na_games"]
+    summary_tbl["avg_cost_per_game"] = (
+        summary_tbl["total_cost"] / summary_tbl["complete_games"].replace(0, np.nan)
+    )
+    if "model" in group_cols:
+        prices = per_identity_game.drop_duplicates("model").set_index("model")[
+            ["input_per_million", "output_per_million"]
+        ]
+        summary_tbl = summary_tbl.merge(
+            prices, left_on="model", right_index=True, how="left"
+        )
+    return summary_tbl.sort_values(
+        "total_cost", ascending=False, na_position="last"
+    ).reset_index(drop=True)
+
+
 class ExploratoryModelTokenCosts(Analysis):
     module = "exploratory.model_token_costs"
 
@@ -34,40 +114,31 @@ class ExploratoryModelTokenCosts(Analysis):
         tokens = ctx.load_table("tokens")
         tokens = ctx.apply_filter(tokens)
         catalog = ctx.catalog
-        pricing = catalog.pricing_per_million()
+        game_costs = compute_game_costs(tokens, catalog)
 
-        df = tokens.copy()
-        df["model"] = df["model_name"].apply(catalog.canonicalize_model_name)
-        df["combined_output_tokens"] = (
-            df.get("reasoning_tokens", 0).fillna(0) + df.get("output_tokens", 0).fillna(0)
-        )
-        df["input_per_million"] = df["model"].map(
-            lambda m: pricing.get(m, {}).get("input_per_million")
-        )
-        df["output_per_million"] = df["model"].map(
-            lambda m: pricing.get(m, {}).get("output_per_million")
-        )
-        df["row_cost"] = (
-            df["input_tokens"] / 1_000_000 * df["input_per_million"]
-            + df["combined_output_tokens"] / 1_000_000 * df["output_per_million"]
-        )
-
-        model_tbl = self._summarize(df, ["model"])
+        model_tbl = self._summarize(game_costs, ["model"])
         tables = {}
         plot_tbl = model_tbl
         if by_player_type:
-            by_player_tbl = self._summarize(df, ["player_type", "model"])
+            by_player_tbl = self._summarize(game_costs, ["player_type", "model"])
             tables["token_costs_by_player_type"] = by_player_tbl
             plot_tbl = by_player_tbl
         tables["token_costs"] = model_tbl
 
-        fig = self._plot(plot_tbl, currency, catalog)
+        warning = ""
+        pairing = ctx.condition_pairing() if by_player_type else None
+        if pairing is None:
+            fig = self._plot(plot_tbl, currency, catalog)
+        else:
+            fig, warning = self._plot_paired(plot_tbl, currency, ctx, pairing)
         total = model_tbl["total_cost"].sum(skipna=True)
         breakdown = " across player types" if by_player_type else ""
         summary = (
             f"Token costs for {len(model_tbl)} model(s){breakdown}; total = "
             f"{total:.2f} {currency.upper()} over {int(model_tbl['games'].sum())} games."
         )
+        if warning:
+            summary += " " + warning
         return AnalysisResult(
             tables=tables,
             figures={"token_costs": fig} if fig is not None else {},
@@ -77,36 +148,63 @@ class ExploratoryModelTokenCosts(Analysis):
 
     @staticmethod
     def _summarize(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-        per_game = (
-            df.groupby(["game_id", *group_cols], as_index=False)
-            .agg(
-                input_tokens=("input_tokens", _complete_sum),
-                combined_output_tokens=("combined_output_tokens", _complete_sum),
-                total_cost=("row_cost", _complete_sum),
-            )
-        )
-        per_game["available"] = per_game[
-            ["input_tokens", "combined_output_tokens", "total_cost"]
-        ].notna().all(axis=1)
-        valid = per_game[per_game["available"]]
+        return summarize_game_costs(df, group_cols)
 
-        games = per_game.groupby(group_cols, as_index=False).agg(
-            games=("game_id", "nunique"),
-            na_games=("available", lambda s: int((~s).sum())),
+    def _plot_paired(self, tbl, currency, ctx, pairing):
+        from ...plotting.pairing import (
+            attach_pair_columns,
+            paired_sort_order,
+            plot_paired_rows,
         )
-        averages = valid.groupby(group_cols, as_index=False).agg(
-            avg_input=("input_tokens", "mean"),
-            avg_output=("combined_output_tokens", "mean"),
-            total_cost=("total_cost", "sum"),
+
+        work = attach_pair_columns(tbl, ctx.catalog, pairing, "player_type")
+        cost_order = paired_sort_order(work, pairing, "avg_cost_per_game", ascending=False)
+        warning = ""
+        upstream = ctx.uses_analyses()
+        if upstream:
+            ratings = ctx.load_analysis_table(upstream[0], "ratings")
+            if "player_type" not in ratings.columns or "elo" not in ratings.columns:
+                from ..errors import AnalysisError
+
+                raise AnalysisError(
+                    f"exploratory.model_token_costs '{self.stage_id}': analysis "
+                    f"'{upstream[0]}' ratings table needs player_type and elo columns."
+                )
+            rated = attach_pair_columns(ratings, ctx.catalog, pairing, "player_type")
+            rating_order = paired_sort_order(rated, pairing, "elo", ascending=False)
+            available = set(work["base_identity"].astype(str))
+            priced = set(
+                work.loc[work["avg_cost_per_game"].notna(), "base_identity"].astype(str)
+            )
+            row_order = [
+                identity for identity in rating_order
+                if identity in available and identity in priced
+            ]
+            row_order.extend(identity for identity in cost_order if identity not in row_order)
+        else:
+            row_order = cost_order
+            warning = (
+                "No uses.analyses rating stage was declared; paired costs are "
+                "ordered by cost instead of Elo."
+            )
+
+        plot_tbl = tbl.copy()
+        plot_tbl["n_label"] = plot_tbl["complete_games"].map(
+            lambda value: f"n={int(value)}" if pd.notna(value) else ""
         )
-        summary_tbl = games.merge(averages, on=group_cols, how="left")
-        prices = df.drop_duplicates("model").set_index("model")[
-            ["input_per_million", "output_per_million"]
-        ]
-        summary_tbl = summary_tbl.merge(prices, left_on="model", right_index=True, how="left")
-        summary_tbl = summary_tbl.sort_values("total_cost", ascending=False, na_position="last")
-        summary_tbl = summary_tbl.reset_index(drop=True)
-        return summary_tbl
+        fig = plot_paired_rows(
+            plot_tbl,
+            catalog=ctx.catalog,
+            spec=pairing,
+            value_col="avg_cost_per_game",
+            identity_col="player_type",
+            annotate_col="n_label",
+            row_order=row_order,
+            ascending=False,
+            xlabel=f"Average cost per complete game ({currency.upper()})",
+            title="Estimated token cost per game by player type",
+        )
+        return fig, warning
 
     def _plot(self, tbl: pd.DataFrame, currency: str, catalog):
         import matplotlib.pyplot as plt

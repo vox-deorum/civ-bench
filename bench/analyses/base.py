@@ -22,6 +22,12 @@ from ..config import RunConfig
 from .errors import AnalysisError
 
 
+def analyses_out_dir(config: RunConfig, stage_id: str) -> Path:
+    """Output-root-aware directory for one analysis stage's artifacts."""
+    authored = f"{config.output.root}/analyses/{stage_id}"
+    return Path(config.output.resolve(authored))
+
+
 @dataclass
 class AnalysisResult:
     """What an analysis returns: named tables, named figures, a text summary.
@@ -98,6 +104,27 @@ class AnalysisContext:
     @property
     def stage_filter(self):
         return self.stage_raw.get("filter")
+
+    # ── presentation resolution ──────────────────────────────────────────────────
+    def condition_pairing(self):
+        """Resolve this stage's pairing override over global presentation."""
+        from ..plotting.pairing import resolve_pairing
+
+        global_block = self.config.presentation.get("condition_pairing") or {}
+        return resolve_pairing(
+            global_block,
+            self.params.get("condition_pairing"),
+            self.catalog,
+        )
+
+    def matchup_display(self) -> str:
+        """Effective matchup figure mode (stage param > global > matrix)."""
+        return str(
+            self.params.get(
+                "display",
+                self.config.presentation.get("matchup_display", "matrix"),
+            )
+        )
 
     # ── filter resolution ────────────────────────────────────────────────────
     def apply_filter(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -296,3 +323,19 @@ class AnalysisContext:
 
     def uses_tables(self) -> list[str]:
         return list((self.stage_raw.get("uses") or {}).get("tables") or [])
+
+    def uses_analyses(self) -> list[str]:
+        return list((self.stage_raw.get("uses") or {}).get("analyses") or [])
+
+    def analysis_out_dir(self, stage_id: str) -> Path:
+        return analyses_out_dir(self.config, stage_id)
+
+    def load_analysis_table(self, stage_id: str, table: str) -> pd.DataFrame:
+        """Load a named CSV emitted by another analysis stage."""
+        path = self.analysis_out_dir(stage_id) / f"{table}.csv"
+        if not path.exists():
+            raise AnalysisError(
+                f"analysis '{self.stage_id}': upstream analysis table '{table}' "
+                f"not found at '{path}'; run stage '{stage_id}' first."
+            )
+        return pd.read_csv(path)
