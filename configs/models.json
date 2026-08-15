@@ -33,18 +33,24 @@
       "id": "Sonnet-4.5",
       "aliases": [
         "claude-sonnet-4-5",
-        "sonnet-4-5",
-        "sonnet-4.5"
+        "sonnet-4-5"
       ],
       "color": "#377EB8",
       "pricing": { "input_per_million": 3.0, "output_per_million": 15.0 }
     },
     {
+      "id": "Sonnet-5",
+      "aliases": [
+        "claude-sonnet-5"
+      ],
+      "color": "#377EB8",
+      "pricing": { "input_per_million": 2.0, "output_per_million": 10.0 }
+    },
+    {
       "id": "Haiku-4.5",
       "aliases": [
         "claude-haiku-4-5",
-        "haiku-4-5",
-        "haiku-4.5"
+        "haiku-4-5"
       ],
       "color": "#1B9E77"
     },
@@ -150,14 +156,20 @@
       "pricing": { "input_per_million": 0.26, "output_per_million": 0.38 }
     },
     {
-      "id": "DeepSeek-4",
+      "id": "DeepSeek-V4-Flash",
       "aliases": [
-        "deepseek-v4",
-        "deepseek-4",
-        "openai-compatible/deepseek-v4"
+        "deepseek-4-flash"
       ],
       "color": "#8C564B",
-      "pricing": { "input_per_million": 0.435, "output_per_million": 0.87 }
+      "pricing": { "input_per_million": 0.14, "output_per_million": 0.28 }
+    },
+    {
+      "id": "DeepSeek-V4-Pro",
+      "aliases": [
+        "deepseek-4-pro]"
+      ],
+      "color": "#8C564B",
+      "pricing": { "input_per_million": 1.32, "output_per_million": 3.96 }
     },
     {
       "id": "Qwen-3.5",
