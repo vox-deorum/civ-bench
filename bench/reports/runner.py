@@ -183,9 +183,18 @@ def _build_section(
         raise ReportError(
             f"analysis '{stage_id}' has an invalid non-string module in its manifest."
         )
+    stage_raw = next((s.raw for s in cfg.analyses if s.id == stage_id), {})
+    display_name = (
+        stage_raw.get("name")
+        or str(manifest.get("module_name") or "")
+        or stage_id
+    )
+    description = stage_raw.get("description") or str(manifest.get("module_description") or "")
     section = Section(
         id=stage_id,
         module=module,
+        display_name=display_name,
+        description=description,
         summary=manifest.get("summary", ""),
         metadata=manifest.get("metadata") or {},
         empty=bool(manifest.get("empty", False)),
@@ -403,13 +412,14 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
 
     written_rel: list[Path] = []
     try:
-        title = report_cfg.get("title") or cfg.name
+        title = report_cfg.get("title") or cfg.friendly_name or cfg.name
         meta = {
             "title": title,
             "run_name": cfg.name,
             "seed": cfg.seed,
             "config_path": str(cfg.config_path),
             "output_root": cfg.output.resolved_root,
+            "description": cfg.description,
             "overview_section_ids": overview_ids,
         }
         document = template(meta, sections)

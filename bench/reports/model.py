@@ -56,12 +56,19 @@ class Section:
 
     id: str
     module: str
+    display_name: str = ""  # friendly heading text (module default or stage override)
+    description: str = ""  # one-line module description (module default or stage override)
     summary: str = ""
     metadata: dict = field(default_factory=dict)
     figures: list[Figure] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
     downloads: list[Download] = field(default_factory=list)
     empty: bool = False
+
+    @property
+    def title(self) -> str:
+        """The visible heading for this section: friendly name, else the stage id."""
+        return self.display_name or self.id
 
 
 @dataclass
@@ -83,6 +90,7 @@ class ReportDocument:
     seed: int
     config_path: str
     output_root: str
+    description: str = ""  # the run-spec's top-level description, shown on the report page
     groups: list[FamilyGroup] = field(default_factory=list)
     intro: str = ""
     overview_sections: list[Section] = field(default_factory=list)

@@ -12,6 +12,7 @@ from __future__ import annotations
 # ── top level ──────────────────────────────────────────────────────────────
 TOP_LEVEL_REQUIRED = ("name", "seed", "data", "analyses", "report")
 TOP_LEVEL_OPTIONAL = (
+    "friendly_name",
     "description",
     "output",
     "presentation",
@@ -121,6 +122,7 @@ STRENGTH_PARAM_KEYS = {
     "block",
     "baseline_experiment",
     "post_cell_normalize",
+    "min_condition_completeness",
 }
 STRENGTH_WEIGHT = {"turn_progress", "uniform"}
 STRENGTH_RELATIVE_TO = {"game_leader", "none"}
@@ -132,7 +134,9 @@ STRENGTH_POST_CELL_NORMALIZE = {"none", "relative_to_leader"}
 # inferred from extracted data.
 
 # ── analyses (§6) ──────────────────────────────────────────────────────────
-ANALYSIS_KEYS = {"id", "module", "enabled", "needs", "uses", "filter", "params"}
+ANALYSIS_KEYS = {
+    "id", "module", "name", "description", "enabled", "needs", "uses", "filter", "params",
+}
 
 # The analysis registry: every module the harness will ship (core + optional).
 # Per-module param schemas are validated by each module as it lands (stages 3-5);

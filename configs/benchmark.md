@@ -39,7 +39,8 @@ The dependency graph is resolved once at config-load time and then reused by the
 ```jsonc
 {
   "name": "staff-standard-2026",        // required: run id; names the report + reports/ subdir
-  "description": "Staff line-up, standard 8-seat map",  // optional, free text
+  "friendly_name": "Staff benchmark 2026",  // optional: human title shown on the report page
+  "description": "Staff line-up, standard 8-seat map",  // optional, free text; shown on the report page
   "seed": 42,                            // required: global RNG seed (determinism)
 
   "output":     { /* §2.1 */ },          // optional: run output root + variant suffix (→ reports/, reports-cross/)
@@ -62,7 +63,7 @@ The dependency graph is resolved once at config-load time and then reused by the
 }
 ```
 
-Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `description`, `output`, `presentation`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate.
+Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `friendly_name`, `description`, `output`, `presentation`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate. `friendly_name` is an optional human title: when set it becomes the report page title unless `report.title` overrides it, and `description` renders under the title on the report page (§7).
 
 **`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this run-spec file** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
 
@@ -383,8 +384,10 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
     "block": "auto",                     // CONTROLLED games: matched final-seat-cell adjustment (replaces civ_adjust):
                                          //   "none" | "start_cell" | "auto" (= start_cell when controlled)
     "baseline_experiment": null,         // explicit per-cell baseline source (e.g. a pure VP self-play experiment id);
-                                         //   null ⇒ implicit per-experiment VPAI extraction. Need not be catalog-listed.
-    "post_cell_normalize": "none"        // optional final re-normalization after the cell effect: "none" | "relative_to_leader"
+                                          //   null ⇒ implicit per-experiment VPAI extraction. Need not be catalog-listed.
+    "post_cell_normalize": "none",       // optional final re-normalization after the cell effect: "none" | "relative_to_leader"
+    "min_condition_completeness": null   // null ⇒ keep every controlled condition; a number in (0, 1] drops
+                                          //   conditions whose occupied (seed, seating_rotation) fraction is below it
   }
 }
 ```
@@ -393,6 +396,7 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
 - `uses.estimators` is **required and single-source** in practice: strength is defined relative to one predictor's win-probabilities. Point it at a `cross_val` estimator for out-of-fold-honest strength, or an `in_sample`/`pretrained` one to mirror a deployed model.
 - The emitted table is per-player-game with at least `game_id, player_id, player_type, civilization, relative_strength, logit_strength, adjusted_strength` — the exact columns `ratings.*` require (§6.2), plus audit columns — plus `seed`/`seating_rotation` joined from `games` and `config_slot` carried from `panel_data` for the controlled-design diagnostics. Because the estimator's `predictions.csv` does **not** carry the composed identity, `player_type` (and `config_slot`) are joined from `panel_data` by `(game_id, player_id)`; `civilization` comes from the predictions (panel as fallback). `enforce_winner:true` forces the actual winner to the top strength (under `relative_to:"game_leader"` that is `relative_strength = 1.0`; under `relative_to` unset/`"none"` the winner is bumped to the top raw strength and `relative_strength` mirrors the raw value), but `logit_strength` is always finite via clipping before any logit-scale adjustment.
 - **The panel retains every experiment** — it is *not* filtered to LLM seats. Vanilla/Null seats stay in so `ratings.* ref="Vanilla"` and the baseline pathways (§5.1) resolve; LLM-only narrowing is each analysis's `only_llm` filter, not baked into the panel.
+- **Condition completeness (`min_condition_completeness`).** A controlled *condition* is an experiment's `seed × seating_rotation` grid, evaluated against the same reference grid the completeness report uses (§5.1: the explicit `baseline_experiment` grid when set, else the controlled union). `null` (default) keeps every condition. A numeric threshold in `(0, 1]` drops, as a whole, every condition whose occupied-slot fraction is below it — `1.0` means "skip every condition missing any slot". Dropped conditions are removed from the panel (and therefore from ratings, baselines, and the audit trails) before the cell adjustment resolves, and each is named in a WARN. Dropping the selected explicit `baseline_experiment` itself is called out loudly, since it voids the whole cell baseline.
 - `civ_adjust: "none"` skips the OLS step (then `adjusted_strength == relative_strength`); any other value selects an adjustment scheme (currently `ols_logit`). The `ols_logit` fit is `logit_strength ~ C(civilization, Sum) + C(player_type, Treatment(reference=<vanilla_label>))` (reference from the catalog's vanilla label), fit over **all** panel rows; only uncontrolled rows have the civ effect subtracted.
 - **Controlled-design adjustment (`block`).** When a game carries controlled seeds **and** seating (`seed != -1` and `seating_rotation != -1` in the `games` table), `block` replaces `civ_adjust` on those rows with a **matched final-seat cell** correction: it subtracts the per-`(seed, player_id)` **Vanilla VPAI baseline**. `seed` identifies the generated map/start layout, and `player_id` identifies the final in-game seat/start position after rotation. `config_slot` is retained for diagnostics about which configured model rotated into that cell, but it is not the baseline cell. "Vanilla VPAI" means rows whose raw model is VPAI when available and whose composed `player_type` is the catalog's vanilla label (`Vanilla` by default); `Null` is not baseline evidence. Because the final-seat cell fixes the seat-bound civilization, this subsumes the civ adjustment. Uncontrolled rows fall back to `civ_adjust`; `block: "none"` ⇒ pure legacy behavior except for harmless audit columns/files. The baseline is built via one or both pathways:
   - **Explicit** (`baseline_experiment` set, e.g. a pure VP self-play condition): for each `(seed, player_id)` cell, average the designated experiment's Vanilla/VPAI `logit_strength` rows. In seated mode, rotations for a seed are repeated observations of the same generated map/start cells, so each final-seat cell's explicit baseline is the logit-scale mean of those repeated Vanilla observations.
@@ -421,6 +425,8 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 {
   "id": "bt_main",                       // required: unique stage id
   "module": "ratings.bradley_terry",     // required: analysis registry name
+  "name": "Main ratings",                // optional: friendly heading, overrides the module default on the report
+  "description": "The headline Elo table.",  // optional: one-line module description (overrides the module default)
   "enabled": true,
   "needs": [],                           // optional explicit deps
   "uses": {                              // optional artifact references (create auto-edges)
@@ -435,6 +441,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 ```
 
 - `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
+- `name` and `description` are optional per-stage identity overrides. Every analysis module ships a coded friendly name and one-line description (§6.3); the report renders the friendly name as the section heading and the description under it. This stage's `name`/`description` replace the module defaults for this one section (so two stages on the same module, e.g. `bt_main` and `bt_strategy`, can carry distinct headings). When omitted, the module defaults are used.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
 - `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `exploratory.cost_vs_rating`, for example, reads `ratings.csv` from the first declared ratings stage.
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
@@ -624,6 +631,35 @@ configs should use `by_player_type`.
 
 > **`behavior.*` is deferred.** The whole behavioral family (flavor-change clusters/decomposition, pivot/nuke rationale, victory commitment) scores no strategist, so it is **not in this schema**. We will revisit how to bring behavioral profiling back as an opt-in extension later.
 
+### 6.3 Module friendly names and descriptions
+
+Every implemented analysis module ships a coded friendly name and one-line
+description; the report renders the friendly name as the section heading and the
+description under it (§7). Both are overridable per stage via the optional
+`name`/`description` envelope keys (§6.1).
+
+| registry module | friendly name | description |
+| --- | --- | --- |
+| `ratings.bradley_terry` | Bradley-Terry ratings | Fitted Elo-style strength ratings from a paired game-comparison (Bradley-Terry) model. |
+| `ratings.plackett_luce` | Plackett-Luce ratings | Fitted strength ratings from the rank-ordered game Plackett-Luce model. |
+| `ratings.matchups` | Strength matchups | Head-to-head strength matchup matrix (mean score or win rate) between player types. |
+| `ratings.outcome_matchups` | Observed matchups | Observed win-rate and score-ratio matchups between player types from game outcomes. |
+| `prediction.evaluate` | Prediction metrics | Scores each estimator's win-probability discrimination and calibration across metrics. |
+| `prediction.compare` | Predictor comparison | Compares the win-probability estimates of the enabled estimators side by side. |
+| `calibration.reliability` | Reliability | Reliability diagram and expected calibration error (ECE) of estimator win probabilities. |
+| `calibration.loss_by_progress` | Loss by turn progress | Scoring-metric performance of estimator win probabilities across the game's turn progression. |
+| `calibration.civ_effects` | Civilization effects | Estimated civilization effects on strength from the uncontrolled civ-OLS fit. |
+| `calibration.cell_baseline` | Cell baselines | Per-seed heatmap of the controlled-design start-cell Vanilla VPAI baselines by condition. |
+| `performance.experiment_completeness` | Experiment completeness | Controlled game-grid completeness summary plus missing-slot and repeated-game details. |
+| `performance.score_ratio` | Score-ratio model | Regresses the final score ratio on player identity and other predictors. |
+| `performance.strength_panel` | Strength panel | Per-identity adjusted-strength summary with bootstrap CIs and cell-coverage diagnostics. |
+| `performance.turn_predicted` | Predicted vs actual | Compares predicted win probability to actual outcomes, summarized by identity or turn. |
+| `exploratory.model_token_costs` | Token costs | Aggregated per-model and per-player-type token and US-dollar costs. |
+| `exploratory.cost_vs_rating` | Cost vs rating | Scatter of average cost per game against Elo rating for each identity. |
+
+Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
+identity; they cannot run, so they never appear on a report.
+
 ---
 
 ## 7. `report` — rendering
@@ -640,25 +676,27 @@ configs should use `by_player_type`.
   "section_overrides": {                 // optional inline-artifact selection by analysis stage id
     "bt_main": {"tables": ["ratings"], "figures": ["ratings"]}
   },
-  "title": null,                         // null = derive from `name`
+  "title": null,                         // null = derive from `friendly_name`, else `name`
   "include_disabled": false              // never render skipped/disabled stages
 }
 ```
 
 The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five module families (ratings / prediction / calibration / performance / exploratory) in that canonical order, with members in dependency order. Pass an ordered `id` list to curate and reorder. The authored order is preserved, including across families. No analysis hardcodes its place in the document (invariant 3).
 
+Each section is headed by the module's **friendly name** (§6.3), overridden by that stage's optional `name` when given, and carries a one-line module description (overridable by the stage `description`) under the heading. The raw registry `module` string stays visible as a `Module:` line, and the stage `id` keeps its stable anchor, so report links and curation (TOC, overview, sidebar) never break. The page title is `report.title`, else the config's `friendly_name`, else its `name`; the config's `description` renders under the title on the overview page and `report.md`. When no friendly identity is configured, behavior is unchanged (headings are the stage ids, page title is the run name).
+
 `overview_sections` controls the compact cards in `report.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact eight-section list shown above. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
 **Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `report.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: no timestamps, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
-**The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, summary, metadata, ordered table/figure filenames, `empty` flag). This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis. An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
+**The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module's coded friendly identity so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
 ---
 
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
-2. **No unknown keys** at any level: typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, report `overview_sections`, and report override artifact lists) must be JSON arrays of strings; a bare string is an error. `report.section_overrides` is a mapping of stage ids to objects whose only optional keys are `tables` and `figures`.
+2. **No unknown keys** at any level: typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, report `overview_sections`, and report override artifact lists) must be JSON arrays of strings; a bare string is an error. Text fields (`friendly_name`, `analyses[].name`, `analyses[].description`) are null or strings. `report.section_overrides` is a mapping of stage ids to objects whose only optional keys are `tables` and `figures`.
 3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. `uses.analyses` additionally rejects self references. These checks apply to disabled stages too, so optional template stages cannot contain stale references. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
@@ -669,6 +707,7 @@ The report walks each produced `AnalysisResult` (tables + figures + summary) and
 10. **Bootstrap**: a `ratings.*` `bootstrap`, when not null, requires an integer `n >= 1`; its resampling is seeded from the top-level `seed` (determinism — same config ⇒ same CIs).
 11. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install` first so every dependency is present.
 12. **Output root** (§2.1): `output`, when present, accepts only `root` (string) and `suffix` (string); both optional, defaulting to `"reports"` and `""`. Every stage save-path resolves under `<root><suffix>/`; two runs that differ only in `suffix` must not write to the same directory.
-13. **Strength controlled-design params** (§5.1): `turn_progress_min` is numeric in `[0, 1]`; `weight ∈ {turn_progress, uniform}`; `relative_to ∈ {game_leader}`; `enforce_winner` is boolean; `civ_adjust ∈ {none, ols_logit}`; `block ∈ {none, start_cell, auto}`; `post_cell_normalize ∈ {none, relative_to_leader}`; `baseline_experiment` is null or a string experiment id. The id need not be listed in `experiments.json`; the adjust stage resolves it from extracted data. A `block` other than `none` affects only rows from the controlled subset (`seed != -1 and seating_rotation != -1`); uncontrolled rows always use `civ_adjust`. Missing cells in the selected implicit pathway and missing source rows for the selected explicit pathway are fatal; non-selected-pathway gaps, per-model gaps, disconnected models, and incomplete cycles warn.
+13. **Strength controlled-design params** (§5.1): `turn_progress_min` is numeric in `[0, 1]`; `weight ∈ {turn_progress, uniform}`; `relative_to ∈ {game_leader}`; `enforce_winner` is boolean; `civ_adjust ∈ {none, ols_logit}`; `block ∈ {none, start_cell, auto}`; `post_cell_normalize ∈ {none, relative_to_leader}`; `baseline_experiment` is null or a string experiment id; `min_condition_completeness` is null or a number in `(0, 1]`. The id need not be listed in `experiments.json`; the adjust stage resolves it from extracted data. A `block` other than `none` affects only rows from the controlled subset (`seed != -1 and seating_rotation != -1`); uncontrolled rows always use `civ_adjust`. Missing cells in the selected implicit pathway and missing source rows for the selected explicit pathway are fatal; non-selected-pathway gaps, per-model gaps, disconnected models, and incomplete cycles warn. `min_condition_completeness` drops (with a WARN) every controlled condition whose occupied `seed × seating_rotation` fraction is below it, after which the cell adjustment resolves on the cleaned panel.
 14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured `configuredSyncRandSeed` must equal `configuredMapRandSeed` — a mismatch **aborts extraction** with a policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1` — `0` is Civ's "pick random" and rejected for controlled runs — and rotations are `≥ 0`). Per-player `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.
 15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"` or a `-`-prefixed suffix and, with an explicit list, must be a member. `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.
+16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.

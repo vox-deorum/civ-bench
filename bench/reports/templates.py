@@ -95,6 +95,7 @@ def default_template(meta: dict, sections: list[Section]) -> ReportDocument:
         seed=meta["seed"],
         config_path=meta["config_path"],
         output_root=meta["output_root"],
+        description=meta.get("description", "") or "",
         groups=groups,
         overview_sections=overview_sections,
         intro=intro,

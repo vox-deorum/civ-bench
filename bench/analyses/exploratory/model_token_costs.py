@@ -104,6 +104,8 @@ def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str])
 
 class ExploratoryModelTokenCosts(Analysis):
     module = "exploratory.model_token_costs"
+    friendly_name = "Token costs"
+    description = "Aggregated per-model and per-player-type token and US-dollar costs."
     report_defaults = {"tables": [], "figures": ["token_costs"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

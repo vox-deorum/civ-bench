@@ -23,6 +23,8 @@ from .metrics import (
 
 class PredictionEvaluate(Analysis):
     module = "prediction.evaluate"
+    friendly_name = "Prediction metrics"
+    description = "Scores each estimator's win-probability discrimination and calibration across metrics."
     report_defaults = {"tables": ["metrics"], "figures": []}
     default_all_estimators = True
 

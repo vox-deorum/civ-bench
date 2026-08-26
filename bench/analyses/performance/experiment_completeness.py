@@ -16,6 +16,8 @@ from .strength_panel import build_experiment_completeness
 
 class PerformanceExperimentCompleteness(Analysis):
     module = "performance.experiment_completeness"
+    friendly_name = "Experiment completeness"
+    description = "Controlled game-grid completeness summary plus missing-slot and repeated-game details."
     report_defaults = {"tables": ["experiment_completeness"], "figures": []}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

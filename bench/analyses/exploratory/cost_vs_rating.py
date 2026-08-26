@@ -12,6 +12,8 @@ from .model_token_costs import compute_game_costs, summarize_game_costs
 
 class ExploratoryCostVsRating(Analysis):
     module = "exploratory.cost_vs_rating"
+    friendly_name = "Cost vs rating"
+    description = "Scatter of average cost per game against Elo rating for each identity."
     report_defaults = {"tables": [], "figures": ["cost_vs_rating"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

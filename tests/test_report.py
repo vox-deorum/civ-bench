@@ -32,7 +32,7 @@ _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
 
 
 def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=None,
-          artifacts=None, empty=False):
+          artifacts=None, empty=False, module_name="", module_description=""):
     """Fabricate one analysis's persisted artifacts + ``result.json`` manifest."""
     d = _analyses_dir(cfg, sid)
     d.mkdir(parents=True, exist_ok=True)
@@ -51,6 +51,7 @@ def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=N
             anames.append({"name": rel, "file": rel})
     manifest = {
         "id": sid, "module": module, "summary": summary,
+        "module_name": module_name, "module_description": module_description,
         "metadata": metadata or {}, "empty": empty,
         "tables": tnames, "figures": fnames, "artifacts": anames,
     }
@@ -388,3 +389,75 @@ def test_report_renders_rating_provenance_metadata(report_env):
     assert "strength_estimator: attention" in md
     assert "estimator_model: attention_mlp" in md
     assert "adjust_block: auto/start_cell" in html
+
+
+# ── friendly names + descriptions ─────────────────────────────────────────────
+def test_manifest_module_name_and_description_are_rendered(report_env):
+    _emit(report_env, "pred_metrics", "prediction.evaluate",
+          summary="Evaluated estimator(s).",
+          tables={"metrics": pd.DataFrame({"model": ["a"], "roc_auc": [0.5]})},
+          module_name="Prediction metrics",
+          module_description="Scores each estimator's win-probability metrics.")
+    result = run_report(report_env)
+    out = report_dir(report_env)
+
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "### Prediction metrics" in md
+    assert "*Scores each estimator's win-probability metrics.*" in md
+    assert "Module: `prediction.evaluate`" in md
+    # TOC and overview use the friendly name too.
+    assert "- [Prediction metrics]" in md
+    assert "- **Prediction metrics** (Prediction):" in md
+
+    overview = (out / "report.html").read_text(encoding="utf-8")
+    assert "<h1>civbench-dev</h1>" in overview
+    assert 'class="overview-card"' in overview
+    assert "<h2>Prediction metrics</h2>" in overview
+
+    prediction = (out / "prediction.html").read_text(encoding="utf-8")
+    assert "<h2 id=\"section-pred-metrics\">Prediction metrics</h2>" in prediction
+    assert "Prediction metrics" in prediction  # sidebar entry
+    assert 'class="caption">Scores each estimator' in prediction
+    assert result.n_sections == 4
+
+
+def test_manifest_without_module_name_falls_back_to_stage_id(report_env):
+    # A manifest from before friendly names still renders the stage id as heading.
+    _emit(report_env, "pred_metrics", "prediction.evaluate",
+          summary="ok.",
+          tables={"metrics": pd.DataFrame({"model": ["a"], "roc_auc": [0.5]})})
+    run_report(report_env)
+    md = (report_dir(report_env) / "report.md").read_text(encoding="utf-8")
+    assert "### pred_metrics" in md
+    assert "### Prediction metrics" not in md
+
+
+def test_section_name_description_override_beats_module_defaults(report_env):
+    _emit(report_env, "pred_metrics", "prediction.evaluate",
+          summary="ok.",
+          tables={"metrics": pd.DataFrame({"model": ["a"], "roc_auc": [0.5]})},
+          module_name="Module default name",
+          module_description="Module default description.")
+    stage = next(s for s in report_env.analyses if s.id == "pred_metrics")
+    stage.raw["name"] = "Configured heading"
+    stage.raw["description"] = "Configured description."
+    run_report(report_env)
+    md = (report_dir(report_env) / "report.md").read_text(encoding="utf-8")
+    assert "### Configured heading" in md
+    assert "*Configured description.*" in md
+    assert "Module default name" not in md
+
+
+def test_config_friendly_name_and_description_show_on_report_page(report_env):
+    report_env.friendly_name = "Staff benchmark 2026"
+    report_env.description = "Staff line-up, standard 8-seat map."
+    run_report(report_env)
+    out = report_dir(report_env)
+
+    overview = (out / "report.html").read_text(encoding="utf-8")
+    assert "<h1>Staff benchmark 2026</h1>" in overview
+    assert 'class="caption">Staff line-up, standard 8-seat map.</p>' in overview
+
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert md.startswith("# Staff benchmark 2026")
+    assert "*Staff line-up, standard 8-seat map.*" in md

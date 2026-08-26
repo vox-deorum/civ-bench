@@ -68,6 +68,8 @@ def create_outcome_matchup_matrices(panel: pd.DataFrame, include_score_ratio: bo
 
 class RatingsOutcomeMatchups(Analysis):
     module = "ratings.outcome_matchups"
+    friendly_name = "Observed matchups"
+    description = "Observed win-rate and score-ratio matchups between player types from game outcomes."
     report_defaults = {
         "tables": [],
         "figures": ["win_rate"],

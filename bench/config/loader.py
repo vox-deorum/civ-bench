@@ -322,6 +322,16 @@ def _validate_strength_params(params: dict, where: str) -> None:
         params["enforce_winner"] = coerce_bool(
             params["enforce_winner"], f"{where}.params.enforce_winner"
         )
+    # `min_condition_completeness` (null ⇒ keep everything): a controlled experiment
+    # whose occupied-slot completeness is below the threshold is dropped from the
+    # panel (named in a WARN). 1.0 ⇒ drop every condition with any missing slot.
+    mcc = params.get("min_condition_completeness")
+    if mcc is not None:
+        if isinstance(mcc, bool) or not isinstance(mcc, (int, float)) or not 0 < mcc <= 1:
+            raise ConfigError(
+                f"{where}.params.min_condition_completeness: must be null or a "
+                "number in (0, 1]."
+            )
     # `baseline_experiment` (§5.1): null ⇒ implicit per-experiment path; a value names the
     # explicit baseline source. Experiment ids can be inferred from extracted data, so this is
     # only type-checked here rather than validated against the legacy experiments catalog.
@@ -402,6 +412,10 @@ def _validate_analysis(
             f"{where}.module: '{module}' is not in the analysis registry. "
             f"Known modules: {sorted(S.ANALYSIS_MODULES)}."
         )
+
+    for key in ("name", "description"):
+        if entry.get(key) is not None:
+            _check_type(entry[key], (str,), f"{where}.{key}")
 
     if "needs" in entry:
         _check_string_list(entry["needs"], f"{where}.needs")
@@ -610,6 +624,9 @@ def load_config(path: str | Path) -> RunConfig:
     _check_keys(raw, S.TOP_LEVEL_KEYS, "<root>", required=S.TOP_LEVEL_REQUIRED)
 
     _check_type(raw["name"], (str,), "name")
+    friendly_name = raw.get("friendly_name")
+    if friendly_name is not None:
+        _check_type(friendly_name, (str,), "friendly_name")
     seed = raw["seed"]
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise ConfigError(f"seed: expected an integer, got {seed!r}.")
@@ -641,6 +658,7 @@ def load_config(path: str | Path) -> RunConfig:
         config_path=config_path,
         raw=raw,
         output=output,
+        friendly_name=friendly_name or "",
         description=raw.get("description", ""),
         presentation=raw.get("presentation") or {},
         filters=presets,

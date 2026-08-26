@@ -1,5 +1,6 @@
 {
   "name": "staff-standard-2026-cross",
+  "friendly_name": "Staff benchmark 2026, standard 8-seat map",
   "description": "TEMPLATE (tracked example — copy to a local, gitignored configs/benchmark*.json to run). The CROSS variant of benchmark.template.json: estimators train on the NON-LLM seats only (train.train_subset:\"non_llm\" = Vanilla/Null) and predict on everyone, the held-out generalization setup. output.suffix:\"-cross\" redirects the whole run to reports-cross/ so it coexists with the normal run on disk. Everything else (adjust + analyses + report) is identical to benchmark.template.json — the cross variant is config, not code (benchmark.md §2.1, §4.4).",
   "seed": 42,
 
@@ -117,7 +118,8 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "post_cell_normalize": "none"
+        "post_cell_normalize": "none",
+        "min_condition_completeness": null
       }
     }
   ],
@@ -126,6 +128,8 @@
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
+      "name": "Main ratings",
+      "description": "The headline Elo table.",
       "enabled": true,
       "uses": { "tables": ["strength"] },
       "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }

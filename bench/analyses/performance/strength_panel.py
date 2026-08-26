@@ -280,6 +280,8 @@ def build_experiment_completeness(
 
 class PerformanceStrengthPanel(Analysis):
     module = "performance.strength_panel"
+    friendly_name = "Strength panel"
+    description = "Per-identity adjusted-strength summary with bootstrap CIs and cell-coverage diagnostics."
     report_defaults = {"tables": [], "figures": ["strength"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

@@ -95,6 +95,7 @@ class RunConfig:
     config_path: Path
     raw: dict
     output: OutputConfig
+    friendly_name: str = ""
     description: str = ""
     presentation: dict = field(default_factory=dict)
     filters: dict = field(default_factory=dict)

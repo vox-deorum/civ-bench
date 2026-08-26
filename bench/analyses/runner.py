@@ -107,7 +107,15 @@ def run_analysis(
             artifact_paths[rel] = str(path)
 
     manifest_path = _write_manifest(
-        out_dir, stage_id, module, result, table_paths, figure_paths, artifact_paths
+        out_dir,
+        stage_id,
+        module,
+        result,
+        table_paths,
+        figure_paths,
+        artifact_paths,
+        module_name=getattr(cls, "friendly_name", ""),
+        module_description=getattr(cls, "description", ""),
     )
 
     return AnalysisRunResult(
@@ -131,6 +139,8 @@ def _write_manifest(
     table_paths: dict[str, str],
     figure_paths: dict[str, str],
     artifact_paths: dict[str, str],
+    module_name: str = "",
+    module_description: str = "",
 ) -> Path:
     """Persist a ``result.json`` describing the produced artifacts.
 
@@ -138,11 +148,16 @@ def _write_manifest(
     manifest); ordered lists preserve the module's table/figure emission order so
     the report renders them as the author intended. ``artifacts`` entries keep
     their relative path (subdirs included) as the ``file`` so the report can
-    mirror the on-disk tree under ``assets/``.
+    mirror the on-disk tree under ``assets/``. ``module_name`` /
+    ``module_description`` carry the module's coded friendly name and description:
+    the report combines them with any per-stage ``name``/``description`` override
+    from the run-spec without importing the analysis registry (invariant 3).
     """
     manifest = {
         "id": stage_id,
         "module": module,
+        "module_name": module_name,
+        "module_description": module_description,
         "summary": result.summary,
         "metadata": _jsonable(result.metadata),
         "empty": result.is_empty(),

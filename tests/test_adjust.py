@@ -337,6 +337,35 @@ def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, c
     assert not cell20["has_baseline"].any()
 
 
+def test_min_condition_completeness_drops_incomplete_experiments(tmp_path, catalog):
+    # "full" occupies every reference rotation (seed 1 × 0..3 ⇒ completeness 1.0);
+    # "partial" occupies only rotations 0..1 (completeness 0.5) and is incomplete.
+    full = _seated_games("full", seed=1, rotations=[0, 1, 2, 3])
+    partial = _seated_games("partial", seed=1, rotations=[0, 1])
+    pp, pa, gp = _write(tmp_path, full + partial)
+
+    # default (null) keeps every condition — unchanged behavior
+    kept = build_strength_panel(pp, pa, gp, _params(block="auto"), catalog)
+    assert set(kept.panel["experiment"]) == {"full", "partial"}
+
+    # a threshold of 1.0 drops every condition missing any reference slot (as a whole)
+    pruned = build_strength_panel(
+        pp, pa, gp, _params(block="auto", min_condition_completeness=1.0), catalog
+    )
+    assert set(pruned.panel["experiment"]) == {"full"}
+    assert any("dropped 1 experiment(s)" in w for w in pruned.warnings)
+    assert any("partial" in w for w in pruned.warnings)
+
+    # a threshold at or below the partial's completeness keeps it
+    kept2 = build_strength_panel(
+        pp, pa, gp, _params(block="auto", min_condition_completeness=0.5), catalog
+    )
+    assert set(kept2.panel["experiment"]) == {"full", "partial"}
+
+    # the dropped condition is absent from the audit trails too (consistent panel)
+    assert set(pruned.cell_coverage["experiment"]) == {"full"}
+
+
 def test_cell_logit_advantage_unaffected_by_post_cell_normalize(tmp_path, catalog):
     # The advantage is captured BEFORE post_cell_normalize, so it stays the exact cell
     # delta even when adjusted_strength is rescaled relative to the game leader.

@@ -1,5 +1,6 @@
 {
-  "name": "staff-standard-2026",
+  "name": "staff-standard-2026",
+  "friendly_name": "Staff benchmark 2026, standard 8-seat map",
   "description": "TEMPLATE for the LOAD-ONLY driver (tracked example — copy to a local, gitignored configs/benchmark*.json to run; configs/benchmark.dev.json is the worked dev instance). Same run as benchmark.template.json but every estimator is fit:pretrained, loaded from the tracked pretrained/<model_id>/ store (one snapshot per prediction_models id — e.g. pretrained/attention_mlp/) (no training, no torch/xgboost/optuna training paths exercised). Note model_dir is an INPUT read as-authored — it is NOT re-rooted by output.suffix (only save-paths are), so the same pretrained/ store serves the default and -dev/-cross variants alike. Stages 1-5 of plans/ run against a local copy of this; extract is disabled here and the canonical CSVs are dropped into runs/ directly. Honest cross-val/OOF and the non-LLM cross variant come from the fit:train pipeline (benchmark.template.json / stage6).",
   "seed": 42,
 
@@ -94,7 +95,8 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "post_cell_normalize": "none"
+        "post_cell_normalize": "none",
+        "min_condition_completeness": null
       }
     }
   ],
@@ -103,6 +105,8 @@
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
+      "name": "Main ratings",
+      "description": "The headline Elo table.",
       "enabled": true,
       "uses": { "tables": ["strength"] },
       "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }

@@ -13,7 +13,8 @@ One JSON file, the **benchmark run-spec**, controls a `civ-bench` run. This guid
 ```jsonc
 {
   "name": "staff-standard-2026",   // required: names the report and its output subdirectory
-  "description": "free text",       // optional
+  "friendly_name": "Staff 2026",    // optional: human title shown on the report page
+  "description": "free text",       // optional; shown on the report page
   "seed": 42,                       // required: global RNG seed, threaded everywhere for determinism
 
   "output":     { ... },            // optional: output root + variant suffix
@@ -29,7 +30,7 @@ One JSON file, the **benchmark run-spec**, controls a `civ-bench` run. This guid
 }
 ```
 
-`name`, `seed`, `data`, `analyses`, and `report` are required; the rest are optional. Omit `estimators` and `adjust` for a run with no prediction-derived strength ratings. Conversely, the strength-based ratings (`ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`) need an `adjust` stage to supply the `strength` table they rate.
+`name`, `seed`, `data`, `analyses`, and `report` are required; the rest are optional. Omit `estimators` and `adjust` for a run with no prediction-derived strength ratings. Conversely, the strength-based ratings (`ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`) need an `adjust` stage to supply the `strength` table they rate. `friendly_name` and `description` are presentation only: when set, the report page titles itself with `friendly_name` and shows `description` under the title (see `report`).
 
 **Determinism.** The top-level `seed` is threaded into every stage that uses randomness (cross-validation splits, torch init, bootstrap resampling). The same run-spec over the same `runs/` data produces byte-stable outputs.
 
@@ -187,12 +188,14 @@ The available models, increasing in complexity, are `naive`, `score`, `baseline`
     "relative_to": "game_leader",         // normalize each seat to its game's strongest seat
     "enforce_winner": true,               // force the actual winner to the top
     "civ_adjust": "ols_logit",            // uncontrolled games: subtract civilization effects
-    "block": "auto"                       // controlled games: matched start-cell correction
+    "block": "auto",                      // controlled games: matched start-cell correction
+    "min_condition_completeness": null    // null = keep every controlled condition; a number in (0, 1]
+                                          //   drops conditions whose occupied seed×rotation fraction is below it
   }
 }
 ```
 
-The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the Vanilla baseline of the same `(seed, seat)` cell, removing the start-position confound. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
+The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the Vanilla baseline of the same `(seed, seat)` cell, removing the start-position confound. `min_condition_completeness` optionally drops incomplete controlled conditions (experiments whose `seed × seating_rotation` grid is missing slots) before any fit; `1.0` skips every condition that is not fully complete. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
 
 Every rating uses the same strength estimate. Its derivation belongs in the `strength` adjust stage.
 
@@ -206,6 +209,8 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 {
   "id": "bt_main",
   "module": "ratings.bradley_terry",
+  "name": "Main ratings",              // optional: friendly heading for this section on the report
+  "description": "The headline Elo table.",  // optional: one-line description under the heading
   "enabled": true,
   "uses": { "tables": ["strength"] },     // canonical table or an adjust stage's table
   "filter": "late_game",                  // optional, narrows the global filter for this stage
@@ -220,6 +225,8 @@ The modules, grouped into five families:
 - **calibration** checks honesty: `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline`.
 - **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`.
 - **exploratory**: `model_token_costs` (uses the token table and pricing from `models.json`).
+
+Each module ships a coded friendly name and one-line description; `name` and `description` here override them for this one section on the report. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
 
 Optional modules are listed in `benchmark.full.template.json` with `"enabled": false`. Some are registry-reserved placeholders until their implementation lands; if you enable one too early, the run fails with a clear "reserved but not implemented" error. The full per-module parameter catalog is in [configs/benchmark.md](../configs/benchmark.md) section 6.2.
 
@@ -249,12 +256,14 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
   "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
                                   // null = cards for every resolved section; a list keeps the HTML overview compact
   "section_overrides": {},        // stage id -> optional {"tables": ["..."], "figures": ["..."]}
-  "title": null,                  // null = derive from name
+  "title": null,                  // null = derive from friendly_name, else name
   "include_disabled": false
 }
 ```
 
 The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above.
+
+Each section is headed by the module's friendly name (the per-stage `name` override wins when present) with the module description underneath; the raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
 
 `section_overrides` narrows an analysis's inline artifacts. For each stage id, `tables` and `figures` are optional lists of manifest names. A supplied list replaces that dimension's normal inline list. An omitted dimension keeps the default list, and hidden artifacts remain downloadable. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped.
 

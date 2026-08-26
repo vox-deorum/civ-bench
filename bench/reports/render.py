@@ -78,6 +78,9 @@ def render_markdown(doc: ReportDocument) -> str:
     lines: list[str] = []
     lines.append(f"# {doc.title}")
     lines.append("")
+    if doc.description:
+        lines.append(f"*{doc.description}*")
+        lines.append("")
     lines.append(doc.intro)
     lines.append("")
 
@@ -93,7 +96,7 @@ def render_markdown(doc: ReportDocument) -> str:
             group = family_for[id(section)]
             summary = section.summary or "No summary was produced."
             lines.append(
-                f"- **{section.id}** ({group.title}): {summary} "
+                f"- **{section.title}** ({group.title}): {summary} "
                 f"[Details](#{anchors[id(section)]})"
             )
         lines.append("")
@@ -104,7 +107,7 @@ def render_markdown(doc: ReportDocument) -> str:
     for group in doc.groups:
         lines.append(f"- [{group.title}](#{anchors[id(group)]})")
         for section in group.sections:
-            lines.append(f"  - [{section.id}](#{anchors[id(section)]})")
+            lines.append(f"  - [{section.title}](#{anchors[id(section)]})")
     lines.append("")
 
     for group in doc.groups:
@@ -118,9 +121,12 @@ def render_markdown(doc: ReportDocument) -> str:
 
 
 def _render_section_md(section: Section, lines: list[str]) -> None:
-    lines.append(f"### {section.id}")
+    lines.append(f"### {section.title}")
     lines.append("")
     lines.append(f"*Module: `{section.module}`*")
+    if section.description:
+        lines.append("")
+        lines.append(f"*{section.description}*")
     meta = _metadata_line(section.metadata)
     if meta:
         lines.append("")
@@ -298,7 +304,7 @@ def _render_navigation(
         for section in group.sections:
             parts.append(
                 f'<li><a href="{filename}#{anchors[id(section)]}">'
-                f'{_html.escape(section.id)}</a></li>'
+                f'{_html.escape(section.title)}</a></li>'
             )
         parts.append("</ul></li>")
     parts.append("</ul></nav></aside>")
@@ -332,6 +338,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     parts.extend(_render_navigation(doc, anchors, filenames, "report"))
     parts.append('<main class="content" id="main-content">')
     parts.append(f"<h1>{_html.escape(doc.title)}</h1>")
+    if doc.description:
+        parts.append(f'<p class="caption">{_html.escape(doc.description)}</p>')
     parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
     parts.append('<section aria-labelledby="overview-heading">')
     parts.append('<h2 id="overview-heading">Overview</h2>')
@@ -342,7 +350,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         summary = section.summary or "No summary was produced."
         parts.append('<article class="overview-card">')
         parts.append(f'<p class="eyebrow">{_html.escape(group.title)}</p>')
-        parts.append(f"<h2>{_html.escape(section.id)}</h2>")
+        parts.append(f"<h2>{_html.escape(section.title)}</h2>")
         parts.append(f"<p>{_md_inline_to_html(summary)}</p>")
         parts.append(f'<p><a href="{target}">View details</a></p>')
         parts.append("</article>")
@@ -370,8 +378,10 @@ def render_html(doc: ReportDocument) -> str:
 
 def _render_section_html(section: Section, parts: list[str], anchor: str) -> None:
     parts.append(f'<section aria-labelledby="{anchor}">')
-    parts.append(f'<h2 id="{anchor}">{_html.escape(section.id)}</h2>')
+    parts.append(f'<h2 id="{anchor}">{_html.escape(section.title)}</h2>')
     parts.append(f'<p class="module">Module: {_html.escape(section.module)}</p>')
+    if section.description:
+        parts.append(f'<p class="caption">{_html.escape(section.description)}</p>')
     meta = _metadata_line(section.metadata)
     if meta:
         parts.append(f'<p class="meta">{_html.escape(meta)}</p>')

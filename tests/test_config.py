@@ -423,3 +423,55 @@ def test_stage_filter_list_can_narrow_global(dev_spec, write_spec):
     dev_spec["analyses"][4]["filter"] = ["late_game", {"players": ["Sonnet-4.5"]}]
     path = write_spec(dev_spec)
     assert load_config(path).analyses[4].raw["filter"][0] == "late_game"
+
+
+# ── friendly names + descriptions ─────────────────────────────────────────────
+
+def test_config_friendly_name_accepted(dev_spec, write_spec):
+    dev_spec["friendly_name"] = "Staff benchmark, 8-seat map"
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.friendly_name == "Staff benchmark, 8-seat map"
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_config_friendly_name_optional_and_blank(dev_spec, write_spec, value):
+    dev_spec["friendly_name"] = value
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.friendly_name == ""
+
+
+def test_config_friendly_name_must_be_string(dev_spec, write_spec):
+    dev_spec["friendly_name"] = 123
+    with pytest.raises(ConfigError, match="friendly_name"):
+        load_config(write_spec(dev_spec))
+
+
+@pytest.mark.parametrize("key", ["name", "description"])
+def test_analysis_name_and_description_accepted(dev_spec, write_spec, key):
+    _analysis(dev_spec, "bt_main")[key] = "Friendly value"
+    cfg = load_config(write_spec(dev_spec))
+    stage = next(a for a in cfg.analyses if a.id == "bt_main")
+    assert stage.raw[key] == "Friendly value"
+
+
+@pytest.mark.parametrize("key", ["name", "description"])
+def test_analysis_name_and_description_must_be_string(dev_spec, write_spec, key):
+    _analysis(dev_spec, "bt_main")[key] = 7
+    with pytest.raises(ConfigError, match=key):
+        load_config(write_spec(dev_spec))
+
+
+# ── strength: min_condition_completeness ─────────────────────────────────────
+
+@pytest.mark.parametrize("value", [None, 1.0, 0.95, 0.5])
+def test_min_condition_completeness_accepted(dev_spec, write_spec, value):
+    dev_spec["adjust"][0]["params"]["min_condition_completeness"] = value
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.adjust[0].raw["params"]["min_condition_completeness"] == value
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "full"])
+def test_min_condition_completeness_bad_value_is_loud(dev_spec, write_spec, value):
+    dev_spec["adjust"][0]["params"]["min_condition_completeness"] = value
+    with pytest.raises(ConfigError, match="min_condition_completeness"):
+        load_config(write_spec(dev_spec))

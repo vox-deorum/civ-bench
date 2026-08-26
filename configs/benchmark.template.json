@@ -1,5 +1,6 @@
 {
   "name": "staff-standard-2026",
+  "friendly_name": "Staff benchmark 2026, standard 8-seat map",
   "description": "TEMPLATE (tracked example — copy to a local, gitignored configs/benchmark*.json to run). Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.template.json for the opt-in extras. `catalogs` omitted; catalog-using stages resolve sibling defaults only when needed.",
   "seed": 42,
 
@@ -112,7 +113,8 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "post_cell_normalize": "none"
+        "post_cell_normalize": "none",
+        "min_condition_completeness": null
       }
     }
   ],
@@ -121,6 +123,8 @@
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
+      "name": "Main ratings",
+      "description": "The headline Elo table.",
       "enabled": true,
       "uses": { "tables": ["strength"] },
       "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
@@ -131,20 +135,6 @@
       "enabled": true,
       "uses": { "tables": ["strength"] },
       "params": { "group_by": ["player_type", "strategy"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
-    },
-    {
-      "id": "pl_main",
-      "module": "ratings.plackett_luce",
-      "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
-    },
-    {
-      "id": "pl_strategy",
-      "module": "ratings.plackett_luce",
-      "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type", "strategy"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
     },
     {
       "id": "matchup_strength",

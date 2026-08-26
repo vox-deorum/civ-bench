@@ -22,6 +22,8 @@ from .metrics import filtered_prediction_rows
 
 class PredictionCompare(Analysis):
     module = "prediction.compare"
+    friendly_name = "Predictor comparison"
+    description = "Compares the win-probability estimates of the enabled estimators side by side."
     report_defaults = {"tables": [], "figures": ["rank_agreement"]}
     default_all_estimators = True
 
