@@ -441,7 +441,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 ```
 
 - `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
-- `name` and `description` are optional per-stage identity overrides. Every analysis module ships a coded friendly name and one-line description (§6.3); the report renders the friendly name as the section heading and the description under it. This stage's `name`/`description` replace the module defaults for this one section (so two stages on the same module, e.g. `bt_main` and `bt_strategy`, can carry distinct headings). When omitted, the module defaults are used.
+- `name` and `description` are optional per-stage identity overrides. Every analysis module ships a coded friendly name and one-line description (§6.3). Rating module instances resolve a distinct coded identity from `params.group_by`, so `bt_main` and `bt_strategy` receive different headings without config name fields. A supplied stage `name` or `description` still replaces the resolved identity for that section. When omitted, the resolved module identity is used.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
 - `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `exploratory.cost_vs_rating`, for example, reads `ratings.csv` from the first declared ratings stage.
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
@@ -635,27 +635,31 @@ configs should use `by_player_type`.
 
 Every implemented analysis module ships a coded friendly name and one-line
 description; the report renders the friendly name as the section heading and the
-description under it (§7). Both are overridable per stage via the optional
-`name`/`description` envelope keys (§6.1).
+description under it (§7). The module instance resolves its identity from its
+parameters before execution. In particular, the fitted rating modules use their
+grouped identity when `group_by` includes an extra dimension such as `strategy`.
+The resolved name and description are persisted in the result manifest, so the
+report can render them without importing the analysis code. Both are overridable
+per stage via the optional `name`/`description` envelope keys (§6.1).
 
 | registry module | friendly name | description |
 | --- | --- | --- |
-| `ratings.bradley_terry` | Bradley-Terry ratings | Fitted Elo-style strength ratings from a paired game-comparison (Bradley-Terry) model. |
-| `ratings.plackett_luce` | Plackett-Luce ratings | Fitted strength ratings from the rank-ordered game Plackett-Luce model. |
-| `ratings.matchups` | Strength matchups | Head-to-head strength matchup matrix (mean score or win rate) between player types. |
-| `ratings.outcome_matchups` | Observed matchups | Observed win-rate and score-ratio matchups between player types from game outcomes. |
-| `prediction.evaluate` | Prediction metrics | Scores each estimator's win-probability discrimination and calibration across metrics. |
-| `prediction.compare` | Predictor comparison | Compares the win-probability estimates of the enabled estimators side by side. |
-| `calibration.reliability` | Reliability | Reliability diagram and expected calibration error (ECE) of estimator win probabilities. |
-| `calibration.loss_by_progress` | Loss by turn progress | Scoring-metric performance of estimator win probabilities across the game's turn progression. |
-| `calibration.civ_effects` | Civilization effects | Estimated civilization effects on strength from the uncontrolled civ-OLS fit. |
-| `calibration.cell_baseline` | Cell baselines | Per-seed heatmap of the controlled-design start-cell Vanilla VPAI baselines by condition. |
-| `performance.experiment_completeness` | Experiment completeness | Controlled game-grid completeness summary plus missing-slot and repeated-game details. |
-| `performance.score_ratio` | Score-ratio model | Regresses the final score ratio on player identity and other predictors. |
-| `performance.strength_panel` | Strength panel | Per-identity adjusted-strength summary with bootstrap CIs and cell-coverage diagnostics. |
-| `performance.turn_predicted` | Predicted vs actual | Compares predicted win probability to actual outcomes, summarized by identity or turn. |
-| `exploratory.model_token_costs` | Token costs | Aggregated per-model and per-player-type token and US-dollar costs. |
-| `exploratory.cost_vs_rating` | Cost vs rating | Scatter of average cost per game against Elo rating for each identity. |
+| `ratings.bradley_terry` | Pairwise skill ratings | Estimates each player type's relative skill from pairwise comparisons of model-adjusted strength within each game (Bradley-Terry Elo ratings). With `group_by: ["player_type", "strategy"]`, the identity is **Pairwise strategy ratings**: estimates relative skill for each player type and strategy combination from the same pairwise comparisons. |
+| `ratings.plackett_luce` | Rank-based skill ratings | Estimates each player type's relative skill from the full within-game ranking of model-adjusted strength (Plackett-Luce ratings). With `group_by: ["player_type", "strategy"]`, the identity is **Rank-based strategy ratings**: estimates relative skill for each player type and strategy combination from the same full rankings. |
+| `ratings.matchups` | Adjusted-strength matchups | Compares every pair of player types using model-adjusted strength, including mean differences and win rates. |
+| `ratings.outcome_matchups` | Observed outcome matchups | Compares every pair of player types using actual wins and final-score margins from completed games. |
+| `prediction.evaluate` | Prediction quality | Measures how well each estimator identifies likely winners and matches observed outcomes (discrimination and calibration). |
+| `prediction.compare` | Estimator agreement | Shows how closely estimators agree on win probabilities and on the within-turn ranking of players. |
+| `calibration.reliability` | Probability reliability | Checks whether predicted win probabilities match observed win rates (reliability curves and expected calibration error). |
+| `calibration.loss_by_progress` | Prediction error over time | Tracks win-probability error from the opening turns through the end of the game (Brier score and log loss by game progress). |
+| `calibration.civ_effects` | Civilization strength effects | Estimates how much civilization choice shifts player strength in uncontrolled games (ordinary least squares). |
+| `calibration.cell_baseline` | Starting-position baselines | Shows baseline AI strength for each map seed and starting position in the controlled experiment. |
+| `performance.experiment_completeness` | Experiment coverage | Reports completed, missing, and repeated games across the planned map, seat, and condition combinations. |
+| `performance.score_ratio` | Final-score effects | Estimates how player identity, civilization, and other factors affect final score share (regression analysis). |
+| `performance.strength_panel` | Adjusted-strength summary | Summarizes model-adjusted strength, uncertainty, and experiment coverage for each player identity (bootstrap confidence intervals). |
+| `performance.turn_predicted` | Win-probability trends | Shows how each player identity's predicted chance of winning changes from the opening turns through the end of the game. |
+| `exploratory.model_token_costs` | Model usage and cost | Summarizes token use and estimated US-dollar cost by model and player type. |
+| `exploratory.cost_vs_rating` | Cost versus skill | Compares each player identity's average model cost per game with its estimated skill rating. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
 identity; they cannot run, so they never appear on a report.
@@ -683,13 +687,13 @@ identity; they cannot run, so they never appear on a report.
 
 The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five module families (ratings / prediction / calibration / performance / exploratory) in that canonical order, with members in dependency order. Pass an ordered `id` list to curate and reorder. The authored order is preserved, including across families. No analysis hardcodes its place in the document (invariant 3).
 
-Each section is headed by the module's **friendly name** (§6.3), overridden by that stage's optional `name` when given, and carries a one-line module description (overridable by the stage `description`) under the heading. The raw registry `module` string stays visible as a `Module:` line, and the stage `id` keeps its stable anchor, so report links and curation (TOC, overview, sidebar) never break. The page title is `report.title`, else the config's `friendly_name`, else its `name`; the config's `description` renders under the title on the overview page and `report.md`. When no friendly identity is configured, behavior is unchanged (headings are the stage ids, page title is the run name).
+Each section is headed by the module instance's **resolved friendly name** (§6.3), overridden by that stage's optional `name` when given, and carries its resolved one-line description (overridable by the stage `description`) under the heading. The raw registry `module` string stays visible as a `Module:` line, and the stage `id` keeps its stable anchor, so report links and curation (TOC, overview, sidebar) never break. The page title is `report.title`, else the config's `friendly_name`, else its `name`; the config's `description` renders under the title on the overview page and `report.md`. When no friendly identity is configured, behavior is unchanged (headings are the stage ids, page title is the run name).
 
 `overview_sections` controls the compact cards in `report.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact eight-section list shown above. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
 **Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `report.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: no timestamps, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
-**The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module's coded friendly identity so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
+**The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module instance's resolved friendly identity, including the grouped BT or PL identity selected from `group_by`, so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
 ---
 

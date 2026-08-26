@@ -105,8 +105,6 @@
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
-      "name": "Main ratings",
-      "description": "The headline Elo table.",
       "enabled": true,
       "uses": { "tables": ["strength"] },
       "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }

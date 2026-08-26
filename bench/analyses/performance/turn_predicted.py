@@ -19,8 +19,11 @@ from ..errors import AnalysisError
 
 class PerformanceTurnPredicted(Analysis):
     module = "performance.turn_predicted"
-    friendly_name = "Predicted vs actual"
-    description = "Compares predicted win probability to actual outcomes, summarized by identity or turn."
+    friendly_name = "Win-probability trends"
+    description = (
+        "Shows how each player identity's predicted chance of winning changes "
+        "from the opening turns through the end of the game."
+    )
     report_defaults = {"tables": [], "figures": ["over_progress"]}
     default_all_estimators = True
 

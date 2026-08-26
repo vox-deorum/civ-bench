@@ -280,8 +280,11 @@ def build_experiment_completeness(
 
 class PerformanceStrengthPanel(Analysis):
     module = "performance.strength_panel"
-    friendly_name = "Strength panel"
-    description = "Per-identity adjusted-strength summary with bootstrap CIs and cell-coverage diagnostics."
+    friendly_name = "Adjusted-strength summary"
+    description = (
+        "Summarizes model-adjusted strength, uncertainty, and experiment coverage "
+        "for each player identity (bootstrap confidence intervals)."
+    )
     report_defaults = {"tables": [], "figures": ["strength"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

@@ -20,8 +20,11 @@ from ..errors import AnalysisError
 
 class PerformanceScoreRatio(Analysis):
     module = "performance.score_ratio"
-    friendly_name = "Score-ratio model"
-    description = "Regresses the final score ratio on player identity and other predictors."
+    friendly_name = "Final-score effects"
+    description = (
+        "Estimates how player identity, civilization, and other factors affect "
+        "final score share (regression analysis)."
+    )
     report_defaults = {"tables": [], "figures": ["player_type_effects"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

@@ -44,8 +44,11 @@ _EXPLICIT_ROW = "(explicit baseline)"
 
 class CalibrationCellBaseline(Analysis):
     module = "calibration.cell_baseline"
-    friendly_name = "Cell baselines"
-    description = "Per-seed heatmap of the controlled-design start-cell Vanilla VPAI baselines by condition."
+    friendly_name = "Starting-position baselines"
+    description = (
+        "Shows baseline AI strength for each map seed and starting position in "
+        "the controlled experiment."
+    )
     report_defaults = {"tables": [], "figures": []}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

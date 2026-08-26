@@ -21,8 +21,11 @@ _DEFAULT_METRICS = ["brier_score", "log_loss"]
 
 class CalibrationLossByProgress(Analysis):
     module = "calibration.loss_by_progress"
-    friendly_name = "Loss by turn progress"
-    description = "Scoring-metric performance of estimator win probabilities across the game's turn progression."
+    friendly_name = "Prediction error over time"
+    description = (
+        "Tracks win-probability error from the opening turns through the end of "
+        "the game (Brier score and log loss by game progress)."
+    )
     report_defaults = {"tables": [], "figures": ["loss_by_progress"]}
     default_all_estimators = True
 

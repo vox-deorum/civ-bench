@@ -19,8 +19,17 @@ _FLAT_MARGIN = 1e9  # weights = 1 + log1p(diff/margin) ≈ 1 → ~unweighted BT
 
 class RatingsBradleyTerry(RatingsAnalysis):
     module = "ratings.bradley_terry"
-    friendly_name = "Bradley-Terry ratings"
-    description = "Fitted Elo-style strength ratings from a paired game-comparison (Bradley-Terry) model."
+    friendly_name = "Pairwise skill ratings"
+    description = (
+        "Estimates each player type's relative skill from pairwise comparisons of "
+        "model-adjusted strength within each game (Bradley-Terry Elo ratings)."
+    )
+    strategy_friendly_name = "Pairwise strategy ratings"
+    strategy_description = (
+        "Estimates relative skill for each player type and strategy combination "
+        "from pairwise comparisons of model-adjusted strength within each game "
+        "(Bradley-Terry Elo ratings)."
+    )
     report_defaults = {"tables": [], "figures": ["ratings"]}
 
     def _margin_for(self, strength_df: pd.DataFrame):

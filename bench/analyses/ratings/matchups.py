@@ -107,8 +107,11 @@ def create_mean_matchup_matrix(strength_df: pd.DataFrame):
 
 class RatingsMatchups(Analysis):
     module = "ratings.matchups"
-    friendly_name = "Strength matchups"
-    description = "Head-to-head strength matchup matrix (mean score or win rate) between player types."
+    friendly_name = "Adjusted-strength matchups"
+    description = (
+        "Compares every pair of player types using model-adjusted strength, "
+        "including mean differences and win rates."
+    )
     report_defaults = {
         "tables": [],
         "figures": ["matchup", "strength_mean", "strength_winrate"],

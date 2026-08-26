@@ -881,6 +881,46 @@ def test_ratings_strategy_group_by(env, monkeypatch):
     assert tbl["composite_type"].str.contains("-").all()
     assert "ratings" in r.figure_paths
 
+    manifest = json.loads(Path(r.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["module_name"] == "Pairwise strategy ratings"
+    assert manifest["module_description"] == (
+        "Estimates relative skill for each player type and strategy combination "
+        "from pairwise comparisons of model-adjusted strength within each game "
+        "(Bradley-Terry Elo ratings)."
+    )
+
+
+@pytest.mark.parametrize(
+    ("module", "params", "expected_name"),
+    [
+        (
+            "ratings.bradley_terry",
+            {"group_by": ["player_type"]},
+            "Pairwise skill ratings",
+        ),
+        (
+            "ratings.bradley_terry",
+            {"group_by": ["player_type", "strategy"]},
+            "Pairwise strategy ratings",
+        ),
+        (
+            "ratings.plackett_luce",
+            {"group_by": ["player_type"]},
+            "Rank-based skill ratings",
+        ),
+        (
+            "ratings.plackett_luce",
+            {"group_by": ["player_type", "strategy"]},
+            "Rank-based strategy ratings",
+        ),
+    ],
+)
+def test_rating_identity_is_resolved_from_grouping(module, params, expected_name):
+    analysis = get_analysis(module)("ratings", params)
+    name, description = analysis.report_identity()
+    assert name == expected_name
+    assert description
+
 
 def test_ratings_bootstrap_blocked_with_strategy(env, monkeypatch):
     monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", _fake_bt)

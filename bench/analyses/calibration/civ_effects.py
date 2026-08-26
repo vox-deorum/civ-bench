@@ -21,8 +21,11 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 
 class CalibrationCivEffects(Analysis):
     module = "calibration.civ_effects"
-    friendly_name = "Civilization effects"
-    description = "Estimated civilization effects on strength from the uncontrolled civ-OLS fit."
+    friendly_name = "Civilization strength effects"
+    description = (
+        "Estimates how much civilization choice shifts player strength in "
+        "uncontrolled games (ordinary least squares)."
+    )
     report_defaults = {"tables": [], "figures": ["civ_effects"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

@@ -48,8 +48,11 @@ def expected_calibration_error(table: pd.DataFrame) -> float:
 
 class CalibrationReliability(Analysis):
     module = "calibration.reliability"
-    friendly_name = "Reliability"
-    description = "Reliability diagram and expected calibration error (ECE) of estimator win probabilities."
+    friendly_name = "Prediction reliability"
+    description = (
+        "Checks whether predicted win probabilities match observed win rates "
+        "(reliability curves and expected calibration error)."
+    )
     report_defaults = {"tables": ["ece"], "figures": ["reliability"]}
     default_all_estimators = True
 

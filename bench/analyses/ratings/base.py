@@ -26,6 +26,22 @@ _STRENGTH_COL = "adjusted_strength"
 class RatingsAnalysis(Analysis):
     """Base for fitted rating analyses; subclasses implement :meth:`_calculate`."""
 
+    strategy_friendly_name: str = ""
+    strategy_description: str = ""
+
+    def report_identity(self) -> tuple[str, str]:
+        """Use a distinct report identity when ratings include extra groupings."""
+        group_by = self._group_by()
+        if group_by == ["player_type", "strategy"]:
+            return self.strategy_friendly_name, self.strategy_description
+        if len(group_by) > 1:
+            dimensions = ", ".join(group_by[1:])
+            return (
+                f"{self.friendly_name} by {dimensions}",
+                f"{self.description} Results are split by {dimensions}.",
+            )
+        return super().report_identity()
+
     def _calculate(self, strength_df: pd.DataFrame, reference: str) -> pd.DataFrame:
         """Fit the rating model and return a per-identity DataFrame (with ``elo``)."""
         raise NotImplementedError

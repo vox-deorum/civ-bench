@@ -65,11 +65,22 @@ class Analysis(ABC):
     """
 
     module: str = ""
+    friendly_name: str = ""
+    description: str = ""
     default_all_estimators: bool = False
 
     def __init__(self, stage_id: str, params: Optional[dict] = None) -> None:
         self.stage_id = stage_id
         self.params = dict(params or {})
+
+    def report_identity(self) -> tuple[str, str]:
+        """Return the report heading and its one-line explanation.
+
+        Modules with parameter-dependent variants can override this method so
+        the resolved identity is stored with the result instead of being
+        repeated in run configs.
+        """
+        return self.friendly_name, self.description
 
     @abstractmethod
     def run(self, ctx: "AnalysisContext") -> AnalysisResult:

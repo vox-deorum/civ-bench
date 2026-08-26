@@ -15,8 +15,17 @@ from .r_interop import calculate_ratings_pl
 
 class RatingsPlackettLuce(RatingsAnalysis):
     module = "ratings.plackett_luce"
-    friendly_name = "Plackett-Luce ratings"
-    description = "Fitted strength ratings from the rank-ordered game Plackett-Luce model."
+    friendly_name = "Rank-based skill ratings"
+    description = (
+        "Estimates each player type's relative skill from the full within-game "
+        "ranking of model-adjusted strength (Plackett-Luce ratings)."
+    )
+    strategy_friendly_name = "Rank-based strategy ratings"
+    strategy_description = (
+        "Estimates relative skill for each player type and strategy combination "
+        "from the full within-game ranking of model-adjusted strength "
+        "(Plackett-Luce ratings)."
+    )
     report_defaults = {"tables": [], "figures": ["ratings"]}
 
     def _calculate(self, strength_df: pd.DataFrame, reference: str) -> pd.DataFrame:

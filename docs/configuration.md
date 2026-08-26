@@ -226,7 +226,7 @@ The modules, grouped into five families:
 - **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`.
 - **exploratory**: `model_token_costs` (uses the token table and pricing from `models.json`).
 
-Each module ships a coded friendly name and one-line description; `name` and `description` here override them for this one section on the report. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
+Each module instance resolves a coded friendly name and one-line description from its parameters; `name` and `description` here override them for this one section on the report. The fitted rating modules use a distinct strategy identity when `group_by` includes `strategy`, so no config name override is needed for that variant. The resolved identity is persisted in the analysis manifest. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
 
 Optional modules are listed in `benchmark.full.template.json` with `"enabled": false`. Some are registry-reserved placeholders until their implementation lands; if you enable one too early, the run fails with a clear "reserved but not implemented" error. The full per-module parameter catalog is in [configs/benchmark.md](../configs/benchmark.md) section 6.2.
 
@@ -263,7 +263,7 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 
 The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above.
 
-Each section is headed by the module's friendly name (the per-stage `name` override wins when present) with the module description underneath; the raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
+Each section is headed by the module instance's resolved friendly name (the per-stage `name` override wins when present) with its resolved description underneath. For fitted ratings, `group_by: ["player_type", "strategy"]` selects the strategy-specific name and description in the code. The raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
 
 `section_overrides` narrows an analysis's inline artifacts. For each stage id, `tables` and `figures` are optional lists of manifest names. A supplied list replaces that dimension's normal inline list. An omitted dimension keeps the default list, and hidden artifacts remain downloadable. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped.
 

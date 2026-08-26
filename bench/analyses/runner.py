@@ -81,6 +81,7 @@ def run_analysis(
 
     analysis = cls(stage_id, stage_raw.get("params"))
     result: AnalysisResult = analysis.run(ctx)
+    module_name, module_description = analysis.report_identity()
 
     table_paths: dict[str, str] = {}
     figure_paths: dict[str, str] = {}
@@ -114,8 +115,8 @@ def run_analysis(
         table_paths,
         figure_paths,
         artifact_paths,
-        module_name=getattr(cls, "friendly_name", ""),
-        module_description=getattr(cls, "description", ""),
+        module_name=module_name,
+        module_description=module_description,
     )
 
     return AnalysisRunResult(
@@ -149,7 +150,7 @@ def _write_manifest(
     the report renders them as the author intended. ``artifacts`` entries keep
     their relative path (subdirs included) as the ``file`` so the report can
     mirror the on-disk tree under ``assets/``. ``module_name`` /
-    ``module_description`` carry the module's coded friendly name and description:
+    ``module_description`` carry the module's resolved name and description:
     the report combines them with any per-stage ``name``/``description`` override
     from the run-spec without importing the analysis registry (invariant 3).
     """
