@@ -1,12 +1,12 @@
 # Getting Started with civ-bench
 
-This guide takes you from a fresh checkout to a finished report, then into a hands-on tutorial covering the edits you will actually make. For the big picture of what `civ-bench` is and why, see the [README](../README.md). For a deeper tour of the run-spec, see the [Configuration guide](configuration.md), and for the authoritative schema see [configs/benchmark.md](../configs/benchmark.md).
+This guide takes you from a fresh checkout to a finished report and covers common config edits. See the [README](../README.md) for an overview, the [Configuration guide](configuration.md) for a run-spec tour, and [configs/benchmark.md](../configs/benchmark.md) for the complete schema.
 
 ---
 
 ## 1. Install
 
-Everything is required and installed up front. There are no optional extras. Run the install script for your platform; it installs the package plus every dependency, then verifies each import (and the R rating packages), failing loudly if anything is missing:
+Run the install script for your platform. It installs and verifies every required dependency, including the R rating packages:
 
 ```powershell
 scripts\install.ps1     # Windows (PowerShell), the primary host
@@ -181,7 +181,7 @@ civ-bench run --config configs/benchmark.dev.json --only bt_main      # one rati
 civ-bench run --config configs/benchmark.dev.json --skip extract       # reuse existing CSVs
 ```
 
-**Train fresh models instead of loading pre-trained ones.** Switch from the pretrained template to [configs/benchmark.template.json](../configs/benchmark.template.json), where each estimator has `fit: "train"` (and the attention model adds a `tune` block for Optuna hyperparameter search). Same pipeline, same report; it just fits the predictors on your data instead of loading snapshots. Expect it to take much longer.
+**Train models locally.** Use [configs/benchmark.template.json](../configs/benchmark.template.json), where each estimator has `fit: "train"`. The attention model also has a `tune` block for Optuna hyperparameter search. Local training takes much longer than loading snapshots.
 
 **Turn on an optional analysis.** The full template lists optional modules with `"enabled": false`. When an implementation exists, flip the flag to `true` (or copy the entry into your config) and it joins the run. Registry-reserved placeholders fail loudly if enabled before their implementation lands, which is intentional.
 
@@ -189,7 +189,7 @@ civ-bench run --config configs/benchmark.dev.json --skip extract       # reuse e
 
 ## Troubleshooting
 
-- **A dependency is missing.** `civ-bench` has no graceful degradation by design. Re-run `scripts/install.ps1` or `scripts/install.sh`; it verifies every Python import and both R packages and tells you exactly what is absent.
+- **A dependency is missing.** Re-run `scripts/install.ps1` or `scripts/install.sh`. Required packages stop the run when absent.
 - **`Rscript not found`.** Install R from [CRAN](https://cran.r-project.org/) and make sure `Rscript` is on your `PATH`, or set `CIV_BENCH_RSCRIPT` to its full path. The `ratings.*` analyses need it.
 - **A config error on load.** The loader fails loud on unknown keys and missing required fields. Read the message; it names the offending key. Cross-check against [configs/benchmark.md](../configs/benchmark.md).
 - **Extraction seems to do nothing.** It is skipped automatically when every output CSV already exists and is newer than the game DBs. Pass `--force-rebuild` to rebuild anyway.

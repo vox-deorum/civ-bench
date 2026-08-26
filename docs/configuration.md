@@ -1,8 +1,8 @@
 # Configuration guide
 
-Everything `civ-bench` does is driven by one JSON file, the **benchmark run-spec**. This guide is a readable tour of that file: what each block is for, how the blocks fit together, and the edits you make most often. It is the companion to [configs/benchmark.md](../configs/benchmark.md), which is the **authoritative, field-by-field schema** (when the two disagree, the schema wins). For a first run, start with the [Getting Started guide](getting-started.md) instead.
+One JSON file, the **benchmark run-spec**, controls a `civ-bench` run. This guide covers each block and the most common edits. [configs/benchmark.md](../configs/benchmark.md) is the authoritative field-by-field schema. For a first run, start with the [Getting Started guide](getting-started.md).
 
-A guiding principle: **config over code.** Anything that changes between datasets, experiments, model line-ups, or report selections lives here, never in Python. The run-spec is validated on load, so unknown keys and missing required fields are hard errors. Typos fail loud rather than silently doing nothing.
+**Config over code:** dataset, experiment, model, and report choices belong in the run-spec. Validation rejects unknown keys and missing required fields.
 
 > The repo tracks example run-specs as `configs/*.template.json`. Copy one to a local, gitignored `configs/benchmark*.json` and edit that. Never edit a template in place.
 
@@ -194,7 +194,7 @@ The available models, increasing in complexity, are `naive`, `score`, `baseline`
 
 The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the Vanilla baseline of the same `(seed, seat)` cell, removing the start-position confound. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
 
-Why a separate stage rather than logic inside each rating: every rating consumes the same strength estimate, so the derivation lives in one place instead of being copy-pasted.
+Every rating uses the same strength estimate. Its derivation belongs in the `strength` adjust stage.
 
 ---
 

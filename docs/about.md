@@ -30,10 +30,10 @@ In the study that introduced it, CivBench was run over **307 games with 7 LLMs**
 
 ## The three ideas that shape everything
 
-`civ-bench` is a deliberate rewrite of the CivBench paper repo, which mixed one-off notebooks and scripts tightly with a single dataset. Three rules drove the redesign, and they are worth knowing because they explain why the code is shaped the way it is (the full rulebook lives in [AGENTS.md](../AGENTS.md)):
+Three rules shape the project. The full repository conventions are in [AGENTS.md](../AGENTS.md).
 
 1. **Config over code.** Anything that changes between datasets, experiments, or strategist line-ups lives in a JSON file under [configs/](../configs/), never hardcoded. Adding a new player type or experiment requires *zero* Python edits.
 2. **Modular and pluggable.** Every analysis (ratings, prediction, calibration, performance, exploratory) is a self-contained unit behind a common interface and a registry. Adding one means writing a module, registering it, and referencing it from config, touching nothing else.
 3. **Reports are generated, never authored.** No notebook is the source of truth for a result. If a number cannot be reproduced by running `civ-bench`, it does not belong in the repo.
 
-These principles are enforced in practice; the [developer guide](development.md) shows how they translate into the plugin contract and the validation rules.
+The [developer guide](development.md) explains how these rules apply to modules and config validation.

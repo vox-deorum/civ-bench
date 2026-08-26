@@ -8,7 +8,7 @@ The whole thing is driven by JSON. Adding a new strategist to the line-up, swapp
 
 > **New here? Read the [Getting Started guide](docs/getting-started.md).** It walks you through installation, making your first config, running the pipeline, and reading the report, with a hands-on tutorial.
 
-This repository is the reusable, config-driven reimplementation of the analysis in the CivBench paper (Chen, Cheng, Gurkan, and Lin, [arXiv:2604.07733](https://arxiv.org/abs/2604.07733)). For *why* it exists, the progress-based evaluation idea it implements, and the design principles behind it, see **[docs/about.md](docs/about.md)**.
+This repository implements the analysis from the CivBench paper (Chen, Cheng, Gurkan, and Lin, [arXiv:2604.07733](https://arxiv.org/abs/2604.07733)). [About CivBench](docs/about.md) explains the research problem and the project's design principles.
 
 ---
 
@@ -27,7 +27,7 @@ raw game DBs ──> extract ──> estimators ──> adjust ──> analyses 
 
 - **extract** walks your game SQLite databases and writes four canonical CSVs: per-turn data, per-player-game panel data, per-game metadata (timestamps, controlled seeds, seating), and model token usage. It figures out each player's *identity* (the `player_type`, for example `Sonnet-4.5-Briefed`) from the game metadata, so the identity follows a model even when controlled games rotate it through different seats.
 - **estimators** are the victory-probability predictors. Each one is either **trained** on the current data (optionally tuned first with Optuna) or **loaded pre-trained** from a saved model directory. Either way it emits the same artifact: a `predictions.csv` with a `predicted_win_probability` column.
-- **adjust** is the bridge between raw predictions and ratings. Following the paper's recipe, it takes each player's progress-weighted average win probability, normalizes it to relative standing against the strongest player in that game, applies a winner-preserving correction, and removes civilization effects with an OLS fit on the logit scale. The paper calls the result the *revised standing*; in the code it is the `adjusted_strength` panel. In controlled games with fixed seeds and seating, it subtracts a matched Vanilla baseline instead, removing the start-position confound. This is shared work, so it lives in one place rather than being copy-pasted into every rating.
+- **adjust** turns raw predictions into the `adjusted_strength` panel used by ratings. It averages progress-weighted win probabilities, measures each player against the game leader, preserves the winner's position, and corrects for civilization effects. Controlled games use a matched Vanilla baseline to remove the start-position confound. The shared calculation lives in `bench/adjust/strength.py`.
 - **analyses** are the pluggable modules, grouped into five families: **ratings** (who is stronger), **prediction** (how good is the predictor), **calibration** (are its probabilities honest), **performance** (strength panels, score regressions, trajectories), and **exploratory** (descriptives like token cost). They consume data and return structured results; they do not write files or hardcode where they appear in the report.
 - **report** walks the analysis results and renders one section per analysis into deterministic Markdown and HTML.
 
@@ -83,7 +83,7 @@ Modules are selected by registry name from your config. The implemented **core**
 
 ```text
 civ-bench/
-├── AGENTS.md            # the conventions / rulebook for changing this repo
+├── AGENTS.md            # agent and repository conventions
 ├── README.md            # you are here (overview)
 ├── LICENSE              # MIT
 ├── docs/                # the human documentation
@@ -140,9 +140,9 @@ When you add a module or a validation rule, add or extend its test in the same c
 - **[docs/getting-started.md](docs/getting-started.md)** is the hands-on guide: install, make a config, run the pipeline, read the report, and a tutorial with common recipes.
 - **[docs/configuration.md](docs/configuration.md)** is the readable run-spec guide: every block, how filters and groupings compose, and the common edits.
 - **[docs/development.md](docs/development.md)** is the developer guide: the plugin contract and how to add an analysis, an estimator, or an adjust module.
-- **[AGENTS.md](AGENTS.md)** is the conventions every change must follow (the three invariants, the plugin contract, the tool-calling rules). Read this before modifying the repo.
+- **[AGENTS.md](AGENTS.md)** defines the conventions that apply to every change.
 - **[configs/benchmark.md](configs/benchmark.md)** is the complete run-spec schema, field by field, with examples for every module.
-- **[plans/plan.md](plans/plan.md)** is the roadmap and the migration map from the old `vox-deorum-analysis` repo. The staged build plan lives alongside it in [plans/stages.md](plans/stages.md) and `stage0.md` through `stage6.md`.
+- **[plans/](plans/)** contains the roadmap and implementation notes.
 - **The CivBench paper** ([arXiv:2604.07733](https://arxiv.org/abs/2604.07733)) is the research this harness implements, including the validity framework, the estimator design, and the full results.
 
 ---
