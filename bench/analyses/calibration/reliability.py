@@ -80,8 +80,8 @@ class CalibrationReliability(Analysis):
 
         best = ece.sort_values("ece").iloc[0]
         summary = (
-            f"Reliability over {len(estimators)} estimator(s), {n_bins} bins; "
-            f"lowest ECE = {best['ece']:.4f} ({best['model']})."
+            f"{best['model']} has the lowest expected calibration error (ECE) at "
+            f"{best['ece']:.4f} across {len(estimators)} estimator(s) and {n_bins} bins."
         )
         return AnalysisResult(
             tables={"reliability": reliability, "ece": ece},

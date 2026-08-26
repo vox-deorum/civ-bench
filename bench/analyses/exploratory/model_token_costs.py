@@ -140,11 +140,11 @@ class ExploratoryModelTokenCosts(Analysis):
         total = model_tbl["total_cost"].sum(skipna=True)
         breakdown = " across player types" if by_player_type else ""
         summary = (
-            f"Token costs for {len(model_tbl)} model(s){breakdown}; total = "
-            f"{total:.2f} {currency.upper()} over {int(model_tbl['games'].sum())} games."
+            f"The {len(model_tbl)} model(s){breakdown} cost {total:.2f} "
+            f"{currency.upper()} across {int(model_tbl['games'].sum())} games."
         )
         if warning:
-            summary += " " + warning
+            summary = summary[:-1] + "; " + warning.rstrip(".") + "."
         return AnalysisResult(
             tables=tables,
             figures={"token_costs": fig} if fig is not None else {},
@@ -191,7 +191,7 @@ class ExploratoryModelTokenCosts(Analysis):
             row_order = cost_order
             warning = (
                 "No uses.analyses rating stage was declared; paired costs are "
-                "ordered by cost instead of Elo."
+                "ordered by cost instead of Elo"
             )
 
         plot_tbl = tbl.copy()

@@ -171,10 +171,19 @@ class RatingsAnalysis(Analysis):
         general = self._attach_appearances(general, panel, "player_type")
         ratings = self._strategy_ratings(ctx, panel, extra_dims, reference)
         fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference, metadata)
-        summary = (
-            f"Per-{'/'.join(group_by)} ratings: {len(ratings)} composite identities "
-            f"across {ratings['strategy'].nunique() if 'strategy' in ratings else len(extra_dims)} group(s)."
-        )
+        if ratings.empty:
+            summary = (
+                f"No {'/'.join(group_by)} combination met the configured minimum "
+                f"number of games."
+            )
+        else:
+            top = ratings.sort_values("elo", ascending=False).iloc[0]
+            groups = ratings["strategy"].nunique() if "strategy" in ratings else len(extra_dims)
+            summary = (
+                f"{top['composite_type']} ranks first among {len(ratings)} "
+                f"{'/'.join(group_by)} combinations at {top['elo']:.0f} Elo across "
+                f"{groups} groups."
+            )
         return AnalysisResult(tables={"ratings": ratings},
                               figures={"ratings": fig} if fig is not None else {},
                               summary=summary, metadata=metadata)
@@ -443,8 +452,8 @@ class RatingsAnalysis(Analysis):
         top = ratings.sort_values("elo", ascending=False).iloc[0]
         rng = ratings["elo"].max() - ratings["elo"].min()
         return (
-            f"{len(ratings)} identities rated; top = {top[identity_col]} "
-            f"(Elo {top['elo']:.0f}); spread {rng:.0f} pts."
+            f"{top[identity_col]} ranks first among {len(ratings)} identities at "
+            f"{top['elo']:.0f} Elo, with a {rng:.0f}-point spread from highest to lowest."
         )
 
     def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, identity_col: str, metadata: dict):

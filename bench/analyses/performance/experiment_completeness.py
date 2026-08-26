@@ -34,7 +34,7 @@ class PerformanceExperimentCompleteness(Analysis):
         tables = build_experiment_completeness(panel, games, baseline_experiment)
         if not tables:
             return AnalysisResult(
-                summary="No controlled experiment rows available for completeness reporting.",
+                summary="Experiment coverage is unavailable because the run has no controlled experiment rows.",
             )
 
         out = {}
@@ -49,9 +49,9 @@ class PerformanceExperimentCompleteness(Analysis):
         repeated_slots = int(comp["repeated_slots"].sum())
         warning_experiments = int((comp["warning"].fillna("ok").astype(str) != "ok").sum())
         summary = (
-            f"Experiment completeness: {present_games}/{required_games} games present, "
-            f"{missing_games} missing slots, {repeated_slots} repeated slots, "
-            f"{warning_experiments} experiment(s) with warnings."
+            f"The run contains {present_games} of {required_games} planned games, "
+            f"with {missing_games} missing slot(s), {repeated_slots} repeated slot(s), "
+            f"and {warning_experiments} experiment(s) with warnings"
         )
 
         artifacts: dict[str, str] = {}
@@ -63,11 +63,16 @@ class PerformanceExperimentCompleteness(Analysis):
                 out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)
                 open_total = int(sum(r["open_cells"] for r in index_rows))
                 summary += (
-                    f" Generated {len(index_rows)} seating.json file(s) with "
-                    f"{open_total} open cell(s)."
+                    f"; generated {len(index_rows)} seating.json file(s) with "
+                    f"{open_total} open cell(s)"
                 )
             if warnings:
-                summary += " Seating notes: " + "; ".join(warnings) + "."
+                notes = "; ".join(
+                    note.rstrip(".").replace(f" {chr(8212)} ", ", ").replace(". ", ", ")
+                    for note in warnings
+                )
+                summary += "; seating notes: " + notes
+        summary += "."
 
         return AnalysisResult(
             tables=out,

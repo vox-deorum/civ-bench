@@ -30,7 +30,7 @@ def analyses_out_dir(config: RunConfig, stage_id: str) -> Path:
 
 @dataclass
 class AnalysisResult:
-    """What an analysis returns: named tables, named figures, a text summary.
+    """What an analysis returns: named tables, named figures, and one result sentence.
 
     ``tables`` and ``figures`` are keyed by a short slug (used for the persisted
     filename); ``figures`` values are matplotlib ``Figure`` objects. An analysis

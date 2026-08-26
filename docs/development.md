@@ -73,7 +73,7 @@ The `AnalysisContext` hands you everything resolved (config, catalog, output-roo
 - `ctx.apply_filter(df)` applies the global `data.filter` narrowed by this stage's `filter`, using the same semantics the config validated.
 - `ctx.params` is this stage's `params` block; `ctx.uses_estimators()` / `ctx.uses_tables()` resolve the `uses` references.
 
-You return an `AnalysisResult`: `tables` (a dict of named DataFrames), `figures` (a dict of named matplotlib figures), a `summary` string, and optional `metadata`. A module that legitimately produces nothing (for example `calibration.cell_baseline` on a fully uncontrolled run) returns an empty result, and `is_empty()` lets the runner record it without error.
+You return an `AnalysisResult`: `tables` (a dict of named DataFrames), `figures` (a dict of named matplotlib figures), a one-sentence `summary` of the result, and optional `metadata`. Lead with the finding or coverage outcome, use plain language, and explain a specialized abbreviation in place. A module that legitimately produces nothing (for example `calibration.cell_baseline` on a fully uncontrolled run) still returns one sentence explaining why, and `is_empty()` lets the runner record it without error.
 
 A minimal real module, [exploratory/model_token_costs.py](../bench/analyses/exploratory/model_token_costs.py):
 

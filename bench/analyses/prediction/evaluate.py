@@ -57,8 +57,8 @@ class PredictionEvaluate(Analysis):
         ranked = table.sort_values(first, ascending=ascending)
         best = ranked.iloc[0]
         summary = (
-            f"Evaluated {len(estimators)} estimator(s) on {len(metrics)} metric(s); "
-            f"best {first} = {best[first]:.4f} ({best['model']})."
+            f"{best['model']} performs best on {first} at {best[first]:.4f} across "
+            f"{len(estimators)} estimator(s) and {len(metrics)} quality metric(s)."
         )
         return AnalysisResult(
             tables={"metrics": table},

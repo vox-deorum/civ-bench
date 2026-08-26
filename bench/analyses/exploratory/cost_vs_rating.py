@@ -80,8 +80,8 @@ class ExploratoryCostVsRating(Analysis):
         annotate = bool(self.params.get("annotate", True))
         fig = self._plot(table, ctx, plot_spec, currency, log_x, annotate)
         summary = (
-            f"Average cost versus Elo for {len(table)} identities from rating stage "
-            f"'{rating_stage}'; excluded {dropped_baselines} baseline, "
+            f"The cost-versus-skill comparison includes {len(table)} identities from "
+            f"rating stage '{rating_stage}' and excludes {dropped_baselines} baseline, "
             f"{dropped_unpriced} unpriced, and {dropped_unrated} unrated identities."
         )
         metadata = {

@@ -32,18 +32,21 @@ class CalibrationCivEffects(Analysis):
         adjust_dir = ctx.adjust_dir(ctx.strength_table_id())
         path = Path(adjust_dir) / "civ_effects.csv"
         if not path.exists():
-            return AnalysisResult(summary="No civ_effects.csv (adjust stage not run).")
+            return AnalysisResult(
+                summary="Civilization strength effects are unavailable because the adjustment stage did not produce them."
+            )
         df = pd.read_csv(path)
         if df.empty:
             return AnalysisResult(
-                summary="civ_effects.csv is empty (civ_adjust:'none'); nothing to render."
+                summary="Civilization strength effects are unavailable because civilization adjustment was disabled."
             )
 
         df = df.sort_values("civ_effect").reset_index(drop=True)
         fig = self._plot(df)
         summary = (
-            f"Civilization adjustment effects (logit scale) for {len(df)} civs; "
-            f"range [{df['civ_effect'].min():+.3f}, {df['civ_effect'].max():+.3f}]."
+            f"Civilization strength effects range from {df['civ_effect'].min():+.3f} "
+            f"to {df['civ_effect'].max():+.3f} across {len(df)} civilizations "
+            f"(log-odds scale)."
         )
         return AnalysisResult(
             tables={"civ_effects": df},

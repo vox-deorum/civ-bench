@@ -79,6 +79,7 @@ class FamilyGroup:
     key: str  # e.g. "ratings"
     title: str  # e.g. "Ratings"
     sections: list[Section] = field(default_factory=list)
+    summary: str = ""
 
 
 @dataclass

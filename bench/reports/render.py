@@ -72,6 +72,11 @@ def _metadata_line(metadata: dict) -> str:
     return "; ".join(parts)
 
 
+def _section_summary(section: Section) -> str:
+    """Return the result sentence shown in overview and detailed views."""
+    return section.summary.strip() or "No result summary was produced for this analysis."
+
+
 # ── markdown ──────────────────────────────────────────────────────────────────
 def render_markdown(doc: ReportDocument) -> str:
     anchors = _build_anchors(doc)
@@ -94,9 +99,8 @@ def render_markdown(doc: ReportDocument) -> str:
         lines.append("")
         for section in doc.overview_sections:
             group = family_for[id(section)]
-            summary = section.summary or "No summary was produced."
             lines.append(
-                f"- **{section.title}** ({group.title}): {summary} "
+                f"- **{section.title}** ({group.title}): {_section_summary(section)} "
                 f"[Details](#{anchors[id(section)]})"
             )
         lines.append("")
@@ -114,6 +118,9 @@ def render_markdown(doc: ReportDocument) -> str:
         lines.append(f'<a id="{anchors[id(group)]}"></a>')
         lines.append(f"## {group.title}")
         lines.append("")
+        if group.summary:
+            lines.append(group.summary)
+            lines.append("")
         for section in group.sections:
             lines.append(f'<a id="{anchors[id(section)]}"></a>')
             _render_section_md(section, lines)
@@ -132,9 +139,8 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         lines.append("")
         lines.append(f"*{meta}*")
     lines.append("")
-    if section.summary:
-        lines.append(section.summary)
-        lines.append("")
+    lines.append(_section_summary(section))
+    lines.append("")
     if section.empty:
         lines.append(
             "_This analysis produced no artifacts for the given inputs "
@@ -347,11 +353,10 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     for section in doc.overview_sections:
         group = family_for[id(section)]
         target = f"{filenames[id(group)]}#{anchors[id(section)]}"
-        summary = section.summary or "No summary was produced."
         parts.append('<article class="overview-card">')
         parts.append(f'<p class="eyebrow">{_html.escape(group.title)}</p>')
         parts.append(f"<h2>{_html.escape(section.title)}</h2>")
-        parts.append(f"<p>{_md_inline_to_html(summary)}</p>")
+        parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
         parts.append(f'<p><a href="{target}">View details</a></p>')
         parts.append("</article>")
     parts.append("</div></section></main></body></html>")
@@ -364,6 +369,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append('<main class="content" id="main-content">')
         parts.append(f'<p class="eyebrow">{_html.escape(doc.title)}</p>')
         parts.append(f'<h1 id="{anchors[id(group)]}">{_html.escape(group.title)}</h1>')
+        if group.summary:
+            parts.append(f"<p>{_md_inline_to_html(group.summary)}</p>")
         for section in group.sections:
             _render_section_html(section, parts, anchors[id(section)])
         parts.append("</main></body></html>")
@@ -385,8 +392,7 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
     meta = _metadata_line(section.metadata)
     if meta:
         parts.append(f'<p class="meta">{_html.escape(meta)}</p>')
-    if section.summary:
-        parts.append(f"<p>{_md_inline_to_html(section.summary)}</p>")
+    parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
     if section.empty:
         parts.append(
             '<p class="empty">This analysis produced no artifacts for the given '

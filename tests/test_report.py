@@ -124,8 +124,16 @@ def test_run_report_writes_md_and_html(report_env):
 
     md = (out / "report.md").read_text(encoding="utf-8")
     assert md.startswith("# civbench-dev")
+    assert (
+        "Run **civbench-dev** (seed 42) produced 4 analysis sections across 3 "
+        "families" in md
+    )
     # Family chapters, canonical order: prediction → calibration → exploratory.
     assert md.index("## Prediction") < md.index("## Calibration") < md.index("## Exploratory")
+    assert (
+        "This page brings together the results for pred_metrics and pred_compare."
+        in md
+    )
     # Section content surfaced from the manifest.
     assert "### pred_metrics" in md and "best **roc_auc**" in md
     assert "metrics" in md and "0.87" in md  # inline table value
@@ -139,6 +147,7 @@ def test_run_report_writes_md_and_html(report_env):
 
     prediction = (out / "prediction.html").read_text(encoding="utf-8")
     assert "pred_metrics" in prediction and "pred_compare" in prediction
+    assert "This page brings together the results for pred_metrics and pred_compare." in prediction
     assert '<h2 id="section-cal-reliability">' not in prediction
     assert 'href="assets/report.css"' in prediction
     assert 'aria-current="page">Prediction</a>' in prediction
@@ -350,7 +359,11 @@ def test_render_markdown_and_html_from_document(report_env):
     doc = ReportDocument(
         title="T", run_name="r", seed=1, config_path="c.json", output_root="reports",
         intro="hi **there**",
-        groups=[FamilyGroup(key="prediction", title="Prediction", sections=[
+        groups=[FamilyGroup(
+            key="prediction",
+            title="Prediction",
+            summary="This page summarizes the prediction result.",
+            sections=[
             Section(id="s", module="prediction.evaluate", summary="ok",
                     tables=[Table(name="t", frame=pd.DataFrame({"a": [1]}),
                                   n_total_rows=1, n_shown_rows=1)]),
@@ -363,7 +376,31 @@ def test_render_markdown_and_html_from_document(report_env):
     assert "<h1>T</h1>" in html and "<strong>there</strong>" in html
     assert "prediction.html" in pages
     assert "<table" in pages["prediction.html"]
+    assert "This page summarizes the prediction result." in md
+    assert "This page summarizes the prediction result." in pages["prediction.html"]
     assert render_html(doc) == html
+
+
+def test_section_without_summary_gets_one_sentence_in_every_view(report_env):
+    from bench.reports.model import FamilyGroup, ReportDocument, Section
+
+    section = Section(id="s", module="prediction.evaluate")
+    doc = ReportDocument(
+        title="T",
+        run_name="r",
+        seed=1,
+        config_path="c.json",
+        output_root="reports",
+        groups=[FamilyGroup(key="prediction", title="Prediction", sections=[section])],
+        overview_sections=[section],
+    )
+
+    sentence = "No result summary was produced for this analysis."
+    md = render_markdown(doc)
+    pages = render_html_site(doc)
+    assert md.count(sentence) == 2
+    assert sentence in pages["report.html"]
+    assert sentence in pages["prediction.html"]
 
 
 def test_report_renders_rating_provenance_metadata(report_env):

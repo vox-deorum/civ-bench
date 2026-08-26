@@ -155,14 +155,15 @@ class RatingsOutcomeMatchups(Analysis):
                 )
 
         summary = (
-            f"Observed matchup {'vs-reference display' if use_vs_reference else 'matrix'} "
-            f"win rates over {len(win_rate)} player types, "
-            f"{panel['game_id'].nunique()} games."
+            f"Observed wins compare {len(win_rate)} player types across "
+            f"{panel['game_id'].nunique()} games in a "
+            f"{'reference view' if use_vs_reference else 'pairwise matrix'}"
         )
         if include_score_ratio:
-            summary += " Score-ratio margins are row minus column."
+            summary += "; score-ratio margins are row minus column"
         if display == "vs_reference" and not reference_available:
-            summary += f" Reference '{reference}' is absent; rendered matrix figures instead."
+            summary += f"; reference '{reference}' is absent, so the report rendered matrix figures instead"
+        summary += "."
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
     @staticmethod

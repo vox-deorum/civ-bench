@@ -366,8 +366,9 @@ class PerformanceStrengthPanel(Analysis):
                 f"{missing} missing, {no_baseline} without Vanilla baseline"
             )
         summary = (
-            f"{len(summary_tbl)} identities by {metric}; {n_prelim} preliminary "
-            f"(< {min_games_prelim} games)"
+            f"The strength panel covers {len(summary_tbl)} identities by {metric}, "
+            f"including {n_prelim} preliminary result(s) with fewer than "
+            f"{min_games_prelim} games"
         )
         if report_notes:
             summary += "; " + "; ".join(report_notes)

@@ -223,12 +223,13 @@ class RatingsMatchups(Analysis):
                 )
 
         summary = (
-            f"Strength matchup {'vs-reference display' if use_vs_reference else 'matrix'} "
-            f"({mode}) over {panel['player_type'].nunique()} player types, "
-            f"{panel['game_id'].nunique()} games."
+            f"Model-adjusted strength compares {panel['player_type'].nunique()} player "
+            f"types across {panel['game_id'].nunique()} games in a "
+            f"{'reference view' if use_vs_reference else 'pairwise matrix'} ({mode})"
         )
         if display == "vs_reference" and not reference_available:
-            summary += f" Reference '{reference}' is absent; rendered matrix figures instead."
+            summary += f"; reference '{reference}' is absent, so the report rendered matrix figures instead"
+        summary += "."
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
     @staticmethod
