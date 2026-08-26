@@ -15,6 +15,7 @@ from .r_interop import calculate_ratings_pl
 
 class RatingsPlackettLuce(RatingsAnalysis):
     module = "ratings.plackett_luce"
+    report_defaults = {"tables": [], "figures": ["ratings"]}
 
     def _calculate(self, strength_df: pd.DataFrame, reference: str) -> pd.DataFrame:
         return calculate_ratings_pl(strength_df, reference=reference)

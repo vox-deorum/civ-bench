@@ -19,6 +19,7 @@ _FLAT_MARGIN = 1e9  # weights = 1 + log1p(diff/margin) ≈ 1 → ~unweighted BT
 
 class RatingsBradleyTerry(RatingsAnalysis):
     module = "ratings.bradley_terry"
+    report_defaults = {"tables": [], "figures": ["ratings"]}
 
     def _margin_for(self, strength_df: pd.DataFrame):
         if not bool(self.params.get("weighted", True)):

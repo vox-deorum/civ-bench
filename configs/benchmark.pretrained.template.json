@@ -227,6 +227,8 @@
     "out_dir": "reports/",
     "formats": ["md", "html"],
     "sections": null,
+    "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+    "section_overrides": {},
     "title": null,
     "include_disabled": false
   }

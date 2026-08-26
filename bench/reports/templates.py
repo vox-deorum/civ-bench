@@ -83,6 +83,12 @@ def default_template(meta: dict, sections: list[Section]) -> ReportDocument:
         f"Every section is regenerated from the pipeline's analysis artifacts; "
         f"nothing in this document is hand-authored."
     )
+    section_by_id = {section.id: section for section in sections}
+    overview_sections = [
+        section_by_id[section_id]
+        for section_id in meta.get("overview_section_ids", [])
+        if section_id in section_by_id
+    ]
     return ReportDocument(
         title=meta["title"],
         run_name=meta["run_name"],
@@ -90,6 +96,7 @@ def default_template(meta: dict, sections: list[Section]) -> ReportDocument:
         config_path=meta["config_path"],
         output_root=meta["output_root"],
         groups=groups,
+        overview_sections=overview_sections,
         intro=intro,
     )
 

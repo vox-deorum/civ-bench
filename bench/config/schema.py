@@ -213,7 +213,10 @@ REPORT_KEYS = {
     "out_dir",
     "formats",
     "sections",
+    "overview_sections",
+    "section_overrides",
     "title",
     "include_disabled",
 }
+REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}

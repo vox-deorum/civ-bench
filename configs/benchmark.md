@@ -635,14 +635,21 @@ configs should use `by_player_type`.
   "formats": ["md", "html"],             // md + html implemented; pdf is schema-reserved (errors at render time)
   "sections": null,                      // null = every enabled analysis (canonical family order, members in dep order);
                                          //   or an explicit ordered list of stage ids to include (authored order kept)
+  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+                                         // null = a summary card for every resolved section; a list selects compact overview cards
+  "section_overrides": {                 // optional inline-artifact selection by analysis stage id
+    "bt_main": {"tables": ["ratings"], "figures": ["ratings"]}
+  },
   "title": null,                         // null = derive from `name`
   "include_disabled": false              // never render skipped/disabled stages
 }
 ```
 
-The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null`, every enabled analysis appears — bucketed into the five module families (ratings / prediction / calibration / performance / exploratory) in that canonical order, with members in dependency order; pass an ordered `id` list to curate and reorder (the authored order is preserved, including across families). No analysis hardcodes its place in the document (invariant 3).
+The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five module families (ratings / prediction / calibration / performance / exploratory) in that canonical order, with members in dependency order. Pass an ordered `id` list to curate and reorder. The authored order is preserved, including across families. No analysis hardcodes its place in the document (invariant 3).
 
-**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, `report.html`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic** — no timestamps — so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+`overview_sections` controls the compact cards in `report.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact eight-section list shown above. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
+
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `report.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: no timestamps, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
 **The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, summary, metadata, ordered table/figure filenames, `empty` flag). This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis. An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
@@ -651,7 +658,7 @@ The report walks each produced `AnalysisResult` (tables + figures + summary) and
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
-2. **No unknown keys** at any level — typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, etc.) must be JSON arrays of strings; a bare string is an error.
+2. **No unknown keys** at any level: typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, report `overview_sections`, and report override artifact lists) must be JSON arrays of strings; a bare string is an error. `report.section_overrides` is a mapping of stage ids to objects whose only optional keys are `tables` and `figures`.
 3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. `uses.analyses` additionally rejects self references. These checks apply to disabled stages too, so optional template stages cannot contain stale references. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.

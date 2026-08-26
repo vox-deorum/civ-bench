@@ -44,6 +44,7 @@ _EXPLICIT_ROW = "(explicit baseline)"
 
 class CalibrationCellBaseline(Analysis):
     module = "calibration.cell_baseline"
+    report_defaults = {"tables": [], "figures": []}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         adjust_dir = Path(ctx.adjust_dir(ctx.strength_table_id()))

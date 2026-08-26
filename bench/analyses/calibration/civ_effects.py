@@ -21,6 +21,7 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 
 class CalibrationCivEffects(Analysis):
     module = "calibration.civ_effects"
+    report_defaults = {"tables": [], "figures": ["civ_effects"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         adjust_dir = ctx.adjust_dir(ctx.strength_table_id())

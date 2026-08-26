@@ -48,6 +48,7 @@ def expected_calibration_error(table: pd.DataFrame) -> float:
 
 class CalibrationReliability(Analysis):
     module = "calibration.reliability"
+    report_defaults = {"tables": ["ece"], "figures": ["reliability"]}
     default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

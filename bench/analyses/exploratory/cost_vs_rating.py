@@ -12,6 +12,7 @@ from .model_token_costs import compute_game_costs, summarize_game_costs
 
 class ExploratoryCostVsRating(Analysis):
     module = "exploratory.cost_vs_rating"
+    report_defaults = {"tables": [], "figures": ["cost_vs_rating"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         upstream = ctx.uses_analyses()

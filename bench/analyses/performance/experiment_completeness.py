@@ -16,6 +16,7 @@ from .strength_panel import build_experiment_completeness
 
 class PerformanceExperimentCompleteness(Analysis):
     module = "performance.experiment_completeness"
+    report_defaults = {"tables": ["experiment_completeness"], "figures": []}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         table_id = ctx.strength_table_id()

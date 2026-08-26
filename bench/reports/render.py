@@ -81,6 +81,23 @@ def render_markdown(doc: ReportDocument) -> str:
     lines.append(doc.intro)
     lines.append("")
 
+    if doc.overview_sections:
+        family_for = {
+            id(section): group
+            for group in doc.groups
+            for section in group.sections
+        }
+        lines.append("## Overview")
+        lines.append("")
+        for section in doc.overview_sections:
+            group = family_for[id(section)]
+            summary = section.summary or "No summary was produced."
+            lines.append(
+                f"- **{section.id}** ({group.title}): {summary} "
+                f"[Details](#{anchors[id(section)]})"
+            )
+        lines.append("")
+
     # Table of contents.
     lines.append("## Contents")
     lines.append("")
@@ -130,7 +147,7 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
     for table in section.tables:
         _render_table_md(table, lines)
     if section.downloads:
-        lines.append("**Generated files**")
+        lines.append("**Downloads and supporting files**")
         lines.append("")
         for dl in section.downloads:
             lines.append(f"- [{dl.label}]({dl.rel_path})")
@@ -198,56 +215,162 @@ def _render_table_md(table: Table, lines: list[str]) -> None:
 
 # ── html ──────────────────────────────────────────────────────────────────────
 _HTML_STYLE = """
-body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-       max-width: 1000px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5;
-       color: #1a1a1a; }
-h1 { border-bottom: 2px solid #ddd; padding-bottom: .3rem; }
-h2 { border-bottom: 1px solid #eee; padding-bottom: .2rem; margin-top: 2.5rem; }
-h3 { margin-top: 2rem; }
-table { border-collapse: collapse; margin: 1rem 0; font-size: .9rem; }
-th, td { border: 1px solid #ccc; padding: .3rem .6rem; text-align: right; }
-th { background: #f5f5f5; }
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18202a; background: #f7f8fa; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.55; font-size: 14px; }
+a { color: #175ca8; }
+a:hover { color: #0b3d73; }
+.skip-link { position: fixed; top: .5rem; left: .5rem; z-index: 20; padding: .5rem .75rem; background: white; transform: translateY(-180%); }
+.skip-link:focus { transform: none; }
+.sidebar { position: fixed; inset: 0 auto 0 0; width: 19rem; overflow-y: auto; padding: 1.5rem 1rem; color: #e9eef5; background: #172536; }
+.site-title { display: block; margin: 0 0 1rem; color: white; font-size: 1.05rem; font-weight: 700; text-decoration: none; }
+.sidebar ul { margin: 0; padding: 0; list-style: none; }
+.sidebar ul ul { margin: .3rem 0 .8rem .75rem; border-left: 1px solid #4b5b6d; padding-left: .75rem; }
+.sidebar a { display: block; border-radius: .3rem; padding: .25rem .45rem; color: #cbd7e5; text-decoration: none; }
+.sidebar a:hover, .sidebar a[aria-current="page"] { color: white; background: #2b4159; }
+.content { max-width: 78rem; margin-left: 19rem; padding: 2.25rem 3rem 4rem; }
+h1 { margin-top: 0; border-bottom: 2px solid #cfd6df; padding-bottom: .45rem; }
+h2 { margin-top: 2.5rem; border-bottom: 1px solid #dfe4ea; padding-bottom: .25rem; }
+h3 { margin-top: 1.75rem; }
+.eyebrow { margin-bottom: .35rem; color: #637083; font-size: .85rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.overview-card { border: 1px solid #d9e0e8; border-radius: .55rem; padding: 1rem; background: white; box-shadow: 0 1px 2px rgb(0 0 0 / 6%); }
+.overview-card h2 { margin: 0 0 .25rem; border: 0; padding: 0; font-size: 1.1rem; }
+.overview-card p { margin: .45rem 0; }
+.module { color: #445164; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.meta, .caption { color: #687486; font-size: .88rem; }
+.caption { font-style: italic; }
+.empty { color: #778294; font-style: italic; }
+figure { margin: 1.25rem 0 2rem; }
+img { max-width: 100%; height: auto; border: 1px solid #e2e6eb; background: white; }
+.table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #d8dee6; border-radius: .35rem; background: white; }
+table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { border-bottom: 1px solid #e0e5eb; padding: .4rem .65rem; text-align: right; white-space: nowrap; }
+th { background: #f0f3f7; }
 td:first-child, th:first-child { text-align: left; }
-img { max-width: 100%; height: auto; border: 1px solid #eee; }
-.meta { color: #666; font-size: .9rem; }
-.module { color: #444; font-family: monospace; }
-.caption { color: #666; font-size: .85rem; font-style: italic; }
-.empty { color: #888; font-style: italic; }
-nav ul { list-style: none; padding-left: 1rem; }
-"""
+details.downloads { margin: 1.25rem 0 2rem; border: 1px solid #d8dee6; border-radius: .4rem; padding: .65rem .8rem; background: #fbfcfd; }
+details.downloads summary { cursor: pointer; font-weight: 650; }
+details.downloads ul { margin-bottom: .25rem; }
+@media (max-width: 820px) {
+  .sidebar { position: static; width: auto; max-height: none; }
+  .sidebar ul ul { display: none; }
+  .content { margin-left: 0; padding: 1.5rem 1rem 3rem; }
+}
+""".strip() + "\n"
+
+
+def render_stylesheet() -> str:
+    """Return the shared, deterministic stylesheet for the HTML report site."""
+    return _HTML_STYLE
+
+
+def _family_filenames(doc: ReportDocument) -> dict[int, str]:
+    used = {"report"}
+    filenames: dict[int, str] = {}
+    for group in doc.groups:
+        base = _slug(group.key) or "family"
+        candidate, index = base, 2
+        while candidate in used:
+            candidate = f"{base}-{index}"
+            index += 1
+        used.add(candidate)
+        filenames[id(group)] = f"{candidate}.html"
+    return filenames
+
+
+def _render_navigation(
+    doc: ReportDocument,
+    anchors: dict,
+    filenames: dict[int, str],
+    active: str,
+) -> list[str]:
+    parts = ['<aside class="sidebar">']
+    parts.append(f'<a class="site-title" href="report.html">{_html.escape(doc.title)}</a>')
+    parts.append('<nav aria-label="Report navigation"><ul>')
+    current = ' aria-current="page"' if active == "report" else ""
+    parts.append(f'<li><a href="report.html"{current}>Overview</a></li>')
+    for group in doc.groups:
+        filename = filenames[id(group)]
+        current = ' aria-current="page"' if active == group.key else ""
+        parts.append(
+            f'<li><a href="{filename}"{current}>{_html.escape(group.title)}</a><ul>'
+        )
+        for section in group.sections:
+            parts.append(
+                f'<li><a href="{filename}#{anchors[id(section)]}">'
+                f'{_html.escape(section.id)}</a></li>'
+            )
+        parts.append("</ul></li>")
+    parts.append("</ul></nav></aside>")
+    return parts
+
+
+def _page_start(doc: ReportDocument, page_title: str) -> list[str]:
+    return [
+        "<!DOCTYPE html>",
+        '<html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{_html.escape(page_title)}</title>",
+        '<link rel="stylesheet" href="assets/report.css">',
+        "</head><body>",
+        '<a class="skip-link" href="#main-content">Skip to content</a>',
+    ]
+
+
+def render_html_site(doc: ReportDocument) -> dict[str, str]:
+    """Render the overview and one HTML page per represented analysis family."""
+    anchors = _build_anchors(doc)
+    filenames = _family_filenames(doc)
+    family_for = {
+        id(section): group
+        for group in doc.groups
+        for section in group.sections
+    }
+    pages: dict[str, str] = {}
+
+    parts = _page_start(doc, doc.title)
+    parts.extend(_render_navigation(doc, anchors, filenames, "report"))
+    parts.append('<main class="content" id="main-content">')
+    parts.append(f"<h1>{_html.escape(doc.title)}</h1>")
+    parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
+    parts.append('<section aria-labelledby="overview-heading">')
+    parts.append('<h2 id="overview-heading">Overview</h2>')
+    parts.append('<div class="overview-grid">')
+    for section in doc.overview_sections:
+        group = family_for[id(section)]
+        target = f"{filenames[id(group)]}#{anchors[id(section)]}"
+        summary = section.summary or "No summary was produced."
+        parts.append('<article class="overview-card">')
+        parts.append(f'<p class="eyebrow">{_html.escape(group.title)}</p>')
+        parts.append(f"<h2>{_html.escape(section.id)}</h2>")
+        parts.append(f"<p>{_md_inline_to_html(summary)}</p>")
+        parts.append(f'<p><a href="{target}">View details</a></p>')
+        parts.append("</article>")
+    parts.append("</div></section></main></body></html>")
+    pages["report.html"] = "\n".join(parts) + "\n"
+
+    for group in doc.groups:
+        page_title = f"{group.title} | {doc.title}"
+        parts = _page_start(doc, page_title)
+        parts.extend(_render_navigation(doc, anchors, filenames, group.key))
+        parts.append('<main class="content" id="main-content">')
+        parts.append(f'<p class="eyebrow">{_html.escape(doc.title)}</p>')
+        parts.append(f'<h1 id="{anchors[id(group)]}">{_html.escape(group.title)}</h1>')
+        for section in group.sections:
+            _render_section_html(section, parts, anchors[id(section)])
+        parts.append("</main></body></html>")
+        pages[filenames[id(group)]] = "\n".join(parts) + "\n"
+    return pages
 
 
 def render_html(doc: ReportDocument) -> str:
-    anchors = _build_anchors(doc)
-    parts: list[str] = []
-    parts.append("<!DOCTYPE html>")
-    parts.append('<html lang="en"><head><meta charset="utf-8">')
-    parts.append(f"<title>{_html.escape(doc.title)}</title>")
-    parts.append(f"<style>{_HTML_STYLE}</style>")
-    parts.append("</head><body>")
-    parts.append(f"<h1>{_html.escape(doc.title)}</h1>")
-    parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
-
-    # Table of contents.
-    parts.append("<nav><h2>Contents</h2><ul>")
-    for group in doc.groups:
-        parts.append(f'<li><a href="#{anchors[id(group)]}">{_html.escape(group.title)}</a><ul>')
-        for section in group.sections:
-            parts.append(f'<li><a href="#{anchors[id(section)]}">{_html.escape(section.id)}</a></li>')
-        parts.append("</ul></li>")
-    parts.append("</ul></nav>")
-
-    for group in doc.groups:
-        parts.append(f'<h2 id="{anchors[id(group)]}">{_html.escape(group.title)}</h2>')
-        for section in group.sections:
-            _render_section_html(section, parts, anchors[id(section)])
-
-    parts.append("</body></html>")
-    return "\n".join(parts) + "\n"
+    """Compatibility wrapper returning the generated overview page."""
+    return render_html_site(doc)["report.html"]
 
 
 def _render_section_html(section: Section, parts: list[str], anchor: str) -> None:
-    parts.append(f'<h3 id="{anchor}">{_html.escape(section.id)}</h3>')
+    parts.append(f'<section aria-labelledby="{anchor}">')
+    parts.append(f'<h2 id="{anchor}">{_html.escape(section.id)}</h2>')
     parts.append(f'<p class="module">Module: {_html.escape(section.module)}</p>')
     meta = _metadata_line(section.metadata)
     if meta:
@@ -259,6 +382,7 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
             '<p class="empty">This analysis produced no artifacts for the given '
             "inputs (e.g. a controlled-design view on an uncontrolled run).</p>"
         )
+        parts.append("</section>")
         return
     for figure in section.figures:
         parts.append(
@@ -269,18 +393,25 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
     for table in section.tables:
         _render_table_html(table, parts)
     if section.downloads:
-        parts.append("<p><strong>Generated files</strong></p>")
+        parts.append('<details class="downloads">')
+        parts.append(
+            f"<summary>Downloads and supporting files ({len(section.downloads)})</summary>"
+        )
         parts.append("<ul>")
         for dl in section.downloads:
             parts.append(
                 f'<li><a href="{_html.escape(dl.rel_path)}">{_html.escape(dl.label)}</a></li>'
             )
         parts.append("</ul>")
+        parts.append("</details>")
+    parts.append("</section>")
 
 
 def _render_table_html(table: Table, parts: list[str]) -> None:
     parts.append(f"<p><strong>{_html.escape(table.name)}</strong></p>")
+    parts.append('<div class="table-scroll" role="region" tabindex="0">')
     parts.append(_display_frame(table.frame).to_html(index=False, border=0))
+    parts.append("</div>")
     note = []
     if table.truncated:
         note.append(f"Showing {table.n_shown_rows} of {table.n_total_rows} rows")

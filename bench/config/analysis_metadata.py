@@ -20,6 +20,21 @@ def analysis_defaults_to_all_estimators(module: str | None) -> bool:
     return module in _default_all_estimator_modules()
 
 
+def analysis_report_defaults(module: str | None) -> dict | None:
+    """Return the report-owned inline artifact defaults for an analysis.
+
+    The lookup intentionally reads source with :mod:`ast`. Importing the analysis
+    registry would make config loading depend on plotting and statistical
+    dependencies. Unknown modules, including custom or older modules without the
+    class attribute, return ``None`` so callers can retain their existing behavior.
+    """
+    if module is None:
+        return None
+    defaults = _report_defaults()
+    value = defaults.get(module)
+    return dict(value) if value is not None else None
+
+
 @lru_cache
 def _default_all_estimator_modules() -> frozenset[str]:
     root = Path(__file__).resolve().parents[1] / "analyses"
@@ -48,6 +63,41 @@ def _defaults_in_file(path: Path) -> set[str]:
         if module is not None and default_all:
             modules.add(module)
     return modules
+
+
+@lru_cache
+def _report_defaults() -> dict[str, dict]:
+    root = Path(__file__).resolve().parents[1] / "analyses"
+    defaults: dict[str, dict] = {}
+    for path in root.rglob("*.py"):
+        if path.name.startswith("__") or path.name in {"base.py", "registry.py"}:
+            continue
+        defaults.update(_report_defaults_in_file(path))
+    return defaults
+
+
+def _report_defaults_in_file(path: Path) -> dict[str, dict]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    defaults: dict[str, dict] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        module = None
+        report_defaults = None
+        for stmt in node.body:
+            name, value = _class_assignment(stmt)
+            if name == "module" and isinstance(value, ast.Constant) and isinstance(value.value, str):
+                module = value.value
+            elif name == "report_defaults" and value is not None:
+                try:
+                    parsed = ast.literal_eval(value)
+                except (ValueError, TypeError, SyntaxError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    report_defaults = parsed
+        if module is not None and report_defaults is not None:
+            defaults[module] = report_defaults
+    return defaults
 
 
 def _class_assignment(stmt: ast.stmt) -> tuple[str | None, ast.expr | None]:

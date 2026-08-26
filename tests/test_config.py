@@ -210,6 +210,12 @@ def _mutations():
         "analysis_enabled_not_bool": lambda c: c["analyses"][0].__setitem__("enabled", "nope"),
         "report_include_disabled_not_bool": lambda c: c["report"].__setitem__("include_disabled", "nope"),
         "report_sections_not_list": lambda c: c["report"].__setitem__("sections", "bt_main"),
+        "report_overview_sections_not_list": lambda c: c["report"].__setitem__("overview_sections", "bt_main"),
+        "report_section_overrides_not_object": lambda c: c["report"].__setitem__("section_overrides", []),
+        "report_section_override_not_object": lambda c: c["report"].__setitem__("section_overrides", {"bt_main": []}),
+        "report_section_override_unknown_key": lambda c: c["report"].__setitem__("section_overrides", {"bt_main": {"caption": "Ratings"}}),
+        "report_section_override_tables_not_list": lambda c: c["report"].__setitem__("section_overrides", {"bt_main": {"tables": "ratings"}}),
+        "report_section_override_figures_not_strings": lambda c: c["report"].__setitem__("section_overrides", {"bt_main": {"figures": [7]}}),
         "report_out_dir_not_string": lambda c: c["report"].__setitem__("out_dir", 7),
         "extract_max_dbs_zero": lambda c: c["data"]["extract"].__setitem__("max_dbs", 0),
         "extract_auto_fix_not_bool": lambda c: c["data"]["extract"].__setitem__("auto_fix", "yes"),
@@ -252,6 +258,20 @@ def test_extract_issues_path_override_loads(dev_spec, write_spec):
     dev_spec["data"]["extract"]["issues_path"] = "runs/custom_issues.csv"
     cfg = load_config(write_spec(dev_spec))
     assert cfg.data["extract"]["issues_path"] == "runs/custom_issues.csv"
+
+
+def test_report_page_fields_load(dev_spec, write_spec):
+    """Report page settings accept string ids and named artifact lists."""
+    dev_spec["report"]["overview_sections"] = ["bt_main", "pred_metrics"]
+    dev_spec["report"]["section_overrides"] = {
+        "bt_main": {"tables": ["ratings"], "figures": ["ratings"]},
+        "pred_metrics": {"figures": []},
+    }
+
+    cfg = load_config(write_spec(dev_spec))
+
+    assert cfg.report["overview_sections"] == ["bt_main", "pred_metrics"]
+    assert cfg.report["section_overrides"]["bt_main"]["tables"] == ["ratings"]
 
 
 def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):

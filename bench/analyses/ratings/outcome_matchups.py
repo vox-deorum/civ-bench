@@ -68,6 +68,10 @@ def create_outcome_matchup_matrices(panel: pd.DataFrame, include_score_ratio: bo
 
 class RatingsOutcomeMatchups(Analysis):
     module = "ratings.outcome_matchups"
+    report_defaults = {
+        "tables": [],
+        "figures": ["win_rate"],
+    }
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         table_id = next((t for t in ctx.uses_tables() if t == "panel"), "panel")

@@ -567,6 +567,23 @@ def _validate_report(report: dict) -> None:
     sections = report.get("sections")
     if sections is not None:
         _check_string_list(sections, "report.sections")
+    overview_sections = report.get("overview_sections")
+    if overview_sections is not None:
+        _check_string_list(overview_sections, "report.overview_sections")
+    section_overrides = report.get("section_overrides")
+    if section_overrides is not None:
+        _require_mapping(section_overrides, "report.section_overrides")
+        for stage_id, override in section_overrides.items():
+            if not isinstance(stage_id, str):
+                raise ConfigError(
+                    "report.section_overrides: expected stage-id keys to be strings."
+                )
+            where = f"report.section_overrides.{stage_id}"
+            _require_mapping(override, where)
+            _check_keys(override, S.REPORT_SECTION_OVERRIDE_KEYS, where)
+            for artifact_kind in S.REPORT_SECTION_OVERRIDE_KEYS:
+                if artifact_kind in override:
+                    _check_string_list(override[artifact_kind], f"{where}.{artifact_kind}")
     formats = report.get("formats")
     if formats is not None:
         formats = _check_string_list(formats, "report.formats")

@@ -22,6 +22,7 @@ from .metrics import filtered_prediction_rows
 
 class PredictionCompare(Analysis):
     module = "prediction.compare"
+    report_defaults = {"tables": [], "figures": ["rank_agreement"]}
     default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

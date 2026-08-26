@@ -29,7 +29,7 @@ raw game DBs ──> extract ──> estimators ──> adjust ──> analyses 
 - **estimators** are the victory-probability predictors. Each one is either **trained** on the current data (optionally tuned first with Optuna) or **loaded pre-trained** from a saved model directory. Either way it emits the same artifact: a `predictions.csv` with a `predicted_win_probability` column.
 - **adjust** turns raw predictions into the `adjusted_strength` panel used by ratings. It averages progress-weighted win probabilities, measures each player against the game leader, preserves the winner's position, and corrects for civilization effects. Controlled games use a matched Vanilla baseline to remove the start-position confound. The shared calculation lives in `bench/adjust/strength.py`.
 - **analyses** are the pluggable modules, grouped into five families: **ratings** (who is stronger), **prediction** (how good is the predictor), **calibration** (are its probabilities honest), **performance** (strength panels, score regressions, trajectories), and **exploratory** (descriptives like token cost). They consume data and return structured results; they do not write files or hardcode where they appear in the report.
-- **report** walks the analysis results and renders one section per analysis into deterministic Markdown and HTML.
+- **report** walks the analysis results and renders compact, deterministic Markdown plus an HTML overview and one page per analysis family.
 
 Stage ordering comes from three places, all resolved into a single topological sort before anything runs: the implicit kind order above, explicit `needs` edges you can add, and automatic edges inferred when one stage `uses` another's output (an estimator's predictions, or a named table like `strength`).
 

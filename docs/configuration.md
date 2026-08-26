@@ -246,12 +246,19 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
   "formats": ["md", "html"],      // md and html implemented
   "sections": null,               // null = every enabled analysis in canonical family order;
                                   //   or an explicit ordered list of stage ids to curate
+  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+                                  // null = cards for every resolved section; a list keeps the HTML overview compact
+  "section_overrides": {},        // stage id -> optional {"tables": ["..."], "figures": ["..."]}
   "title": null,                  // null = derive from name
   "include_disabled": false
 }
 ```
 
-The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. Each analysis persists a `result.json` beside its artifacts, so `civ-bench report` re-renders the document from disk, deterministically and byte-identically, without re-running any analysis.
+The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above.
+
+`section_overrides` narrows an analysis's inline artifacts. For each stage id, `tables` and `figures` are optional lists of manifest names. A supplied list replaces that dimension's normal inline list. An omitted dimension keeps the default list, and hidden artifacts remain downloadable. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped.
+
+HTML also writes one page for every family represented in `sections`: `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html`. The output directory contains `report.html`, `report.md`, `assets/report.css`, and the self-contained `assets/` tree. Each analysis persists a `result.json` beside its artifacts, so `civ-bench report` re-renders the documents from disk, deterministically and byte-identically, without re-running any analysis.
 
 ---
 

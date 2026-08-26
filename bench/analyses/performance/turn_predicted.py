@@ -19,6 +19,7 @@ from ..errors import AnalysisError
 
 class PerformanceTurnPredicted(Analysis):
     module = "performance.turn_predicted"
+    report_defaults = {"tables": [], "figures": ["over_progress"]}
     default_all_estimators = True
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:

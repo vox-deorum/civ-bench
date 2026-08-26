@@ -104,6 +104,7 @@ def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str])
 
 class ExploratoryModelTokenCosts(Analysis):
     module = "exploratory.model_token_costs"
+    report_defaults = {"tables": [], "figures": ["token_costs"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         currency = self.params.get("currency", "usd")

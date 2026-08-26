@@ -85,6 +85,7 @@ class ReportDocument:
     output_root: str
     groups: list[FamilyGroup] = field(default_factory=list)
     intro: str = ""
+    overview_sections: list[Section] = field(default_factory=list)
 
     @property
     def n_sections(self) -> int:

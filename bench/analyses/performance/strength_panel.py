@@ -280,6 +280,7 @@ def build_experiment_completeness(
 
 class PerformanceStrengthPanel(Analysis):
     module = "performance.strength_panel"
+    report_defaults = {"tables": [], "figures": ["strength"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         table_id = ctx.strength_table_id()

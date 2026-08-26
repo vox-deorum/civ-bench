@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -25,19 +26,19 @@ from typing import Optional
 import pandas as pd
 
 from ..config import RunConfig
+from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .errors import ReportError
 from .model import Download, Figure, Section, Table
-from .render import render_html, render_markdown
+from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import family_of, family_sort_index, get_template
 
 # Inline tables are capped so a large audit trail (e.g. cell baselines) does not
 # bloat the document; the full data is always one click away via the copied CSV.
 MAX_TABLE_ROWS = 100
 
-# Renderers we ship today. `pdf` is reserved in the schema but not yet rendered.
-_RENDERERS = {"md": render_markdown, "html": render_html}
-_EXT = {"md": "md", "html": "html"}
+# Formats we ship today. `pdf` is reserved in the schema but not yet rendered.
+_SUPPORTED_FORMATS = {"md", "html"}
 
 
 @dataclass
@@ -118,6 +119,43 @@ def _resolve_section_ids(cfg: RunConfig, warnings: list[str]) -> list[str]:
     return out
 
 
+def _resolve_overview_ids(
+    cfg: RunConfig, section_ids: list[str], warnings: list[str]
+) -> list[str]:
+    overview = cfg.report.get("overview_sections")
+    if overview is None:
+        return list(section_ids)
+
+    selected = set(section_ids)
+    out: list[str] = []
+    for sid in overview:
+        if sid not in selected:
+            raise ReportError(
+                f"report.overview_sections references '{sid}', which is not in "
+                "the resolved report.sections."
+            )
+        if sid in out:
+            warnings.append(
+                f"section '{sid}' listed more than once in "
+                "report.overview_sections; kept once."
+            )
+            continue
+        out.append(sid)
+    return out
+
+
+def _resolve_section_overrides(cfg: RunConfig) -> dict[str, dict]:
+    overrides = cfg.report.get("section_overrides") or {}
+    all_ids = {stage.id for stage in cfg.analyses}
+    unknown = sorted(set(overrides) - all_ids)
+    if unknown:
+        raise ReportError(
+            f"report.section_overrides references analysis stage id(s) {unknown}; "
+            f"known ids are {sorted(all_ids)}."
+        )
+    return overrides
+
+
 # ── manifest → section ─────────────────────────────────────────────────────────
 def _read_manifest(cfg: RunConfig, stage_id: str) -> dict:
     path = _analyses_dir(cfg, stage_id) / "result.json"
@@ -132,11 +170,19 @@ def _read_manifest(cfg: RunConfig, stage_id: str) -> dict:
 
 
 def _build_section(
-    cfg: RunConfig, stage_id: str, assets_root: Path, warnings: list[str]
+    cfg: RunConfig,
+    stage_id: str,
+    assets_root: Path,
+    warnings: list[str],
+    override: Optional[dict] = None,
 ) -> Section:
     manifest = _read_manifest(cfg, stage_id)
     src_dir = _analyses_dir(cfg, stage_id)
     module = manifest.get("module", "")
+    if not isinstance(module, str):
+        raise ReportError(
+            f"analysis '{stage_id}' has an invalid non-string module in its manifest."
+        )
     section = Section(
         id=stage_id,
         module=module,
@@ -144,39 +190,117 @@ def _build_section(
         metadata=manifest.get("metadata") or {},
         empty=bool(manifest.get("empty", False)),
     )
+
+    table_entries = list(manifest.get("tables", []))
+    figure_entries = list(manifest.get("figures", []))
+    inline_tables = _inline_artifact_names(
+        stage_id,
+        module,
+        "tables",
+        [entry["name"] for entry in table_entries],
+        override,
+        warnings,
+    )
+    inline_figures = _inline_artifact_names(
+        stage_id,
+        module,
+        "figures",
+        [entry["name"] for entry in figure_entries],
+        override,
+        warnings,
+    )
     if section.empty:
         return section
 
     asset_dir = assets_root / stage_id
-    for fig in manifest.get("figures", []):
-        rel = _copy_asset(src_dir / fig["file"], asset_dir, stage_id, fig["file"], warnings)
-        if rel is not None:
-            section.figures.append(Figure(caption=_caption(stage_id, fig["name"]), rel_path=rel))
-
-    for tbl in manifest.get("tables", []):
-        src = src_dir / tbl["file"]
-        if not src.exists():
-            warnings.append(f"section '{stage_id}': table file '{src}' is missing — skipped.")
-            continue
-        frame = pd.read_csv(src)
-        rel_csv = _copy_asset(src, asset_dir, stage_id, tbl["file"], warnings)
-        shown = frame.head(MAX_TABLE_ROWS)
-        section.tables.append(
-            Table(
-                name=tbl["name"],
-                frame=shown,
-                rel_csv=rel_csv,
-                n_total_rows=int(len(frame)),
-                n_shown_rows=int(len(shown)),
-            )
+    for fig in figure_entries:
+        rel = _copy_asset(
+            src_dir / fig["file"],
+            asset_dir,
+            stage_id,
+            fig["file"],
+            warnings,
+            source_root=src_dir,
         )
+        if rel is not None:
+            caption = _caption(stage_id, fig["name"])
+            if fig["name"] in inline_figures:
+                section.figures.append(Figure(caption=caption, rel_path=rel))
+            else:
+                section.downloads.append(
+                    Download(label=f"Figure: {caption} (PNG)", rel_path=rel)
+                )
+
+    for tbl in table_entries:
+        src = src_dir / tbl["file"]
+        rel_csv = _copy_asset(
+            src,
+            asset_dir,
+            stage_id,
+            tbl["file"],
+            warnings,
+            source_root=src_dir,
+        )
+        if rel_csv is None:
+            continue
+        if tbl["name"] in inline_tables:
+            frame = pd.read_csv(src)
+            shown = frame.head(MAX_TABLE_ROWS)
+            section.tables.append(
+                Table(
+                    name=tbl["name"],
+                    frame=shown,
+                    rel_csv=rel_csv,
+                    n_total_rows=int(len(frame)),
+                    n_shown_rows=int(len(shown)),
+                )
+            )
+        else:
+            section.downloads.append(
+                Download(label=f"Table: {tbl['name']} (CSV)", rel_path=rel_csv)
+            )
 
     for art in manifest.get("artifacts", []):
         rel_within = str(art["file"])  # relative path under the analysis dir, subdirs kept
-        copied = _copy_asset(src_dir / rel_within, asset_dir, stage_id, rel_within, warnings)
+        copied = _copy_asset(
+            src_dir / rel_within,
+            asset_dir,
+            stage_id,
+            rel_within,
+            warnings,
+            source_root=src_dir,
+        )
         if copied is not None:
             section.downloads.append(Download(label=Path(copied).name, rel_path=copied))
     return section
+
+
+def _inline_artifact_names(
+    stage_id: str,
+    module: str,
+    kind: str,
+    available: list[str],
+    override: Optional[dict],
+    warnings: list[str],
+) -> set[str]:
+    """Resolve inline artifact names from a stage override or module defaults."""
+    explicit = override is not None and kind in override
+    defaults = analysis_report_defaults(module)
+    if explicit:
+        requested = list(override[kind])
+    elif defaults is None or kind not in defaults:
+        return set(available)
+    else:
+        requested = list(defaults[kind])
+
+    if explicit:
+        missing = [name for name in requested if name not in available]
+        for name in missing:
+            warnings.append(
+                f"section '{stage_id}': report.section_overrides requested {kind[:-1]} "
+                f"'{name}', but it was not emitted; skipped."
+            )
+    return set(requested) & set(available)
 
 
 def _caption(stage_id: str, name: str) -> str:
@@ -184,13 +308,30 @@ def _caption(stage_id: str, name: str) -> str:
 
 
 def _copy_asset(
-    src: Path, asset_dir: Path, stage_id: str, rel_within: str, warnings: list[str]
+    src: Path,
+    asset_dir: Path,
+    stage_id: str,
+    rel_within: str,
+    warnings: list[str],
+    source_root: Optional[Path] = None,
 ) -> Optional[str]:
     """Copy an artifact into ``assets/<id>/<rel_within>``; return its report-relative path.
 
     ``rel_within`` may contain subdirs (e.g. ``seating/<exp>.seating.json``); the
     tree under ``assets/<id>/`` mirrors the analysis dir so links resolve.
     """
+    if source_root is not None:
+        resolved_source_root = source_root.resolve()
+        resolved_src = src.resolve()
+        if (
+            resolved_src != resolved_source_root
+            and resolved_source_root not in resolved_src.parents
+        ):
+            warnings.append(
+                f"section '{stage_id}': asset path '{rel_within}' escapes the "
+                "analysis tree; skipped."
+            )
+            return None
     if not src.exists():
         warnings.append(f"section '{stage_id}': asset '{src}' is missing — skipped.")
         return None
@@ -220,7 +361,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     template = get_template(template_name)
 
     formats = list(report_cfg.get("formats") or ["md", "html"])
-    unsupported = [f for f in formats if f not in _RENDERERS]
+    unsupported = [f for f in formats if f not in _SUPPORTED_FORMATS]
     if unsupported:
         raise ReportError(
             f"report.formats: {unsupported} not implemented yet (md/html only); "
@@ -235,50 +376,90 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
             "requested section was disabled). Enable an analysis or adjust "
             "report.sections."
         )
+    overview_ids = _resolve_overview_ids(cfg, section_ids, warnings)
+    section_overrides = _resolve_section_overrides(cfg)
 
     out_dir = report_dir(cfg)
-    assets_root = out_dir / "assets"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Build into a staging tree and swap it in only once every section succeeds, so a
-    # mid-build failure (e.g. a missing result.json manifest) leaves the previous
-    # report and its assets/ intact instead of deleting them and then aborting.
-    # Swapping still rebuilds assets/ from scratch, so a removed section/figure leaves
-    # no orphan in the "self-contained" tree.
-    staging = out_dir / "assets.tmp"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir(parents=True)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{out_dir.name}.tmp-", dir=str(out_dir.parent))
+    )
+    assets_root = staging / "assets"
+    assets_root.mkdir()
     try:
-        sections = [_build_section(cfg, sid, staging, warnings) for sid in section_ids]
+        sections = [
+            _build_section(
+                cfg,
+                sid,
+                assets_root,
+                warnings,
+                override=section_overrides.get(sid),
+            )
+            for sid in section_ids
+        ]
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    if assets_root.exists():
-        shutil.rmtree(assets_root)
-    staging.replace(assets_root)
 
-    title = report_cfg.get("title") or cfg.name
-    meta = {
-        "title": title,
-        "run_name": cfg.name,
-        "seed": cfg.seed,
-        "config_path": str(cfg.config_path),
-        "output_root": cfg.output.resolved_root,
-    }
-    document = template(meta, sections)
+    written_rel: list[Path] = []
+    try:
+        title = report_cfg.get("title") or cfg.name
+        meta = {
+            "title": title,
+            "run_name": cfg.name,
+            "seed": cfg.seed,
+            "config_path": str(cfg.config_path),
+            "output_root": cfg.output.resolved_root,
+            "overview_section_ids": overview_ids,
+        }
+        document = template(meta, sections)
 
-    written: list[str] = []
-    for fmt in formats:
-        text = _RENDERERS[fmt](document)
-        path = out_dir / f"report.{_EXT[fmt]}"
-        path.write_text(text, encoding="utf-8")
-        written.append(str(path))
+        for fmt in formats:
+            if fmt == "md":
+                path = staging / "report.md"
+                path.write_text(render_markdown(document), encoding="utf-8")
+                written_rel.append(Path("report.md"))
+                continue
+
+            stylesheet = assets_root / "report.css"
+            stylesheet.write_text(render_stylesheet(), encoding="utf-8")
+            for filename, text in render_html_site(document).items():
+                (staging / filename).write_text(text, encoding="utf-8")
+                written_rel.append(Path(filename))
+            written_rel.append(Path("assets") / "report.css")
+
+        cleanup_warning = _replace_report_dir(staging, out_dir)
+        if cleanup_warning:
+            warnings.append(cleanup_warning)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
     return ReportRunResult(
         report_dir=str(out_dir),
         formats=formats,
-        written=written,
+        written=[str(out_dir / rel) for rel in written_rel],
         n_sections=len(sections),
         warnings=warnings,
     )
+
+
+def _replace_report_dir(staging: Path, out_dir: Path) -> Optional[str]:
+    """Replace a generated report directory after the complete site is ready."""
+    backup = staging.with_name(staging.name + ".bak")
+
+    had_previous = out_dir.exists()
+    if had_previous:
+        out_dir.replace(backup)
+    try:
+        staging.replace(out_dir)
+    except BaseException:
+        if had_previous and backup.exists() and not out_dir.exists():
+            backup.replace(out_dir)
+        raise
+    if backup.exists():
+        try:
+            shutil.rmtree(backup)
+        except OSError as exc:
+            return f"could not remove prior report backup '{backup}': {exc}"
+    return None

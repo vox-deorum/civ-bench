@@ -59,7 +59,7 @@ Handy flags:
 - `--skip <stage-id>` drops a stage. `--skip all` is equivalent to a dry run. Repeatable.
 - `--force-rebuild` (or `-f`) re-extracts even when the CSVs are newer than the game DBs.
 
-Your finished report lands in `reports/<run-name>/` as `report.md`, `report.html`, and a self-contained `assets/` tree with figures and the full-table CSVs. Rendering is **deterministic** (no timestamps), so re-running `civ-bench report` reproduces the document byte-for-byte.
+Your finished report lands in `reports/<run-name>/`. It contains `report.html`, a compact overview; `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html` for represented analysis families; `report.md`; and a self-contained `assets/` tree with `report.css`, figures, and full-table CSVs. Rendering is **deterministic** (no timestamps), so re-running `civ-bench report` reproduces every document byte-for-byte.
 
 ---
 
@@ -124,7 +124,7 @@ reports/staff-standard-2026/report.html
 
 ### Step 4: read the report
 
-The report is organized into the five analysis families, in this order. Here is what to look at and why, with the connection to the CivBench paper's framework noted:
+`report.html` is the compact overview. Use its links to open the full family pages. The templates select eight overview cards by default: headline ratings, win rates, prediction metrics, reliability, strength, experiment completeness, token cost, and cost versus rating. Set `report.overview_sections` to `null` for a card for every selected report section, or provide your own ordered list. The report is organized into the five analysis families, in this order. Here is what to look at and why, with the connection to the CivBench paper's framework noted:
 
 - **Ratings** are the headline. The Bradley-Terry and Plackett-Luce tables rank every `player_type` by skill, centered on the `Vanilla` baseline (the stock Vox Populi AI sits at Elo 1500 in the paper, so a rating above that means "stronger than stock Civ AI"). This is the answer to "who is the better player." The `bt_strategy` and `pl_strategy` sections break the same ratings down by dominant victory path (Domination, Culture, Diplomatic, Science). The matchup matrices show head-to-head strength and actual win rates.
 - **Prediction** tells you how much to trust the rest. The metrics table (ROC-AUC, Brier, log-loss, balanced accuracy) is the paper's **predictive validity**. The ratings are only as trustworthy as the strength estimates feeding them, which come from this predictor (the paper's primary estimator, AttentionMLP, reaches AUC 0.865).
@@ -132,7 +132,7 @@ The report is organized into the five analysis families, in this order. Here is 
 - **Performance** covers strength panels per player type (with confidence intervals and small-sample flags), score-ratio regressions, victory-probability trajectories over the course of a game, and a controlled-design completeness check.
 - **Exploratory** reports token cost per player type and per model, so you can weigh strength against price.
 
-Every inline table is capped for readability; the full data sits next to it as a linked CSV under `assets/<analysis-id>/`.
+Every inline table is capped for readability; the full data sits next to it as a linked CSV under `assets/<analysis-id>/`. To keep a family page focused, use `report.section_overrides` to select a stage's inline table or figure names. Unselected artifacts remain downloadable.
 
 ### Step 5: re-render without recomputing
 

@@ -20,6 +20,7 @@ from ..errors import AnalysisError
 
 class PerformanceScoreRatio(Analysis):
     module = "performance.score_ratio"
+    report_defaults = {"tables": [], "figures": ["player_type_effects"]}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         target = self.params.get("target", "score_ratio")

@@ -107,6 +107,10 @@ def create_mean_matchup_matrix(strength_df: pd.DataFrame):
 
 class RatingsMatchups(Analysis):
     module = "ratings.matchups"
+    report_defaults = {
+        "tables": [],
+        "figures": ["matchup", "strength_mean", "strength_winrate"],
+    }
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         mode = self.params.get("mode", "both")
