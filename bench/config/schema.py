@@ -60,6 +60,7 @@ FILTER_KEYS = {
     "only_llm",
     "min_games",
     "turn_range",
+    "min_condition_completeness",
 }
 
 # ── groupings (§3.2) ───────────────────────────────────────────────────────
@@ -122,7 +123,6 @@ STRENGTH_PARAM_KEYS = {
     "block",
     "baseline_experiment",
     "post_cell_normalize",
-    "min_condition_completeness",
 }
 STRENGTH_WEIGHT = {"turn_progress", "uniform"}
 STRENGTH_RELATIVE_TO = {"game_leader", "none"}

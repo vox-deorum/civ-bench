@@ -131,12 +131,16 @@ def _validate_condition_pairing(
     sort_condition = block.get("sort_condition")
     if sort_condition is not None:
         if not isinstance(sort_condition, str) or (
-            sort_condition != "base" and not sort_condition.startswith("-")
+            sort_condition not in ("base", "best") and not sort_condition.startswith("-")
         ):
             raise ConfigError(
-                f"{where}.sort_condition: must be 'base' or a '-' prefixed suffix."
+                f"{where}.sort_condition: must be 'base', 'best', or a '-' prefixed suffix."
             )
-        if suffixes is not None and sort_condition != "base" and sort_condition not in suffixes:
+        if (
+            suffixes is not None
+            and sort_condition not in ("base", "best")
+            and sort_condition not in suffixes
+        ):
             raise ConfigError(
                 f"{where}.sort_condition: '{sort_condition}' is not in the explicit "
                 f"suffixes list {suffixes}."
@@ -322,16 +326,6 @@ def _validate_strength_params(params: dict, where: str) -> None:
         params["enforce_winner"] = coerce_bool(
             params["enforce_winner"], f"{where}.params.enforce_winner"
         )
-    # `min_condition_completeness` (null ⇒ keep everything): a controlled experiment
-    # whose occupied-slot completeness is below the threshold is dropped from the
-    # panel (named in a WARN). 1.0 ⇒ drop every condition with any missing slot.
-    mcc = params.get("min_condition_completeness")
-    if mcc is not None:
-        if isinstance(mcc, bool) or not isinstance(mcc, (int, float)) or not 0 < mcc <= 1:
-            raise ConfigError(
-                f"{where}.params.min_condition_completeness: must be null or a "
-                "number in (0, 1]."
-            )
     # `baseline_experiment` (§5.1): null ⇒ implicit per-experiment path; a value names the
     # explicit baseline source. Experiment ids can be inferred from extracted data, so this is
     # only type-checked here rather than validated against the legacy experiments catalog.

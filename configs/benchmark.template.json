@@ -5,7 +5,7 @@
   "seed": 42,
 
   "filters": {
-    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5 },
+    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5, "min_condition_completeness": null },
     "llm_only": { "only_llm": true, "min_games": 5 },
     "late_game": { "turn_range": [200, null] }
   },
@@ -113,8 +113,7 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "post_cell_normalize": "none",
-        "min_condition_completeness": null
+        "post_cell_normalize": "none"
       }
     }
   ],

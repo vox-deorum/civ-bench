@@ -140,15 +140,45 @@ class AnalysisContext:
     # ── filter resolution ────────────────────────────────────────────────────
     def apply_filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply the global ``data.filter`` narrowed by this stage's ``filter``."""
-        from ..data.loading import apply_filter_spec
+        from ..config.filters import resolve_filter_spec
+        from ..data.loading import apply_filter_spec, incomplete_experiments_from_games
 
+        filter_spec = self.config.data.get("filter")
+        global_spec = resolve_filter_spec(filter_spec, self.config.filters, "data.filter")
+        condition_incomplete = None
+        if global_spec.get("min_condition_completeness") is not None:
+            conditions = self._games_for_filter()
+            condition_incomplete = incomplete_experiments_from_games(
+                str(conditions), global_spec, self._problem_game_ids()
+            )
         return apply_filter_spec(
             df,
             catalog=self.catalog,
-            filter_spec=self.config.data.get("filter"),
+            filter_spec=filter_spec,
             presets=self.config.filters,
             stage_filter=self.stage_filter,
+            condition_incomplete=condition_incomplete,
         )
+
+    def _games_for_filter(self) -> str:
+        """The canonical games-table path, resolved once for the global
+        condition-completeness filter (which needs the ``seed × seat`` grid)."""
+        cached = getattr(self, "_games_filter_path", None)
+        if cached is None:
+            path = (self.config.data.get("tables") or {}).get("games")
+            if not path:
+                raise AnalysisError(
+                    f"analysis '{self.stage_id}': data.filter.min_condition_completeness "
+                    "requires data.tables.games to define the controlled grid."
+                )
+            if not Path(path).exists():
+                raise AnalysisError(
+                    f"analysis '{self.stage_id}': games table not found at '{path}'. "
+                    "Run extract first."
+                )
+            cached = path
+            self._games_filter_path = cached
+        return cached
 
     # ── canonical / adjust table resolution ───────────────────────────────────
     def _canonical_path(self, name: str) -> Optional[str]:

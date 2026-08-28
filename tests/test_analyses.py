@@ -769,6 +769,28 @@ def test_paired_sort_order_uses_requested_condition_fallback_and_nan_last():
     ]
 
 
+@pytest.mark.parametrize(
+    "ascending, expected",
+    [
+        (False, ["B", "A", "Vanilla", "C"]),
+        (True, ["A", "B", "Vanilla", "C"]),
+    ],
+)
+def test_paired_sort_order_best_keys_off_best_condition_value(ascending, expected):
+    from bench.plotting.pairing import PairingSpec, paired_sort_order
+
+    spec = PairingSpec(("-Per-5",), "best", "Every-turn")
+    frame = pd.DataFrame([
+        {"base_identity": "A", "condition": "base", "value": 3.0},
+        {"base_identity": "A", "condition": "-Per-5", "value": 1.0},
+        {"base_identity": "B", "condition": "base", "value": 2.0},
+        {"base_identity": "B", "condition": "-Per-5", "value": 5.0},
+        {"base_identity": "Vanilla", "condition": "base", "value": 2.5},
+        {"base_identity": "C", "condition": "base", "value": np.nan},
+    ])
+    assert paired_sort_order(frame, spec, "value", ascending) == expected
+
+
 def test_paired_token_costs_follow_ratings_order(env, monkeypatch):
     env.cfg.presentation = {
         "condition_pairing": {"enabled": True, "sort_condition": "-Per-5"}
@@ -803,6 +825,33 @@ def test_paired_token_costs_declared_missing_rating_is_loud(env):
             {"currency": "usd"},
             {"tables": ["tokens"], "analyses": ["bt_main"]},
         )
+
+
+def test_global_completeness_filter_drops_incomplete_conditions_from_tokens(env):
+    from bench.analyses.base import AnalysisContext
+
+    # Replace the controlled grid: llm-standard covers seeds {1, 2} × rotations
+    # {0, 1} (complete); observe-vanilla-standard covers only rotation 0 (half the
+    # grid, incomplete at a 1.0 threshold).
+    games_path = env.cfg.data["tables"]["games"]
+    pd.DataFrame([
+        {"game_id": f"F{i}", "timestamp": "2026-01-01", "experiment": "llm-standard",
+         "seed": seed, "seating_rotation": rot}
+        for i, (seed, rot) in enumerate([(1, 0), (1, 1), (2, 0), (2, 1)])
+    ] + [
+        {"game_id": f"P{i}", "timestamp": "2026-01-01",
+         "experiment": "observe-vanilla-standard",
+         "seed": seed, "seating_rotation": rot}
+        for i, (seed, rot) in enumerate([(1, 0), (2, 0)])
+    ]).to_csv(games_path, index=False)
+    env.cfg.data["filter"] = {"min_condition_completeness": 1.0}
+
+    ctx = AnalysisContext(
+        config=env.cfg, catalog=env.catalog, stage_id="t", stage_raw={},
+        out_dir=Path(env.cfg.output.root),
+    )
+    filtered = ctx.apply_filter(ctx.load_table("tokens"))
+    assert set(filtered["experiment"]) == {"llm-standard"}
 
 
 def test_cost_vs_rating_outputs_and_excludes_baseline(env, monkeypatch):

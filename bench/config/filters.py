@@ -69,6 +69,17 @@ def validate_filter_object(obj: dict, where: str) -> None:
                 f"{where}.turn_range: min ({lo}) must be <= max ({hi})."
             )
 
+    # `min_condition_completeness` (null ⇒ keep every controlled condition): a number
+    # in (0, 1] drops, as a whole, every controlled experiment whose occupied
+    # (seed, seating_rotation) slot fraction is below it (1.0 ⇒ drop any missing slot).
+    mcc = obj.get("min_condition_completeness")
+    if mcc is not None:
+        if isinstance(mcc, bool) or not isinstance(mcc, (int, float)) or not 0 < mcc <= 1:
+            raise ConfigError(
+                f"{where}.min_condition_completeness: must be null or a "
+                "number in (0, 1]."
+            )
+
 
 def resolve_filter_spec(spec: Any, presets: dict, where: str = "filter") -> dict:
     """Resolve a filter spec to one inline object.
@@ -123,6 +134,18 @@ def intersect_filter_specs(base: dict, narrow: dict) -> dict:
     if "min_games" in base or "min_games" in narrow:
         out["min_games"] = max(base.get("min_games", 1), narrow.get("min_games", 1))
 
+    # Completeness is a floor: a stage can only require more coverage than the
+    # global filter, so the effective threshold is the stricter (higher) of the two.
+    if "min_condition_completeness" in base or "min_condition_completeness" in narrow:
+        thresholds = [
+            v for v in (
+                base.get("min_condition_completeness"),
+                narrow.get("min_condition_completeness"),
+            ) if v is not None
+        ]
+        if thresholds:
+            out["min_condition_completeness"] = max(thresholds)
+
     if "turn_range" in base or "turn_range" in narrow:
         blo, bhi = _range_bounds(base.get("turn_range"))
         nlo, nhi = _range_bounds(narrow.get("turn_range"))
@@ -149,6 +172,13 @@ def ensure_filter_narrows(base: dict, candidate: dict, where: str) -> None:
     if "min_games" in base and candidate.get("min_games", base["min_games"]) < base["min_games"]:
         raise ConfigError(
             f"{where}.min_games: cannot be lower than global min_games={base['min_games']}."
+        )
+
+    base_mcc = base.get("min_condition_completeness")
+    if base_mcc is not None and candidate.get("min_condition_completeness", base_mcc) < base_mcc:
+        raise ConfigError(
+            f"{where}.min_condition_completeness: cannot be lower than the global "
+            f"min_condition_completeness={base_mcc}."
         )
 
     if "turn_range" in candidate:

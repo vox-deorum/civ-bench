@@ -81,6 +81,23 @@ def test_presentation_validates_and_is_exposed(dev_spec, write_spec):
     assert cfg.presentation["matchup_display"] == "vs_reference"
 
 
+@pytest.mark.parametrize("sort_condition", ["best", "base"])
+def test_presentation_accepts_best_and_base_sort_condition(
+    dev_spec, write_spec, sort_condition
+):
+    dev_spec["presentation"] = {
+        "condition_pairing": {
+            "enabled": True,
+            "suffixes": ["-Per-5"],
+            "sort_condition": sort_condition,
+        },
+    }
+    cfg = load_config(write_spec(dev_spec))
+    assert (
+        cfg.presentation["condition_pairing"]["sort_condition"] == sort_condition
+    )
+
+
 @pytest.mark.parametrize(
     "presentation",
     [
@@ -461,17 +478,38 @@ def test_analysis_name_and_description_must_be_string(dev_spec, write_spec, key)
         load_config(write_spec(dev_spec))
 
 
-# ── strength: min_condition_completeness ─────────────────────────────────────
+# ── global filter: min_condition_completeness ───────────────────────────────
 
 @pytest.mark.parametrize("value", [None, 1.0, 0.95, 0.5])
-def test_min_condition_completeness_accepted(dev_spec, write_spec, value):
-    dev_spec["adjust"][0]["params"]["min_condition_completeness"] = value
+def test_min_condition_completeness_accepted_in_global_filter(
+    dev_spec, write_spec, value
+):
+    dev_spec["filters"]["staff_recent"]["min_condition_completeness"] = value
     cfg = load_config(write_spec(dev_spec))
-    assert cfg.adjust[0].raw["params"]["min_condition_completeness"] == value
+    assert (
+        cfg.filters["staff_recent"]["min_condition_completeness"] == value
+    )
 
 
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, "full"])
 def test_min_condition_completeness_bad_value_is_loud(dev_spec, write_spec, value):
-    dev_spec["adjust"][0]["params"]["min_condition_completeness"] = value
+    dev_spec["filters"]["staff_recent"]["min_condition_completeness"] = value
+    with pytest.raises(ConfigError, match="min_condition_completeness"):
+        load_config(write_spec(dev_spec))
+
+
+def test_min_condition_completeness_removed_from_strength_params(
+    dev_spec, write_spec
+):
+    dev_spec["adjust"][0]["params"]["min_condition_completeness"] = 1.0
+    with pytest.raises(ConfigError, match="unknown key"):
+        load_config(write_spec(dev_spec))
+
+
+def test_stage_filter_cannot_lower_global_min_condition_completeness(
+    dev_spec, write_spec
+):
+    dev_spec["filters"]["staff_recent"]["min_condition_completeness"] = 0.8
+    dev_spec["analyses"][0]["filter"] = {"min_condition_completeness": 0.5}
     with pytest.raises(ConfigError, match="min_condition_completeness"):
         load_config(write_spec(dev_spec))

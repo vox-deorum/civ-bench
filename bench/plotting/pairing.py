@@ -51,7 +51,7 @@ def resolve_pairing(global_block, stage_override, catalog) -> Optional[PairingSp
             "were configured and presentation.condition_pairing.suffixes is null."
         )
     sort_condition = merged.get("sort_condition", "base")
-    if sort_condition != "base" and sort_condition not in suffixes:
+    if sort_condition not in ("base", "best") and sort_condition not in suffixes:
         raise AnalysisError(
             f"condition pairing sort_condition {sort_condition!r} is not in the "
             f"effective suffixes {suffixes}."
@@ -95,28 +95,33 @@ def paired_sort_order(
 ) -> list[str]:
     """Order base identities by the requested condition, with value fallback.
 
-    The input must already carry ``base_identity`` and ``condition``. If the
-    requested condition is absent or NaN for an identity, the first available
-    condition is used. Identities with no numeric value sort last.
+    The input must already carry ``base_identity`` and ``condition``.
+    ``spec.sort_condition`` is ``"base"``, ``"best"``, or a suffix. With a
+    concrete condition, an identity missing that condition falls back to the
+    first available condition. With ``"best"``, each identity is keyed by its
+    best value across all its conditions (the maximum when ``ascending`` is
+    false, the minimum when true). Identities with no numeric value sort last.
     """
     if df.empty:
         return []
-    preferences = [spec.sort_condition]
-    for condition in ("base", *spec.suffixes):
-        if condition not in preferences:
-            preferences.append(condition)
 
-    keyed: list[tuple[str, float]] = []
-    for identity, group in df.groupby("base_identity", sort=False, dropna=False):
-        value = float("nan")
-        for condition in preferences:
-            values = pd.to_numeric(
-                group.loc[group["condition"] == condition, value_col], errors="coerce"
-            ).dropna()
-            if not values.empty:
-                value = float(values.iloc[0])
-                break
-        keyed.append((str(identity), value))
+    def identity_value(group: pd.DataFrame) -> float:
+        values = pd.to_numeric(group[value_col], errors="coerce").dropna()
+        if values.empty:
+            return float("nan")
+        if spec.sort_condition == "best":
+            ordered = values.sort_values(ascending=ascending)
+            return float(ordered.iloc[0])
+        for condition in (spec.sort_condition, "base", *spec.suffixes):
+            candidates = values[group["condition"].astype(str) == condition]
+            if not candidates.empty:
+                return float(candidates.iloc[0])
+        return float("nan")
+
+    keyed: list[tuple[str, float]] = [
+        (str(identity), identity_value(group))
+        for identity, group in df.groupby("base_identity", sort=False, dropna=False)
+    ]
 
     def key(item):
         identity, value = item

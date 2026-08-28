@@ -32,7 +32,8 @@ import pandas as pd
 
 from ..catalog import Catalog
 from ..config import RunConfig
-from ..data import apply_filter_spec
+from ..config.filters import resolve_filter_spec
+from ..data import apply_filter_spec, incomplete_experiments_from_games
 from .errors import EstimatorError
 from .features import build_feature_frame, needs_variant_columns, prepare_features
 from .registry import MODEL_REGISTRY, load_model
@@ -315,9 +316,24 @@ def _load_and_filter(
             f"Run extract first (or point data.tables.turns at an existing CSV)."
         )
     df = build_feature_frame(turns_csv, use_variants=use_variants, filter_zero_score=False)
+    filter_spec = cfg.data.get("filter")
+    global_spec = resolve_filter_spec(filter_spec, cfg.filters, "data.filter")
+    condition_incomplete = None
+    if global_spec.get("min_condition_completeness") is not None:
+        games_csv = _table_path(cfg, "games")
+        if not Path(games_csv).exists():
+            raise EstimatorError(
+                f"estimator '{stage_id}': games table not found at '{games_csv}'. "
+                f"data.filter.min_condition_completeness needs the controlled grid. "
+                f"Run extract first."
+            )
+        condition_incomplete = incomplete_experiments_from_games(
+            games_csv, global_spec
+        )
     df = apply_filter_spec(
         df, catalog=catalog,
-        filter_spec=cfg.data.get("filter"), presets=cfg.filters,
+        filter_spec=filter_spec, presets=cfg.filters,
+        condition_incomplete=condition_incomplete,
     )
     if df.empty:
         raise EstimatorError(

@@ -44,10 +44,6 @@ DEFAULT_PARAMS = {
     "block": "auto",
     "baseline_experiment": None,
     "post_cell_normalize": "none",
-    # None ⇒ keep every controlled condition; a number in (0, 1] drops conditions
-    # whose occupied (seed, rotation) slot fraction is below the threshold (1.0 ⇒
-    # drop every condition missing any slot).
-    "min_condition_completeness": None,
 }
 
 # The persisted panel column contract (Done criterion). The first columns are the
@@ -438,82 +434,6 @@ def _build_cell_coverage(
     return pd.DataFrame(rows, columns=CELL_COVERAGE_COLUMNS)
 
 
-# ── parameterized condition completeness ─────────────────────────────────────
-def _reference_slots(
-    df: pd.DataFrame, baseline_experiment: str | None
-) -> list[tuple[int, int]]:
-    """The controlled reference grid: the ``(seed, seating_rotation)`` slots a
-    condition must occupy to be complete. Mirrors the report-side semantics
-    (``performance.experiment_completeness``): the explicit baseline experiment's
-    grid when set, else the union across the controlled subset."""
-    controlled = df[df["controlled"]]
-    if baseline_experiment is not None:
-        explicit = controlled[controlled["experiment"] == str(baseline_experiment)]
-        if not explicit.empty:
-            controlled = explicit
-    seeds = sorted(controlled["seed"].dropna().astype(int).unique())
-    rotations = sorted(controlled["seating_rotation"].dropna().astype(int).unique())
-    return [(int(seed), int(rot)) for seed in seeds for rot in rotations]
-
-
-def _condition_completeness(
-    df: pd.DataFrame, baseline_experiment: str | None
-) -> dict[str, float]:
-    """Per controlled experiment, the fraction of reference ``(seed, rotation)``
-    slots it occupies. An experiment missing any reference slot scores below 1.0;
-    an absent reference grid yields ``{}``."""
-    reference = set(_reference_slots(df, baseline_experiment))
-    if not reference:
-        return {}
-    out: dict[str, float] = {}
-    for exp, grp in df[df["controlled"]].groupby("experiment"):
-        present = {
-            (int(seed), int(rot))
-            for seed, rot in grp[["seed", "seating_rotation"]].itertuples(
-                index=False, name=None
-            )
-        }
-        out[str(exp)] = len(reference & present) / len(reference)
-    return out
-
-
-def _drop_incomplete_conditions(
-    df: pd.DataFrame,
-    baseline_experiment: str | None,
-    min_condition_completeness: float | None,
-    warnings_out: list[str],
-) -> pd.DataFrame:
-    """Drop every controlled experiment whose slot completeness is below the
-    threshold (``None`` ⇒ keep everything). A whole condition is dropped, not just
-    its missing cells, so ratings and baselines never mix complete and partial
-    evidence from the same experiment. The selected explicit baseline is called out
-    loudly because dropping it would void the whole cell adjustment."""
-    if min_condition_completeness is None or not df["controlled"].any():
-        return df
-    incomplete = sorted(
-        exp
-        for exp, frac in _condition_completeness(df, baseline_experiment).items()
-        if frac < min_condition_completeness
-    )
-    if not incomplete:
-        return df
-    if baseline_experiment is not None and str(baseline_experiment) in incomplete:
-        warnings_out.append(
-            f"condition completeness: the selected baseline_experiment "
-            f"'{baseline_experiment}' is itself below min_condition_completeness "
-            f"{min_condition_completeness} and would be dropped; reconsider the "
-            f"threshold or the baseline source."
-        )
-    dropped = int(df["experiment"].isin(incomplete).sum())
-    df = df[~df["experiment"].isin(incomplete)]
-    warnings_out.append(
-        f"condition completeness: dropped {len(incomplete)} experiment(s) below "
-        f"min_condition_completeness {min_condition_completeness}: "
-        f"{', '.join(incomplete)} ({dropped} rows)."
-    )
-    return df
-
-
 # ── orchestration ────────────────────────────────────────────────────────────
 def _effective_block(block: str, controlled_any: bool) -> str:
     if block == "auto":
@@ -553,10 +473,6 @@ def build_strength_panel(
         )
     df = _relative_and_logit(df, p["enforce_winner"], p["relative_to"])
     df = _join_identity(df, panel, games, catalog)
-
-    df = _drop_incomplete_conditions(
-        df, p["baseline_experiment"], p["min_condition_completeness"], warnings_out
-    )
 
     controlled_any = bool(df["controlled"].any())
     effective = _effective_block(p["block"], controlled_any)

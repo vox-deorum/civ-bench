@@ -189,13 +189,13 @@ The available models, increasing in complexity, are `naive`, `score`, `baseline`
     "enforce_winner": true,               // force the actual winner to the top
     "civ_adjust": "ols_logit",            // uncontrolled games: subtract civilization effects
     "block": "auto",                      // controlled games: matched start-cell correction
-    "min_condition_completeness": null    // null = keep every controlled condition; a number in (0, 1]
-                                          //   drops conditions whose occupied seed×rotation fraction is below it
   }
 }
 ```
 
-The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the Vanilla baseline of the same `(seed, seat)` cell, removing the start-position confound. `min_condition_completeness` optionally drops incomplete controlled conditions (experiments whose `seed × seating_rotation` grid is missing slots) before any fit; `1.0` skips every condition that is not fully complete. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
+The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the Vanilla baseline of the same `(seed, seat)` cell, removing the start-position confound. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
+
+Incomplete controlled conditions are handled by the **global** filter, not by this stage: set `data.filter.min_condition_completeness` (documented in [configs/benchmark.md](../configs/benchmark.md) section 3.1) to drop, as a whole, conditions whose `seed × seating_rotation` grid is missing slots (`1.0` skips every condition missing any slot). Because it is a global filter it drops the same conditions from every table before the strength fit, so incomplete conditions never reach the panel or the ratings.
 
 Every rating uses the same strength estimate. Its derivation belongs in the `strength` adjust stage.
 
