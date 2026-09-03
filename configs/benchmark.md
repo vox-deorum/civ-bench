@@ -143,7 +143,7 @@ render the matrix instead.
     "turns":      "runs/turn_data.csv",          // per-player per-turn panel (prediction features) — carries player_type, NOT seed
     "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategies/strength (+ player_type/model/strategist/config_slot)
     "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
-    "tokens":     "runs/model_token_usage.csv"
+    "tokens":     "runs/model_token_usage.csv"  // token use plus failed strategist turns per player trace
   },
 
   "filter": "llm_only"                   // GLOBAL selector: inline object OR a preset name (§3.1)
@@ -416,7 +416,7 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
   - `cell_baseline.csv` — the **VPAI seating×seed effect** from the controlled (`block`) path: `experiment, pathway, seed, player_id, civilization, cell_baseline, n_vanilla, win_rate, n_games, n_models, has_vanilla_baseline, vanilla_connected`. It carries every pathway that actually ran (`pathway ∈ {explicit, implicit}`); a default `baseline_experiment:null` run normally contains only implicit rows. When both explicit and implicit exist for a condition/cell, the report compares `implicit - explicit` on the logit scale.
   - `cell_coverage.csv` — the **controlled-design cell coverage report**: for each controlled experiment, which `(seed, player_id)` cells of the **entirety** reference grid it is missing. Columns: `experiment, seed, player_id, civilization, in_entirety, n_rows, n_vanilla, has_baseline, missing` (`missing = true` ⇒ the experiment has no rows for that cell). The "entirety" is the full baseline cell set — the `baseline_experiment`'s cells when set (a pure VP self-play spans every seat across every seed/rotation), else the union of `(seed, player_id)` cells observed across the controlled subset. This is a **report-only** diagnostic (WARN, never fatal — distinct from the hard-error "a row needs adjustment but its selected baseline cell is missing"); written only when controlled rows exist.
 
-  `performance.experiment_completeness` derives compact game-level completeness tables from the strength panel as its own report section: `experiment_completeness.csv` (`experiment, required_games, present_games, missing_games, completeness_pct, repeated_slots, warning`), `repeated_games.csv` (`experiment, seed, seating_rotation, n_games, game_ids, keep_candidate_game_id, extra_game_ids`), and gap/issue detail tables when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct `game_id`s, repeated slots list exact duplicate `game_id`s so bad runs can be removed deliberately, and `warning` is `ok` or a readable issue summary rather than a boolean.
+  `performance.experiment_completeness` derives compact game-level completeness tables from the strength panel and token telemetry as its own report section. `experiment_completeness.csv` contains `experiment, required_games, present_games, missing_games, completeness_pct, repeated_slots, failed_turn_count, avg_failure_count, failure_pct, warning`. The average is the mean failed turn count per player trace. The percentage is total failed turns divided by total selected turn roots. `decision_turn_failures.csv` identifies every affected `experiment, game_id, player_id` and lists its failed turns. `repeated_games.csv` lists exact duplicate game ids by seed and rotation, and gap or issue detail tables are written when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct `game_id`s, and `warning` is `ok` or a readable issue summary rather than a boolean.
 
   A mixed dataset writes these files; each is simply empty/absent when its path didn't run (`cell_baseline.csv`/`cell_coverage.csv` are empty on a fully uncontrolled run). `performance.strength_panel` always surfaces whichever exist (§6.2) — no flag.
 
@@ -588,9 +588,9 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 
 // performance.experiment_completeness — compact controlled-design game-grid completeness.
 //   Emits a standalone report section with per-experiment required/present/missing games,
-//   readable warning text, and exact repeated `game_id`s by seed/rotation slot for cleanup.
+//   failed-turn rates, readable warning text, exact repeated game ids, and failure details.
 { "module": "performance.experiment_completeness",
-  "uses": { "tables": ["strength"] },
+  "uses": { "tables": ["strength", "tokens"] },
   "params": {} }
 
 // performance.turn_predicted — P(win) / strength trajectory over the game, per estimator

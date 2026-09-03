@@ -270,6 +270,70 @@ def test_export_game_data_mismatch_aborts(tmp_path):
         export_game_data([str(db)], {"bad"}, str(out))
 
 
+def test_token_extraction_counts_latest_failed_turn_roots(tmp_path, catalog):
+    from bench.extract.extract_model_tokens import extract_player_model_token_rows
+
+    trace = tmp_path / "abc-player-1.db"
+    conn = sqlite3.connect(trace)
+    conn.execute(
+        "CREATE TABLE spans (id INTEGER PRIMARY KEY, traceId TEXT, spanId TEXT, "
+        "parentSpanId TEXT, turn INTEGER, name TEXT, startTime INTEGER, "
+        "attributes TEXT, statusCode INTEGER)"
+    )
+    conn.executemany(
+        "INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (1, "old", "old-root", None, 1, "strategist.turn.1", 1, "{}", 2),
+            (2, "ok", "ok-root", None, 1, "strategist.turn.1", 2, "{}", 1),
+            (3, "ok", "agent", "ok-root", 1, "agent.simple-strategist", 3,
+             '{"model":"openai-compatible/gpt-oss-120b","tokens.input":10,'
+             '"tokens.reasoning":2,"tokens.output":3}', 1),
+            (4, "failed", "failed-root", None, 2, "strategist.turn.2", 4, "{}", 2),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    rows = extract_player_model_token_rows(
+        str(trace), "abc", "ctrl", "GPT-OSS-120B", catalog
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["valid_turn_count"] == 2
+    assert row["failed_turn_count"] == 1
+    assert row["failure_pct"] == pytest.approx(0.5)
+    assert row["failed_turns"] == "2"
+    assert row["total_tokens"] == 15
+
+
+def test_all_failed_trace_uses_non_null_model_label(tmp_path, catalog):
+    from bench.extract.extract_model_tokens import extract_player_model_token_rows
+
+    trace = tmp_path / "def-player-2.db"
+    conn = sqlite3.connect(trace)
+    conn.execute(
+        "CREATE TABLE spans (id INTEGER PRIMARY KEY, traceId TEXT, spanId TEXT, "
+        "parentSpanId TEXT, turn INTEGER, name TEXT, startTime INTEGER, "
+        "attributes TEXT, statusCode INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (1, "failed", "root", None, 4, "strategist.turn.4", 1, "{}", 2),
+    )
+    conn.commit()
+    conn.close()
+
+    rows = extract_player_model_token_rows(
+        str(trace), "def", "ctrl", "TestLLM", catalog
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["model_name"] == "Unattributed"
+    assert rows[0]["model_base"] == "unattributed"
+    assert rows[0]["failed_turn_count"] == 1
+
+
 # ── WS7: export driver — swallowed-failure + structure-mismatch bugs ──────────
 def test_export_append_failure_raises(tmp_path, monkeypatch):
     from bench.extract import export_common

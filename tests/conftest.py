@@ -225,7 +225,7 @@ def _make_dev_spec() -> dict:
                 "id": "perf_experiment_completeness",
                 "module": "performance.experiment_completeness",
                 "enabled": True,
-                "uses": {"tables": ["strength"]},
+                "uses": {"tables": ["strength", "tokens"]},
                 "params": {},
             },
             {

@@ -59,7 +59,9 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
                            "model_name": model, "model_base": model,
                            "input_tokens": 1000 * (pid + 1), "reasoning_tokens": 100,
                            "output_tokens": 200 * (pid + 1), "total_tokens": 0,
-                           "focus_briefer_count": 0, "valid_turn_count": 5})
+                           "focus_briefer_count": 0, "valid_turn_count": 5,
+                           "failed_turn_count": 0, "failure_pct": 0.0,
+                           "failed_turns": ""})
             for (turn, tp) in LATE:
                 pred.append({"experiment": exp, "game_id": gid, "player_id": pid, "civilization": civ,
                              "turn": turn, "max_turn": MAX_TURN,
@@ -426,14 +428,76 @@ def test_performance_strength_panel_logit_advantage_uncontrolled_gate(env):
 
 
 def test_performance_experiment_completeness(env):
-    r = env("performance.experiment_completeness", {}, {"tables": ["strength"]})
+    r = env(
+        "performance.experiment_completeness", {},
+        {"tables": ["strength", "tokens"]},
+    )
     assert "experiment_completeness" in r.table_paths
     assert "repeated_games" in r.table_paths
     completeness = pd.read_csv(r.table_paths["experiment_completeness"])
     assert {
-        "required_games", "present_games", "missing_games", "repeated_slots", "warning",
+        "required_games", "present_games", "missing_games", "repeated_slots",
+        "avg_failure_count", "failure_pct", "warning",
     } <= set(completeness.columns)
     assert "repeat_warning" not in completeness.columns
+    assert "decision_turn_failures" in r.table_paths
+
+
+def test_experiment_completeness_reports_decision_turn_failures():
+    from bench.analyses.performance.experiment_completeness import (
+        attach_decision_turn_failures,
+    )
+
+    completeness = pd.DataFrame([
+        {"experiment": "ctrl", "warning": "ok"},
+        {"experiment": "clean", "warning": "1 missing slot(s)"},
+    ])
+    tokens = pd.DataFrame([
+        {"experiment": "ctrl", "game_id": "g1", "player_id": 0,
+         "player_type": "TestLLM", "model_base": "main", "valid_turn_count": 10,
+         "failed_turn_count": 2, "failed_turns": "3,7"},
+        # A second model row for the same trace must not double count its turns.
+        {"experiment": "ctrl", "game_id": "g1", "player_id": 0,
+         "player_type": "TestLLM", "model_base": "briefer", "valid_turn_count": 10,
+         "failed_turn_count": 2, "failed_turns": "3,7"},
+        {"experiment": "ctrl", "game_id": "g1", "player_id": 1,
+         "player_type": "Vanilla", "model_base": "vanilla", "valid_turn_count": 10,
+         "failed_turn_count": 0, "failed_turns": ""},
+        {"experiment": "clean", "game_id": "g2", "player_id": 0,
+         "player_type": "TestLLM", "model_base": "main", "valid_turn_count": 20,
+         "failed_turn_count": 0, "failed_turns": ""},
+    ])
+
+    summary, failures = attach_decision_turn_failures(completeness, tokens)
+    by_experiment = summary.set_index("experiment")
+    assert by_experiment.loc["ctrl", "avg_failure_count"] == pytest.approx(1.0)
+    assert by_experiment.loc["ctrl", "failure_pct"] == pytest.approx(0.1)
+    assert "2 failed decision turn(s)" in by_experiment.loc["ctrl", "warning"]
+    assert by_experiment.loc["clean", "avg_failure_count"] == 0
+    assert by_experiment.loc["clean", "failure_pct"] == 0
+    assert by_experiment.loc["clean", "warning"] == "1 missing slot(s)"
+    assert len(failures) == 1
+    assert failures.iloc[0]["failed_turns"] == "3,7"
+
+
+def test_experiment_completeness_warns_for_legacy_token_csv():
+    from bench.analyses.performance.experiment_completeness import (
+        attach_decision_turn_failures,
+    )
+
+    completeness = pd.DataFrame([{"experiment": "ctrl", "warning": "ok"}])
+    legacy_tokens = pd.DataFrame([
+        {"experiment": "ctrl", "game_id": "g1", "player_id": 0,
+         "valid_turn_count": 10},
+    ])
+
+    summary, failures = attach_decision_turn_failures(completeness, legacy_tokens)
+
+    assert pd.isna(summary.iloc[0]["failed_turn_count"])
+    assert pd.isna(summary.iloc[0]["avg_failure_count"])
+    assert pd.isna(summary.iloc[0]["failure_pct"])
+    assert summary.iloc[0]["warning"] == "decision-turn failure telemetry unavailable"
+    assert failures.empty
 
 
 def test_strength_panel_coverage_summary_counts_gaps():
@@ -718,6 +782,25 @@ def test_exploratory_model_token_costs(env):
     assert "player_type" not in tbl.columns
     assert "total_cost" in tbl.columns and "games" in tbl.columns
     assert r.metadata["by_player_type"] is True
+
+
+def test_compute_game_costs_accepts_missing_model_name(env):
+    from bench.analyses.exploratory.model_token_costs import compute_game_costs
+
+    tokens = pd.DataFrame([{
+        "game_id": "failed-game",
+        "player_type": "TestLLM",
+        "model_name": np.nan,
+        "input_tokens": 0,
+        "reasoning_tokens": 0,
+        "output_tokens": 0,
+    }])
+
+    costs = compute_game_costs(tokens, env.catalog)
+
+    assert len(costs) == 1
+    assert costs.iloc[0]["model"] == "Unattributed"
+    assert bool(costs.iloc[0]["available"]) is False
 
 
 def test_exploratory_model_token_costs_can_use_model_only_view(env):

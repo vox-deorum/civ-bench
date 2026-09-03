@@ -26,7 +26,8 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
     """Price token rows and aggregate them to complete per-player-game costs."""
     pricing = catalog.pricing_per_million()
     df = tokens_df.copy()
-    df["model"] = df["model_name"].apply(catalog.canonicalize_model_name)
+    model_names = df["model_name"].where(df["model_name"].notna(), "Unattributed")
+    df["model"] = model_names.astype(str).apply(catalog.canonicalize_model_name)
 
     def numeric_column(name: str) -> pd.Series:
         if name not in df.columns:

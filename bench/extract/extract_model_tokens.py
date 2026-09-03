@@ -42,10 +42,16 @@ MODEL_TOKEN_FIELDNAMES = [
     "tool_count",
     "focus_briefer_count",
     "valid_turn_count",
+    "failed_turn_count",
+    "failure_pct",
+    "failed_turns",
 ]
 
 VANILLA_MODEL_NAME = "Vanilla"
 VANILLA_MODEL_BASE = "vanilla"
+UNATTRIBUTED_MODEL_NAME = "Unattributed"
+UNATTRIBUTED_MODEL_BASE = "unattributed"
+OTEL_ERROR_STATUS_CODE = 2
 
 PLAYER_TRACE_PATTERN = re.compile(
     r"^(?P<game_id>[0-9a-f-]+)-player-(?P<player_id>\d+)\.db$",
@@ -96,12 +102,12 @@ def _find_player_trace_databases(game_db_path: str) -> List[Tuple[int, str]]:
     return sorted(trace_dbs, key=lambda item: item[0])
 
 
-def _fetch_valid_traces(cursor) -> List[Tuple[int, str]]:
+def _fetch_valid_traces(cursor) -> List[Tuple[int, str, int]]:
     cursor.execute(
         """
-        SELECT turn, traceId
+        SELECT turn, traceId, statusCode
         FROM (
-            SELECT turn, traceId, startTime, id,
+            SELECT turn, traceId, statusCode, startTime, id,
                    ROW_NUMBER() OVER (
                        PARTITION BY turn
                        ORDER BY startTime DESC, id DESC
@@ -113,7 +119,10 @@ def _fetch_valid_traces(cursor) -> List[Tuple[int, str]]:
         ORDER BY turn
         """
     )
-    return [(int(turn), trace_id) for turn, trace_id in cursor.fetchall()]
+    return [
+        (int(turn), trace_id, int(status_code))
+        for turn, trace_id, status_code in cursor.fetchall()
+    ]
 
 
 def _fetch_relevant_spans(cursor, trace_ids: List[str]) -> List[dict]:
@@ -168,6 +177,7 @@ def _get_or_create_model_row(
     player_type: str,
     model_raw: str,
     valid_turn_count: int,
+    failed_turns: List[int],
 ) -> dict:
     model_base = catalog.normalize_model_base(model_raw)
     if not model_base:
@@ -187,6 +197,9 @@ def _get_or_create_model_row(
             "tool_count": 0,
             "focus_briefer_count": 0,
             "valid_turn_count": valid_turn_count,
+            "failed_turn_count": len(failed_turns),
+            "failure_pct": round(len(failed_turns) / valid_turn_count, 4),
+            "failed_turns": ",".join(str(turn) for turn in failed_turns),
             "_model_variants": set(),
             "_agent_names": set(),
         }
@@ -208,7 +221,14 @@ def _find_owner_span(tool_span: dict, span_lookup: Dict[Tuple[str, str], dict]) 
     return None
 
 
-def _build_zero_token_row(experiment, game_id, player_id, player_type, valid_turn_count) -> dict:
+def _build_zero_token_row(
+    experiment,
+    game_id,
+    player_id,
+    player_type,
+    valid_turn_count,
+    failed_turns,
+) -> dict:
     return {
         "experiment": experiment,
         "game_id": game_id,
@@ -225,6 +245,9 @@ def _build_zero_token_row(experiment, game_id, player_id, player_type, valid_tur
         "tool_count": 0,
         "focus_briefer_count": 0,
         "valid_turn_count": valid_turn_count,
+        "failed_turn_count": len(failed_turns),
+        "failure_pct": round(len(failed_turns) / valid_turn_count, 4),
+        "failed_turns": ",".join(str(turn) for turn in failed_turns),
     }
 
 
@@ -264,7 +287,12 @@ def extract_player_model_token_rows(
             conn.close()
             return []
         valid_turn_count = len(valid_turns)
-        trace_ids = [trace_id for _, trace_id in valid_turns]
+        failed_turns = sorted(
+            turn
+            for turn, _, status_code in valid_turns
+            if status_code == OTEL_ERROR_STATUS_CODE
+        )
+        trace_ids = [trace_id for _, trace_id, _ in valid_turns]
         spans = _fetch_relevant_spans(cursor, trace_ids)
         conn.close()
     except sqlite3.DatabaseError as exc:
@@ -290,7 +318,7 @@ def extract_player_model_token_rows(
             continue
         row = _get_or_create_model_row(
             rows_by_model, catalog, experiment, game_id, player_id,
-            player_type, span["model_raw"], valid_turn_count,
+            player_type, span["model_raw"], valid_turn_count, failed_turns,
         )
         row["input_tokens"] += span["input_tokens"]
         row["reasoning_tokens"] += span["reasoning_tokens"]
@@ -305,7 +333,7 @@ def extract_player_model_token_rows(
             continue
         row = _get_or_create_model_row(
             rows_by_model, catalog, experiment, game_id, player_id,
-            player_type, owner_span["model_raw"], valid_turn_count,
+            player_type, owner_span["model_raw"], valid_turn_count, failed_turns,
         )
         row["tool_count"] += 1
         if span["name"] == "simple-tool.focus-briefer":
@@ -313,7 +341,20 @@ def extract_player_model_token_rows(
         row["_agent_names"].add(_extract_agent_name(owner_span["name"], owner_span["agent_name"]))
 
     if not rows_by_model and player_type == VANILLA_MODEL_NAME and valid_turn_count > 0:
-        return [_build_zero_token_row(experiment, game_id, player_id, player_type, valid_turn_count)]
+        return [_build_zero_token_row(
+            experiment, game_id, player_id, player_type, valid_turn_count, failed_turns
+        )]
+
+    if not rows_by_model and failed_turns:
+        row = _build_zero_token_row(
+            experiment, game_id, player_id, player_type, valid_turn_count, failed_turns
+        )
+        row.update({
+            "model_name": UNATTRIBUTED_MODEL_NAME,
+            "model_base": UNATTRIBUTED_MODEL_BASE,
+            "model_variants": "",
+        })
+        return [row]
 
     final_rows = []
     for row in sorted(rows_by_model.values(), key=lambda item: item["model_base"]):
@@ -333,6 +374,9 @@ def extract_player_model_token_rows(
             "tool_count": row["tool_count"],
             "focus_briefer_count": row["focus_briefer_count"],
             "valid_turn_count": row["valid_turn_count"],
+            "failed_turn_count": row["failed_turn_count"],
+            "failure_pct": row["failure_pct"],
+            "failed_turns": row["failed_turns"],
         })
     return final_rows
 
