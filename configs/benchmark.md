@@ -772,8 +772,9 @@ The chapter lives in its own directory beside the family pages:
   controlled-seed/
     index.html                       # the chapter page: two heatmap tables per controlled seed
     seed-<seed>-player-<player_id>.html # one detail page per available pair
-  assets/controlled-seed-report.js    # deterministic vanilla JS, no packages/network
-  assets/<analysis-id>/*.csv          # the three source tables
+  assets/report-common.js            # shared vanilla JS util (color spreading), no packages/network
+  assets/controlled-seed-report.js   # the chapter's vanilla JS, no packages/network
+  assets/<analysis-id>/*.csv         # the three source tables
 ```
 
 - **Seed overview.** Each seed gets two heatmaps on the same axes: rows are
@@ -784,11 +785,13 @@ The chapter lives in its own directory beside the family pages:
   isolated row before the strategist rows. The renderer completes the global
   row and column grid and leaves unobserved combinations blank. The first
   heatmap shows mean `adjusted_strength` on a fixed RdYlBu scale from 0 to 1
-  (red at 0, yellow at 0.5, blue at 1; rounded value in the cell); the second
-  annotates the dominant victory focus (name and percentage, a stable
-  categorical color per strategy with intensity by share). Both heatmaps carry
-  the same cell tooltip: the civilization with its run count, the mean adjusted
-  strength, and the dominant victory focus. Clicking a cell opens the matching
+  (red at 0, yellow at 0.5, blue at 1; rounded value in the cell) and leads
+  with an `Avg` column that pools each condition row's runs (the run-weighted
+  mean over the seed's populated seats, not a link); the second annotates the
+  dominant victory focus (name and percentage, a stable categorical color per
+  strategy with intensity by share). Both heatmaps carry the same cell
+  tooltip: the civilization with its run count, the mean adjusted strength,
+  and the dominant victory focus. Clicking a cell opens the matching
   `(seed, player_id)` detail page with that strategist and condition
   preselected (encoded in the query string).
 - **Seed-player detail page.** The header shows the seed, player ID, matched
@@ -798,17 +801,20 @@ The chapter lives in its own directory beside the family pages:
   run's interpolated curve averaged on the fixed 101-point grid (§6.2): one
   checkbox per strategist, all checked by default, toggles that strategist's
   conditions; the matched Vanilla curve stays visible as a thicker reference
-  line; and hovering the chart snaps to the nearest grid progress and lists
-  every checked condition's probability at that point, highest first. The
-  comparison table keeps one row per strategist-condition combination plus the
-  Vanilla row: strategist, condition, run count, mean weighted victory
-  probability, mean adjusted strength, the dominant focus, and the four focus
-  percentages, under short headers whose full wording is the header's title
-  tooltip. The adjusted-strength and focus cells are colored exactly like the
-  overview heatmaps (RdYlBu for strength, per-strategy colors for focus
-  shares), and the Vanilla row and its adjusted-strength value are highlighted.
-  Missing baselines and missing prediction rows are visible page notes, never
-  fatal.
+  line; the vertical axis fits the visible curves; and hovering the chart
+  snaps to the nearest grid progress and lists every checked condition's
+  probability at that point, highest first. Strategists that share a catalog
+  color (typically one model family) are spread through the shared
+  `civBench.distinguishColors` util in `assets/report-common.js` so their
+  curves stay distinguishable. The comparison table keeps one row per
+  strategist-condition combination plus the Vanilla row: strategist,
+  condition, run count, mean weighted victory probability, mean adjusted
+  strength, the dominant focus, and the four focus percentages, under short
+  headers whose full wording is the header's title tooltip. The
+  adjusted-strength and focus cells are colored exactly like the overview
+  heatmaps (RdYlBu for strength, per-strategy colors for focus shares), and
+  the Vanilla row and its adjusted-strength value are highlighted. Missing
+  baselines and missing prediction rows are visible page notes, never fatal.
 
 **The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module instance's resolved friendly identity, including the grouped BT or PL identity selected from `group_by`, so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 

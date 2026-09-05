@@ -505,7 +505,8 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
         "controlled-seed/index.html",
         "controlled-seed/seed-1-player-0.html", "controlled-seed/seed-1-player-1.html",
         "controlled-seed/seed-2-player-0.html", "controlled-seed/seed-2-player-1.html",
-        "assets/report.css", "assets/controlled-seed-report.js",
+        "assets/report.css", "assets/report-common.js",
+        "assets/controlled-seed-report.js",
     }
     written = {
         str(path.relative_to(out)).replace("\\", "/")
@@ -539,7 +540,10 @@ def test_chapter_pages_carry_the_site_sidebar(rendered):
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<a href="../report.html">Overview</a>' in detail
     assert '<link rel="stylesheet" href="../assets/report.css">' in detail
+    # The shared util loads before the page script on every chapter page.
+    assert '<script src="../assets/report-common.js" defer></script>' in detail
     assert '<script src="../assets/controlled-seed-report.js" defer></script>' in detail
+    assert detail.index("report-common.js") < detail.index("controlled-seed-report.js")
     # The family report's sidebar points into the chapter folder.
     overview_page = _read(out, "report.html")
     assert 'href="controlled-seed/index.html#seed-1"' in overview_page
@@ -553,8 +557,10 @@ def test_two_heatmaps_per_seed_and_blank_cells(rendered):
     assert index.count("<h2") == 3  # seed 1, seed 2, source tables
     assert index.count('id="seed-1"') == 1 and index.count('id="seed-2"') == 1
     # The completed global grid leaves unobserved combinations blank (12 empty
-    # cells per heatmap: 4 in seed 1, 8 in seed 2).
-    assert index.count("heat-cell-empty") == 24
+    # cells per heatmap: 4 in seed 1, 8 in seed 2) and the strength heatmap's
+    # Avg column adds 3 more in seed 2 (the two Kimi rows and the vanilla row
+    # have no seed-2 cells to pool).
+    assert index.count("heat-cell-empty") == 27
     # One isolated vanilla tbody per heatmap.
     assert index.count('<tbody class="vanilla-body">') == 4
 
@@ -617,6 +623,38 @@ def test_strength_scale_is_rdylbu(rendered):
     assert "background-color:#fee090" in index
     assert "background-color:#abd9e9" in index
     assert "red 0, yellow 0.5, blue 1" in index
+
+
+def test_strength_heatmap_leads_with_avg_column(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    # One Avg column per strength heatmap (one per seed), none on the focus
+    # heatmaps.
+    assert index.count('<th scope="col" class="col-avg"') == 2
+    # The vanilla row pools both seats' runs; a one-seat row pools its own.
+    assert 'data-tip="Adj strength: 0.4000\nMean over 4 runs across 2 seats"' in index
+    assert 'data-tip="Adj strength: 0.7000\nMean over 1 run across 1 seat"' in index
+    # The avg cell is a colored summary, not a link into a detail page.
+    assert (
+        '<td class="heat-cell heat-cell-avg col-avg" '
+        'style="background-color:#fee090;color:#18202a" '
+        'data-tip="Adj strength: 0.4000\n'
+        'Mean over 4 runs across 2 seats">0.40</td>' in index
+    )
+    # Seed 2's uncovered rows leave the avg cell blank (Kimi x 2, vanilla).
+    assert index.count('class="heat-cell heat-cell-empty col-avg"') == 3
+
+
+def test_shared_color_util_and_adaptive_axis(rendered):
+    env, result, out = rendered
+    common = _read(out, "assets/report-common.js")
+    assert common.startswith("/* civ-bench")
+    assert "window.civBench" in common
+    assert "distinguishColors" in common
+    script = _read(out, "assets/controlled-seed-report.js")
+    assert "distinguishColors" in script  # same-family colors get spread
+    assert "fitYRange" in script  # the Y axis fits the visible curves
+    assert "yTicks" in script
 
 
 def test_detail_page_columns_and_run_counts(rendered):
@@ -816,4 +854,6 @@ def test_renderer_escapes_labels_and_query_parameters():
     assert 'value="Weird &amp; &lt;Model&gt;" checked' in detail
     assert "<script" in detail and "../assets/controlled-seed-report.js" in detail
     assert 'href="index.html#seed-1"' in detail
+    assert pages["assets/report-common.js"].startswith("/* civ-bench")
+    assert "distinguishColors" in pages["assets/report-common.js"]
     assert pages["assets/controlled-seed-report.js"].startswith("/* civ-bench")

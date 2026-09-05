@@ -39,7 +39,7 @@ This row and column orientation follows the requirement that Vanilla is a condit
 
 ### Adjusted strength heatmap
 
-The first heatmap shows mean `adjusted_strength`. Use a fixed RdYlBu scale from 0 to 1 across every seed so the panels can be compared directly: 0 is red, 0.5 is yellow, 1 is blue. Display the rounded value in each populated cell and leave missing combinations blank.
+The first heatmap shows mean `adjusted_strength`. Use a fixed RdYlBu scale from 0 to 1 across every seed so the panels can be compared directly: 0 is red, 0.5 is yellow, 1 is blue. Display the rounded value in each populated cell and leave missing combinations blank. Lead with an `Avg` column that pools each condition row: weight each populated seat's mean by its run count, which equals the mean over every run of that `(seed, strategist, condition)` row and keeps the page's equal-runs averaging. The avg cell is a colored summary with its own tooltip, not a link.
 
 ### Dominant victory focus heatmap
 
@@ -64,8 +64,10 @@ The header shows the seed, player ID, matched civilization, and total source run
 - Interpolate each individual game curve onto a fixed 101-point normalized-progress grid from 0 to 1, then take the arithmetic mean at each grid point. Interpolate only inside each run's observed progress range and do not extrapolate or hold endpoints. Each point averages the runs that cover that point. Do not draw a confidence interval.
 - Provide one checkbox per strategist, all checked by default, so every condition is shown together. Unchecking a strategist hides its conditions; the Vanilla reference stays visible.
 - Keep the matched dedicated Vanilla curve visible as a thicker reference line when it exists.
+- Let the vertical axis fit the visible curves (a padded min-to-max range, clamped to 0 to 1) instead of always showing the full 0-to-1 range.
 - Opening the page from an overview cell checks only that cell's strategist (the Vanilla row's cells keep everyone) and highlights the condition in the legend.
 - Hovering the chart snaps to the nearest grid progress and shows a tooltip comparing every checked condition's victory probability at that point, sorted from highest to lowest, with a vertical guide line and a dot on each curve.
+- Spread strategists that share a catalog color (typically one model family) through the shared `civBench.distinguishColors` util (`assets/report-common.js`): the first member keeps the color, every extra member rotates the hue 30 degrees, and grays step lightness instead. Forthcoming report pages load the same util rather than growing per-report copies.
 
 ### Comparison table
 
@@ -126,6 +128,7 @@ The chapter adds these files to the report directory:
   controlled-seed/
     index.html
     seed-<seed>-player-<player_id>.html
+  assets/report-common.js
   assets/controlled-seed-report.js
   assets/<analysis-id>/*.csv
 ```
@@ -167,6 +170,7 @@ Use accessible HTML tables for the heatmaps, with deterministic vanilla JavaScri
 - Render exactly two heatmaps per seed and one page per available seed-player pair.
 - Render Vanilla as a separate condition row in both heatmaps and the detail table.
 - Render the civ-paired column headings and the same tooltip on both heatmaps' cells.
+- Render the strength heatmap's leading Avg column (pooled row means, blank when the row is uncovered).
 - Link every populated heatmap cell to the correct page and preselection query.
 - Show run count but no rotations-represented column on detail pages.
 - Render strategist checkboxes, all checked by default, and color the detail table's strength and focus cells like the overview heatmaps.

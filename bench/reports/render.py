@@ -294,6 +294,8 @@ table.heatmap .row-label { text-align: left; white-space: normal; min-width: 13r
 .heat-cell a { display: block; padding: .38rem .55rem; color: inherit; text-decoration: none; }
 .heat-cell a:hover, .heat-cell a:focus-visible { outline: 2px solid #175ca8; outline-offset: -2px; }
 .heat-cell-empty { background: transparent; }
+table.heatmap .col-avg { border-right: 2px solid #b6c1cd; }
+.heat-cell-avg { padding: .38rem .55rem; font-weight: 650; }
 tbody.vanilla-body tr.vanilla-row th, tbody.vanilla-body tr.vanilla-row td { border-top: 3px double #8d99a9; border-bottom: 3px double #8d99a9; background: #f3f0e8; }
 tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient(rgba(255,255,255,.35), rgba(255,255,255,.35)); }
 .heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); white-space: pre-line; font-size: .82rem; pointer-events: none; }

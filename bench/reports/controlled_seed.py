@@ -10,12 +10,16 @@ folder, both framed by the report site's sidebar navigation.
 
 The pages are self-contained and deterministic: one overview page with two heatmap
 tables per controlled seed (mean adjusted strength on a fixed RdYlBu scale, red at
-0, yellow at 0.5, blue at 1, plus the dominant victory focus with a stable
-categorical color per strategy), one detail page per ``(seed, player_id)`` pair,
-and one static vanilla-JavaScript asset for tooltips, the strategist checkboxes,
-and the probability-curve chart with its per-progress comparison tooltip. Every
-value, color, link, and query string is computed server-side, so unchanged inputs
-re-render byte-identically; the browser script only reads embedded data.
+0, yellow at 0.5, blue at 1, with a leading Avg column pooling each condition
+row's runs, plus the dominant victory focus with a stable categorical color per
+strategy), one detail page per ``(seed, player_id)`` pair, and static
+vanilla-JavaScript assets for tooltips, the strategist checkboxes, and the
+probability-curve chart with its per-progress comparison tooltip. Every value,
+color, link, and query string is computed server-side, so unchanged inputs
+re-render byte-identically; the browser script only reads embedded data. The
+chart's Y axis fits the visible curves, and same-family strategists that share a
+catalog color are spread through the shared
+:js:func:`civBench.distinguishColors` util in :mod:`bench.reports.assets`.
 
 Rows are strategist-condition combinations and columns are final ``player_id``
 values, each column heading pairing the position with its seat-bound
@@ -33,6 +37,7 @@ from urllib.parse import urlencode
 
 import numpy as np
 
+from .assets import REPORT_COMMON_JS
 from .context import ReportBuildContext
 from .errors import ReportError
 from .model import ControlledSeedDocument
@@ -291,8 +296,11 @@ def _heat_cell(row: dict, seed: int, player_id: int, kind: str) -> str:
     )
 
 
-def _empty_heat_cell() -> str:
-    return '<td class="heat-cell heat-cell-empty" aria-label="no data"></td>'
+def _empty_heat_cell(extra_class: str = "") -> str:
+    classes = "heat-cell heat-cell-empty"
+    if extra_class:
+        classes += f" {extra_class}"
+    return f'<td class="{classes}" aria-label="no data"></td>'
 
 
 def _heatmap(
@@ -314,6 +322,11 @@ def _heatmap(
         "condition row and final player position</caption>"
     )
     parts.append("<thead><tr><th scope=\"col\" class=\"row-label\">Strategist | Condition</th>")
+    if kind == "strength":
+        parts.append(
+            '<th scope="col" class="col-avg" title="Pooled mean adjusted strength '
+            "across this seed's populated seats\">Avg</th>"
+        )
     for player_id in players:
         civilization = headings.get((seed, player_id))
         column = f"{player_id}: {civilization}" if civilization else f"Player {player_id}"
@@ -330,12 +343,50 @@ def _heatmap(
                 out.append(_heat_cell(row, seed, player_id, kind))
         return out
 
+    def avg_cell(strategist: str, condition: str) -> str:
+        """The strength heatmap's leading cell: the pooled mean over the row.
+
+        Each populated seat's cell is itself a mean over its runs, so weighting
+        the seat means by their run counts yields the mean over every run of
+        this (seed, strategist, condition) row, consistent with the page's
+        equal-runs averaging.
+        """
+        rows = []
+        for player_id in players:
+            row = summary.get((seed, player_id, strategist, condition))
+            if row is not None and np.isfinite(float(row["mean_adjusted_strength"])):
+                rows.append(row)
+        runs = sum(int(row["run_count"]) for row in rows)
+        if not rows or runs <= 0:
+            return _empty_heat_cell("col-avg")
+        value = (
+            sum(
+                float(row["mean_adjusted_strength"]) * int(row["run_count"])
+                for row in rows
+            )
+            / runs
+        )
+        background = _strength_background(value)
+        tip = (
+            f"Adj strength: {value:.4f}\n"
+            f"Mean over {runs} run{'s' if runs != 1 else ''} across "
+            f"{len(rows)} seat{'s' if len(rows) != 1 else ''}"
+        )
+        return (
+            f'<td class="heat-cell heat-cell-avg col-avg" '
+            f'style="background-color:{background};'
+            f'color:{_cell_text_color(background)}" '
+            f'data-tip="{_esc(tip)}">{value:.2f}</td>'
+        )
+
     if _has_vanilla_rows(doc):
         parts.append('<tbody class="vanilla-body">')
         parts.append(
             f'<tr class="vanilla-row"><th scope="row" class="row-label">'
             f"{_esc(vanilla)}</th>"
         )
+        if kind == "strength":
+            parts.append(avg_cell(vanilla, vanilla))
         parts.extend(cells_for(vanilla, vanilla))
         parts.append("</tr></tbody>")
 
@@ -345,6 +396,8 @@ def _heatmap(
         parts.append(
             f'<tr><th scope="row" class="row-label">{_esc(row_label)}</th>'
         )
+        if kind == "strength":
+            parts.append(avg_cell(strategist, condition))
         parts.extend(cells_for(strategist, condition))
         parts.append("</tr>")
     parts.append("</tbody></table></div>")
@@ -413,8 +466,9 @@ def _render_overview(
     parts.append(
         '<p class="caption">Each cell averages every unique run for its seed, final '
         "player position, strategist, and condition; seating rotations and repeated "
-        "runs contribute equally. Click a cell to open the matching seed-player "
-        "detail page.</p>"
+        "runs contribute equally. The strength heatmap's leading Avg column pools "
+        "each row's runs. Click a cell to open the matching seed-player detail "
+        "page.</p>"
     )
 
     for seed in seeds:
@@ -444,6 +498,7 @@ def _render_overview(
         parts.append("</ul></section>")
 
     parts.append("</main>")
+    parts.append('<script src="../assets/report-common.js" defer></script>')
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
     return "\n".join(parts) + "\n"
@@ -701,9 +756,9 @@ def _render_detail(
     parts.append(
         '<p class="caption">Each curve is the mean of every run\'s interpolated '
         "victory probability on the fixed 0 to 1 progress grid; the "
-        f"{_esc(vanilla)} reference curve is drawn thicker when present. Hover "
-        "the chart to compare every checked condition's probability at one "
-        "progress point.</p>"
+        f"{_esc(vanilla)} reference curve is drawn thicker when present. The "
+        "vertical axis fits the visible curves. Hover the chart to compare "
+        "every checked condition's probability at one progress point.</p>"
     )
     parts.append("</section>")
 
@@ -716,6 +771,7 @@ def _render_detail(
     parts.append(
         f'<script type="application/json" id="curve-data">{_chart_data(series)}</script>'
     )
+    parts.append('<script src="../assets/report-common.js" defer></script>')
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
     return "\n".join(parts) + "\n"
@@ -747,6 +803,7 @@ def render_controlled_seed_site(
             pages[f"{CONTROLLED_SEED_DIR}/{filename}"] = _render_detail(
                 doc, row, prev_row, next_row, navigation
             )
+    pages["assets/report-common.js"] = REPORT_COMMON_JS
     pages["assets/controlled-seed-report.js"] = CONTROLLED_SEED_JS
     return pages
 
@@ -754,8 +811,10 @@ def render_controlled_seed_site(
 # ── the static browser script ─────────────────────────────────────────────────
 CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
    Deterministic vanilla JavaScript: no packages, no network. Tooltips on
-   heatmap cells; strategist checkboxes, the SVG probability-curve chart, and
-   the per-progress comparison tooltip on seed-player detail pages. */
+   heatmap cells; strategist checkboxes, the SVG probability-curve chart (its
+   Y axis fits the visible curves), and the per-progress comparison tooltip on
+   seed-player detail pages. Same-family strategist colors are spread through
+   the shared civBench.distinguishColors util (assets/report-common.js). */
 (function () {
   "use strict";
 
@@ -908,6 +967,20 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
       });
     }
 
+    // Same-family strategists can share a catalog color; the shared util
+    // spreads their hues so their curves stay distinguishable.
+    var colorMap = null;
+    if (window.civBench && window.civBench.distinguishColors) {
+      colorMap = window.civBench.distinguishColors(
+        data.series.map(function (entry) {
+          return { key: entry.strategist, color: entry.color };
+        })
+      );
+    }
+    function colorOf(entry) {
+      return (colorMap && colorMap[entry.strategist]) || entry.color;
+    }
+
     var margin = data.margin;
     var width = data.chartWidth;
     var height = data.chartHeight;
@@ -917,8 +990,51 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     function x(value) {
       return margin.left + value * plotWidth;
     }
+
+    // The Y axis fits the visible curves instead of the full 0-to-1 range.
+    var yMin = 0;
+    var yMax = 1;
+
     function y(value) {
-      return margin.top + (1 - value) * plotHeight;
+      return margin.top + (1 - (value - yMin) / (yMax - yMin)) * plotHeight;
+    }
+
+    function fitYRange(series) {
+      var values = [];
+      series.forEach(function (entry) {
+        entry.points.forEach(function (point) {
+          values.push(point[1]);
+        });
+      });
+      if (!values.length) {
+        yMin = 0;
+        yMax = 1;
+        return;
+      }
+      var lo = Math.min.apply(null, values);
+      var hi = Math.max.apply(null, values);
+      var pad = (hi - lo) > 0 ? (hi - lo) * 0.08 : 0.05;
+      yMin = Math.max(0, lo - pad);
+      yMax = Math.min(1, hi + pad);
+    }
+
+    function yTicks() {
+      var range = yMax - yMin;
+      var steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1];
+      var step = steps[steps.length - 1];
+      for (var i = 0; i < steps.length; i++) {
+        if (range / steps[i] <= 5) {
+          step = steps[i];
+          break;
+        }
+      }
+      var ticks = [];
+      var first = Math.ceil(yMin / step - 1e-9);
+      var last = Math.floor(yMax / step + 1e-9);
+      for (var k = first; k <= last; k++) {
+        ticks.push(Math.round(step * k * 1e6) / 1e6);
+      }
+      return ticks;
     }
 
     var svg = null;
@@ -957,13 +1073,13 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     function buildGuide(series) {
       guide = svgTag("g", { "class": "chart-guide", display: "none" });
       guideLine = svgTag("line", {
-        y1: y(0), y2: y(1),
+        y1: margin.top, y2: margin.top + plotHeight,
         stroke: "#445164", "stroke-width": 1, "stroke-dasharray": "4 3"
       });
       guide.appendChild(guideLine);
       guideDots = series.map(function (entry) {
         var dot = svgTag("circle", {
-          r: 4, fill: entry.color, stroke: "#ffffff",
+          r: 4, fill: colorOf(entry), stroke: "#ffffff",
           "stroke-width": 1.5, display: "none"
         });
         guide.appendChild(dot);
@@ -989,19 +1105,24 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
         width: "100%",
         preserveAspectRatio: "xMidYMid meet"
       });
+      fitYRange(series);
+      var ticks = yTicks();
       [0, 0.25, 0.5, 0.75, 1].forEach(function (tick) {
         chart.appendChild(svgTag("line", {
-          x1: x(tick), y1: y(0), x2: x(tick), y2: y(1),
-          stroke: "#e0e5eb", "stroke-width": 1
-        }));
-        chart.appendChild(svgTag("line", {
-          x1: x(0), y1: y(tick), x2: x(1), y2: y(tick),
+          x1: x(tick), y1: margin.top,
+          x2: x(tick), y2: margin.top + plotHeight,
           stroke: "#e0e5eb", "stroke-width": 1
         }));
         chart.appendChild(svgTag("text", {
           x: x(tick), y: height - margin.bottom + 18,
           "text-anchor": "middle", "font-size": 11, fill: "#687486"
         })).textContent = tick.toFixed(2);
+      });
+      ticks.forEach(function (tick) {
+        chart.appendChild(svgTag("line", {
+          x1: x(0), y1: y(tick), x2: x(1), y2: y(tick),
+          stroke: "#e0e5eb", "stroke-width": 1
+        }));
         chart.appendChild(svgTag("text", {
           x: margin.left - 8, y: y(tick) + 4,
           "text-anchor": "end", "font-size": 11, fill: "#687486"
@@ -1028,7 +1149,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
             x(point[0]).toFixed(2) + " " + y(point[1]).toFixed(2);
         }).join(" ");
         chart.appendChild(svgTag("path", {
-          d: d, fill: "none", stroke: entry.color,
+          d: d, fill: "none", stroke: colorOf(entry),
           "stroke-width": entry.width,
           "stroke-dasharray": entry.dash || "none",
           "stroke-linejoin": "round", "stroke-linecap": "round"
@@ -1059,7 +1180,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
           var swatch = document.createElement("span");
           swatch.className = "curve-swatch";
           swatch.style.borderTop = entry.width + "px " +
-            (entry.dash ? "dashed" : "solid") + " " + entry.color;
+            (entry.dash ? "dashed" : "solid") + " " + colorOf(entry);
           item.appendChild(swatch);
           item.appendChild(document.createTextNode(" " + entry.label));
           legendHost.appendChild(item);

@@ -17,6 +17,7 @@ it pulls neither matplotlib nor R; safe to import from the CLI report path.
 
 from __future__ import annotations
 
+from .assets import render_common_script
 from .context import ReportBuildContext
 from .controlled_seed import controlled_seed_document
 from .errors import ReportError
@@ -44,6 +45,7 @@ __all__ = [
     "Table",
     "controlled_seed_document",
     "default_template",
+    "render_common_script",
     "render_html",
     "render_html_site",
     "render_markdown",
