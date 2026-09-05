@@ -9,7 +9,7 @@
 
 - The analysis module is `bench/analyses/performance/controlled_seed_report.py`; `bench/reports/controlled_seed.py` owns the chapter end-to-end (the `controlled_seed_document` builder and the `render_controlled_seed_site` renderer); the build context is `bench/reports/context.py`; the document model addition is `ControlledSeedDocument` in `bench/reports/model.py`, carried on `ReportDocument.controlled_seed` with `render_html_site` emitting its pages.
 - The module reads its inputs as a census of the controlled design: it does not apply the global `data.filter`, because an `only_llm` or `min_games` filter would punch holes in the seed grid and remove the dedicated Vanilla baseline.
-- A missing `baseline_experiment` on the strength stage is a configuration error (the report has no dedicated Vanilla source at all). A configured baseline that lacks rows for a specific `(seed, player_id)` pair is not fatal: the pair keeps blank differences and a visible page note.
+- A missing `baseline_experiment` on the strength stage is a configuration error (the report has no dedicated Vanilla source at all). A configured baseline that lacks rows for a specific `(seed, player_id)` pair is not fatal: the pair keeps a visible page note.
 - The exactly-one-estimator / one-strength-table references and the at-most-one-enabled-instance rule are validated at config load; the HTML-only formats rule is enforced at render time (`report.formats` without `html` skips the pages with a warning and omits the section's link).
 - Previous and next player links on a detail page wrap cyclically within the seed's available player list, so both links always exist.
 
@@ -29,17 +29,17 @@ The current dataset has three seeds and eight final player positions. It therefo
 Each seed gets two heatmaps with the same axes:
 
 - Rows are strategist and condition combinations, such as `GPT-5.6-Sol | Every-turn` and `GPT-5.6-Sol | Per-5`.
-- Columns are final `player_id` values.
+- Columns are final `player_id` values, each heading pairing the position with its seat-bound civilization, such as `1: China`.
 - The dedicated Vanilla condition is a separate, visually isolated row. It is not a strategist column.
 - Each cell averages all unique runs for its `(seed, player_id, strategist, condition)` key. Seating rotations and genuine repeated runs contribute equally. No confidence interval is shown.
-- A cell tooltip shows the exact value, civilization, and run count.
+- Both heatmaps carry the same cell tooltip: the civilization with its run count, the mean adjusted strength, and the dominant victory focus.
 - Clicking a cell opens the matching `(seed, player_id)` detail page with that strategist and condition selected.
 
 This row and column orientation follows the requirement that Vanilla is a condition row. It supersedes the earlier sketch that placed strategist-condition combinations on columns.
 
 ### Adjusted strength heatmap
 
-The first heatmap shows mean `adjusted_strength`. Use a fixed probability scale from 0 to 1 across every seed so the panels can be compared directly. Display the rounded value in each populated cell and leave missing combinations blank.
+The first heatmap shows mean `adjusted_strength`. Use a fixed RdYlBu scale from 0 to 1 across every seed so the panels can be compared directly: 0 is red, 0.5 is yellow, 1 is blue. Display the rounded value in each populated cell and leave missing combinations blank.
 
 ### Dominant victory focus heatmap
 
@@ -62,28 +62,27 @@ The header shows the seed, player ID, matched civilization, and total source run
 
 - Use the estimator referenced by the report analysis.
 - Interpolate each individual game curve onto a fixed 101-point normalized-progress grid from 0 to 1, then take the arithmetic mean at each grid point. Interpolate only inside each run's observed progress range and do not extrapolate or hold endpoints. Each point averages the runs that cover that point. Do not draw a confidence interval.
-- Provide a strategist selector. Selecting a strategist shows all of its conditions together so Every-turn and Per-5 can be compared directly.
+- Provide one checkbox per strategist, all checked by default, so every condition is shown together. Unchecking a strategist hides its conditions; the Vanilla reference stays visible.
 - Keep the matched dedicated Vanilla curve visible as a thicker reference line when it exists.
-- Opening the page from an overview cell preselects the clicked strategist and condition. Direct navigation selects the first strategist in deterministic display order.
-- Allow an explicit `Show all` choice for inspecting every curve, but do not use it as the default because the chart can contain many conditions.
+- Opening the page from an overview cell checks only that cell's strategist (the Vanilla row's cells keep everyone) and highlights the condition in the legend.
+- Hovering the chart snaps to the nearest grid progress and shows a tooltip comparing every checked condition's victory probability at that point, sorted from highest to lowest, with a vertical guide line and a dot on each curve.
 
 ### Comparison table
 
-Show one row per strategist-condition combination, plus the separate Vanilla condition row. Keep these columns:
+Show one row per strategist-condition combination, plus the separate Vanilla condition row. Keep these columns, with short header text and the full wording as the header's title tooltip:
 
 - Strategist
 - Condition
-- Run count
-- Mean weighted victory probability
-- Mean adjusted strength
-- Difference from matched Vanilla adjusted strength
-- Dominant victory focus and percentage
-- Domination focus %
-- Culture focus %
-- Diplomatic focus %
-- Science focus %
+- Runs
+- Win prob (mean weighted victory probability)
+- Adj strength (mean adjusted strength)
+- Focus (dominant victory focus and percentage)
+- Dom %
+- Cul %
+- Dip %
+- Sci %
 
-Do not include a rotations-represented column. Highlight the Vanilla row and its adjusted-strength value. Leave the difference blank for Vanilla itself or when the matched baseline is unavailable.
+Visualize adjusted strength and the focus shares the same way as the overview heatmaps: the adjusted-strength cell uses the RdYlBu scale, and each focus cell uses its strategy color with intensity by share. Do not include a rotations-represented column or a difference-from-Vanilla column (the matched difference stays available in `seed_player_summary.csv`). Highlight the Vanilla row and its adjusted-strength value.
 
 ## Data preparation
 
@@ -141,7 +140,7 @@ Use accessible HTML tables for the heatmaps, with deterministic vanilla JavaScri
 
 - Config validation requires one estimator reference and one strength-table reference for `performance.controlled_seed_report`, and allows at most one enabled instance per run.
 - The pages render only when `html` is among `report.formats`; otherwise the run warns, skips the pages, and omits the analysis section's link to `controlled-seed/index.html`.
-- A missing dedicated baseline leaves baseline curves and differences unavailable, with a visible page note. It is not fatal.
+- A missing dedicated baseline leaves the baseline curve unavailable, with a visible page note. It is not fatal.
 - A condition missing a seed-player combination produces a blank cell in the completed heatmap grid and no detail-table row for that unobserved combination.
 - A seed-player pair with no usable prediction rows keeps its scalar summary and marks the probability curve unavailable.
 - All ordering is stable: seeds numerically, Vanilla first, strategists by catalog order, conditions by configured pairing order, and player IDs numerically.
@@ -167,8 +166,10 @@ Use accessible HTML tables for the heatmaps, with deterministic vanilla JavaScri
 
 - Render exactly two heatmaps per seed and one page per available seed-player pair.
 - Render Vanilla as a separate condition row in both heatmaps and the detail table.
+- Render the civ-paired column headings and the same tooltip on both heatmaps' cells.
 - Link every populated heatmap cell to the correct page and preselection query.
 - Show run count but no rotations-represented column on detail pages.
+- Render strategist checkboxes, all checked by default, and color the detail table's strength and focus cells like the overview heatmaps.
 - Emphasize the Vanilla curve and strength value when present, and show an unavailable note when absent.
 - Escape labels and query parameters safely.
 - Link the analysis's section to `controlled-seed/index.html` from its downloads list when html is rendered.

@@ -9,17 +9,19 @@ controlled seed) plus one detail page per ``(seed, player_id)`` pair in the same
 folder, both framed by the report site's sidebar navigation.
 
 The pages are self-contained and deterministic: one overview page with two heatmap
-tables per controlled seed (mean adjusted strength on a fixed 0-1 scale, and the
-dominant victory focus with a stable categorical color per strategy), one detail
-page per ``(seed, player_id)`` pair, and one static vanilla-JavaScript asset for
-tooltips, the strategist selector, and the probability-curve chart. Every value,
-color, link, and query string is computed server-side, so unchanged inputs
+tables per controlled seed (mean adjusted strength on a fixed RdYlBu scale, red at
+0, yellow at 0.5, blue at 1, plus the dominant victory focus with a stable
+categorical color per strategy), one detail page per ``(seed, player_id)`` pair,
+and one static vanilla-JavaScript asset for tooltips, the strategist checkboxes,
+and the probability-curve chart with its per-progress comparison tooltip. Every
+value, color, link, and query string is computed server-side, so unchanged inputs
 re-render byte-identically; the browser script only reads embedded data.
 
 Rows are strategist-condition combinations and columns are final ``player_id``
-values (the orientation that keeps the dedicated Vanilla condition a separate,
-visually isolated row). The renderer completes the global row and column grid
-and leaves unobserved combinations blank.
+values, each column heading pairing the position with its seat-bound
+civilization, such as ``1: China`` (the orientation that keeps the dedicated
+Vanilla condition a separate, visually isolated row). The renderer completes the
+global row and column grid and leaves unobserved combinations blank.
 """
 
 from __future__ import annotations
@@ -105,9 +107,13 @@ FOCUS_COLORS = {
     "Science": "#4e9b4e",
 }
 
-# The adjusted-strength heatmap scale is fixed from 0 to 1 across every seed so
-# the panels compare directly.
-_STRENGTH_SCALE = ("#f2f6fa", "#1f5fa8")
+# The adjusted-strength heatmap scale is matplotlib's RdYlBu (its 11 ColorBrewer
+# anchors), fixed from 0 to 1 across every seed so the panels compare directly:
+# 0 is red, 0.5 is yellow, 1 is blue.
+_STRENGTH_SCALE = (
+    "#a50026", "#d73027", "#f46d43", "#fdae61", "#fee090",
+    "#ffffbf", "#e0f3f8", "#abd9e9", "#74add1", "#4575b4", "#313695",
+)
 _TEXT_DARK = "#18202a"
 _TEXT_LIGHT = "#ffffff"
 
@@ -149,7 +155,12 @@ def _cell_text_color(background: str) -> str:
 
 def _strength_background(value: float) -> str:
     t = 0.0 if not np.isfinite(value) else min(1.0, max(0.0, value))
-    return _interpolate(_STRENGTH_SCALE[0], _STRENGTH_SCALE[1], t)
+    n = len(_STRENGTH_SCALE) - 1
+    position = t * n
+    index = min(int(position), n - 1)
+    return _interpolate(
+        _STRENGTH_SCALE[index], _STRENGTH_SCALE[index + 1], position - index
+    )
 
 
 def _focus_background(label: str, pct: float) -> str:
@@ -170,12 +181,6 @@ def _detail_link(seed: int, player_id: int, strategist: str, condition: str) -> 
 
 def _fmt_probability(value) -> str:
     return "" if value is None or not np.isfinite(value) else f"{value:.4f}"
-
-
-def _fmt_signed(value) -> str:
-    if value is None or not np.isfinite(value):
-        return ""
-    return f"{value:+.4f}"
 
 
 def _fmt_pct(value) -> str:
@@ -231,43 +236,57 @@ def _has_vanilla_rows(doc: ControlledSeedDocument) -> bool:
     return bool(mask.any())
 
 
+def _civ_headings(doc: ControlledSeedDocument) -> dict[tuple[int, int], str]:
+    """Each column heading pairs the final player position with its civilization."""
+    out: dict[tuple[int, int], str] = {}
+    for row in doc.index_table.to_dict("records"):
+        out[(int(row["seed"]), int(row["player_id"]))] = str(row["civilization"])
+    return out
+
+
 # ── heatmaps ──────────────────────────────────────────────────────────────────
+def _cell_tooltip(row: dict) -> str:
+    """The shared cell tooltip: civilization and runs, strength, and focus.
+
+    Both overview heatmaps carry the same tooltip so a cell means the same thing
+    wherever it is hovered.
+    """
+    runs = int(row["run_count"])
+    strength = float(row["mean_adjusted_strength"])
+    pct = float(row["dominant_focus_pct"])
+    strength_line = (
+        f"Adj strength: {strength:.4f}"
+        if np.isfinite(strength)
+        else "Adj strength: unavailable"
+    )
+    focus_line = (
+        f"Victory focus: {row['dominant_focus']} ({pct:.1f}%)"
+        if np.isfinite(pct)
+        else "Victory focus: unavailable"
+    )
+    return (
+        f"{row['civilization']} ({runs} run{'s' if runs != 1 else ''})\n"
+        f"{strength_line}\n{focus_line}"
+    )
+
+
 def _heat_cell(row: dict, seed: int, player_id: int, kind: str) -> str:
     """One populated heatmap cell: colored, tooltip-equipped, and clickable."""
     strategist, condition = str(row["strategist"]), str(row["condition"])
     if kind == "strength":
         value = float(row["mean_adjusted_strength"])
         background = _strength_background(value)
-        if np.isfinite(value):
-            text = f"{value:.2f}"
-            value_line = f"Adjusted strength: {value:.4f}"
-        else:
-            text = ""
-            value_line = "Adjusted strength: unavailable"
-        tip = (
-            f"{value_line}\n"
-            f"Civilization: {row['civilization']}\n"
-            f"Runs: {int(row['run_count'])}"
-        )
+        text = f"{value:.2f}" if np.isfinite(value) else ""
     else:
         label = str(row["dominant_focus"])
         pct = float(row["dominant_focus_pct"])
         background = _focus_background(label, pct)
         text = f"{label} {_fmt_pct_short(pct)}" if np.isfinite(pct) else ""
-        if np.isfinite(pct):
-            value_line = f"Dominant focus: {label} ({pct:.2f}%)"
-        else:
-            value_line = "Dominant focus: unavailable"
-        tip = (
-            f"{value_line}\n"
-            f"Civilization: {row['civilization']}\n"
-            f"Runs: {int(row['run_count'])}"
-        )
     color = _cell_text_color(background)
     href = _detail_link(seed, player_id, strategist, condition)
     return (
         f'<td class="heat-cell" style="background-color:{background};'
-        f'color:{color}" data-tip="{_esc(tip)}">'
+        f'color:{color}" data-tip="{_esc(_cell_tooltip(row))}">'
         f'<a href="{_esc(href)}" style="color:inherit">{_esc(text)}</a></td>'
     )
 
@@ -283,6 +302,7 @@ def _heatmap(
     players: list[int],
     combos: list[tuple[str, str]],
     kind: str,
+    headings: dict[tuple[int, int], str],
 ) -> str:
     vanilla = doc.vanilla_label
     parts: list[str] = []
@@ -295,7 +315,9 @@ def _heatmap(
     )
     parts.append("<thead><tr><th scope=\"col\" class=\"row-label\">Strategist | Condition</th>")
     for player_id in players:
-        parts.append(f'<th scope="col">Player {player_id}</th>')
+        civilization = headings.get((seed, player_id))
+        column = f"{player_id}: {civilization}" if civilization else f"Player {player_id}"
+        parts.append(f'<th scope="col">{_esc(column)}</th>')
     parts.append("</tr></thead>")
 
     def cells_for(strategist: str, condition: str) -> list[str]:
@@ -370,6 +392,7 @@ def _render_overview(
 ) -> str:
     summary = _summary_lookup(doc)
     _, combos, seeds, players = _grid(doc)
+    headings = _civ_headings(doc)
     parts = _page_start(doc, f"{CONTROLLED_SEED_TITLE} | {doc.title}", navigation)
     parts.append(f'<p class="eyebrow">{_esc(doc.title)}</p>')
     parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}</h1>")
@@ -398,12 +421,14 @@ def _render_overview(
         parts.append(f'<section aria-labelledby="seed-{seed}-heading">')
         parts.append(f'<h2 id="seed-{seed}">Seed {seed}</h2>')
         parts.append('<figure class="heat-figure">')
-        parts.append("<figcaption>Mean adjusted strength (fixed 0 to 1 scale)</figcaption>")
-        parts.append(_heatmap(doc, summary, seed, players, combos, "strength"))
+        parts.append(
+            "<figcaption>Mean adjusted strength (red 0, yellow 0.5, blue 1)</figcaption>"
+        )
+        parts.append(_heatmap(doc, summary, seed, players, combos, "strength", headings))
         parts.append("</figure>")
         parts.append('<figure class="heat-figure">')
         parts.append("<figcaption>Dominant victory focus (largest mean share)</figcaption>")
-        parts.append(_heatmap(doc, summary, seed, players, combos, "focus"))
+        parts.append(_heatmap(doc, summary, seed, players, combos, "focus", headings))
         parts.append("</figure>")
         parts.append(_focus_legend())
         parts.append("</section>")
@@ -453,6 +478,7 @@ def _page_series(
             series[key] = {
                 "strategist": key[0],
                 "condition": key[1],
+                "label": key[0] if is_vanilla else f"{key[0]} · {key[1]}",
                 "vanilla": is_vanilla,
                 "color": color,
                 "dash": _DASH_PATTERNS[condition_rank.get(key[1], 0) % len(_DASH_PATTERNS)],
@@ -498,6 +524,60 @@ def _comparison_rows(doc: ControlledSeedDocument, seed: int, player_id: int) -> 
     )
 
 
+def _strength_cell(row: dict, is_vanilla: bool) -> str:
+    """The adjusted-strength cell, colored like the overview strength heatmap."""
+    value = float(row["mean_adjusted_strength"])
+    if not np.isfinite(value):
+        return "<td></td>"
+    background = _strength_background(value)
+    classes = ' class="vanilla-value"' if is_vanilla else ""
+    return (
+        f'<td{classes} style="background-color:{background};'
+        f'color:{_cell_text_color(background)}">{value:.2f}</td>'
+    )
+
+
+def _focus_cell(row: dict) -> str:
+    """The dominant-focus cell, colored like the overview focus heatmap."""
+    label = str(row["dominant_focus"])
+    pct = float(row["dominant_focus_pct"])
+    if not np.isfinite(pct):
+        return "<td></td>"
+    background = _focus_background(label, pct)
+    return (
+        f'<td style="background-color:{background};'
+        f'color:{_cell_text_color(background)}">'
+        f"{_esc(label)} {_fmt_pct_short(pct)}</td>"
+    )
+
+
+def _share_cell(row: dict, column: str, label: str) -> str:
+    """One focus-share cell, colored with its strategy color at share intensity."""
+    pct = float(row[column])
+    if not np.isfinite(pct):
+        return "<td></td>"
+    background = _focus_background(label, pct)
+    return (
+        f'<td style="background-color:{background};'
+        f'color:{_cell_text_color(background)}">{_fmt_pct(pct)}</td>'
+    )
+
+
+# Short header text; the full wording rides along as the title tooltip.
+_COMPARISON_HEADERS = [
+    ("Strategist", None),
+    ("Condition", None),
+    ("Runs", "Unique runs averaged"),
+    ("Win prob", "Mean weighted victory probability"),
+    ("Adj strength", "Mean adjusted strength"),
+    ("Focus", "Dominant victory focus"),
+    ("Dom %", "Domination focus %"),
+    ("Cul %", "Culture focus %"),
+    ("Dip %", "Diplomatic focus %"),
+    ("Sci %", "Science focus %"),
+]
+
+
 def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) -> str:
     vanilla = doc.vanilla_label
     parts: list[str] = []
@@ -507,16 +587,10 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
         f'<caption class="sr-only">Seed {seed}, player {player_id}: per-condition means '
         "over every unique run occupying this final position</caption>"
     )
-    headers = [
-        "Strategist", "Condition", "Run count",
-        "Mean weighted victory probability", "Mean adjusted strength",
-        "Difference from matched Vanilla adjusted strength",
-        "Dominant victory focus", "Domination focus %", "Culture focus %",
-        "Diplomatic focus %", "Science focus %",
-    ]
     parts.append("<thead><tr>")
-    for header in headers:
-        parts.append(f'<th scope="col">{_esc(header)}</th>')
+    for header, title in _COMPARISON_HEADERS:
+        title_attr = f' title="{_esc(title)}"' if title else ""
+        parts.append(f'<th scope="col"{title_attr}>{_esc(header)}</th>')
     parts.append("</tr></thead><tbody>")
     for row in _comparison_rows(doc, seed, player_id):
         is_vanilla = str(row["strategist"]) == vanilla
@@ -526,40 +600,22 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
         parts.append(f"<td>{_esc(row['condition'])}</td>")
         parts.append(f"<td>{int(row['run_count'])}</td>")
         parts.append(f"<td>{_esc(_fmt_probability(row['mean_weighted_victory_probability']))}</td>")
-        strength_cell = (
-            f'<td class="vanilla-value">{_esc(_fmt_probability(row["mean_adjusted_strength"]))}</td>'
-            if is_vanilla
-            else f"<td>{_esc(_fmt_probability(row['mean_adjusted_strength']))}</td>"
-        )
-        parts.append(strength_cell)
-        parts.append(f"<td>{_esc(_fmt_signed(row['adjusted_strength_difference']))}</td>")
-        dominant = (
-            f"{row['dominant_focus']} {_fmt_pct_short(row['dominant_focus_pct'])}"
-            if np.isfinite(row["dominant_focus_pct"])
-            else ""
-        )
-        parts.append(f"<td>{_esc(dominant)}</td>")
-        for column in (
-            "domination_focus_pct",
-            "culture_focus_pct",
-            "diplomatic_focus_pct",
-            "science_focus_pct",
+        parts.append(_strength_cell(row, is_vanilla))
+        parts.append(_focus_cell(row))
+        for column, label in (
+            ("domination_focus_pct", "Domination"),
+            ("culture_focus_pct", "Culture"),
+            ("diplomatic_focus_pct", "Diplomatic"),
+            ("science_focus_pct", "Science"),
         ):
-            parts.append(f"<td>{_esc(_fmt_pct(row[column]))}</td>")
+            parts.append(_share_cell(row, column, label))
         parts.append("</tr>")
     parts.append("</tbody></table></div>")
     return "".join(parts)
 
 
-def _chart_data(doc: ControlledSeedDocument, seed: int, player_id: int) -> str:
-    series = _page_series(doc, seed, player_id)
-    strategists = []
-    for entry in series:
-        if not entry["vanilla"] and entry["strategist"] not in strategists:
-            strategists.append(entry["strategist"])
+def _chart_data(series: list[dict]) -> str:
     data = {
-        "strategists": strategists,
-        "showAllLabel": "Show all",
         "xLabel": "Turn progress",
         "yLabel": "Mean predicted win probability",
         "series": series,
@@ -582,6 +638,11 @@ def _render_detail(
     seed = int(index_row["seed"])
     player_id = int(index_row["player_id"])
     vanilla = doc.vanilla_label
+    series = _page_series(doc, seed, player_id)
+    strategists = []
+    for entry in series:
+        if not entry["vanilla"] and entry["strategist"] not in strategists:
+            strategists.append(entry["strategist"])
     parts = _page_start(
         doc, f"Seed {seed} · Player {player_id} | {doc.title}", navigation
     )
@@ -609,8 +670,7 @@ def _render_detail(
     if not bool(index_row["has_matched_vanilla"]):
         parts.append(
             '<p class="warning">The dedicated Vanilla baseline is unavailable for this '
-            "seed-player pair; the reference curve and the difference column are "
-            "omitted.</p>"
+            "seed-player pair; the reference curve is omitted.</p>"
         )
     if not bool(index_row["has_probability"]):
         parts.append(
@@ -620,10 +680,19 @@ def _render_detail(
 
     parts.append('<section aria-labelledby="curves-heading">')
     parts.append('<h2 id="curves-heading">Victory-probability curves</h2>')
-    parts.append('<div class="chart-controls">')
-    parts.append('<label for="strategist-select">Strategist</label>')
-    parts.append('<select id="strategist-select"></select>')
-    parts.append("</div>")
+    if strategists:
+        parts.append(
+            '<div class="chart-controls" id="strategist-filters" role="group" '
+            'aria-label="Strategists">'
+        )
+        parts.append('<span class="controls-label">Strategists</span>')
+        for name in strategists:
+            parts.append(
+                '<label class="strategist-check">'
+                f'<input type="checkbox" value="{_esc(name)}" checked> '
+                f"{_esc(name)}</label>"
+            )
+        parts.append("</div>")
     parts.append(
         '<div id="curve-chart" class="curve-chart" role="img" '
         'aria-label="Mean victory probability over normalized game progress"></div>'
@@ -632,7 +701,9 @@ def _render_detail(
     parts.append(
         '<p class="caption">Each curve is the mean of every run\'s interpolated '
         "victory probability on the fixed 0 to 1 progress grid; the "
-        f"{_esc(vanilla)} reference curve is drawn thicker when present.</p>"
+        f"{_esc(vanilla)} reference curve is drawn thicker when present. Hover "
+        "the chart to compare every checked condition's probability at one "
+        "progress point.</p>"
     )
     parts.append("</section>")
 
@@ -643,7 +714,7 @@ def _render_detail(
 
     parts.append("</main>")
     parts.append(
-        f'<script type="application/json" id="curve-data">{_chart_data(doc, seed, player_id)}</script>'
+        f'<script type="application/json" id="curve-data">{_chart_data(series)}</script>'
     )
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
@@ -683,12 +754,12 @@ def render_controlled_seed_site(
 # ── the static browser script ─────────────────────────────────────────────────
 CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
    Deterministic vanilla JavaScript: no packages, no network. Tooltips on
-   heatmap cells; strategist selection and the SVG probability-curve chart on
-   seed-player detail pages. */
+   heatmap cells; strategist checkboxes, the SVG probability-curve chart, and
+   the per-progress comparison tooltip on seed-player detail pages. */
 (function () {
   "use strict";
 
-  // ── tooltips (overview heatmaps) ─────────────────────────────────────────
+  // ── shared tooltip ───────────────────────────────────────────────────────
   var tooltip = null;
 
   function ensureTooltip() {
@@ -713,6 +784,24 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     }
     tip.style.top = (window.scrollY + top) + "px";
     tip.style.left = (window.scrollX + rect.left) + "px";
+  }
+
+  function showChartTooltip(clientX, clientY, text) {
+    var tip = ensureTooltip();
+    tip.textContent = text;
+    tip.style.display = "block";
+    var left = window.scrollX + clientX + 16;
+    var top = window.scrollY + clientY - tip.offsetHeight - 12;
+    if (top < window.scrollY + 4) {
+      top = window.scrollY + clientY + 16;
+    }
+    var edge = window.scrollX + document.documentElement.clientWidth -
+      tip.offsetWidth - 8;
+    if (left > edge) {
+      left = window.scrollX + clientX - tip.offsetWidth - 16;
+    }
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
   }
 
   function hideTooltip() {
@@ -742,7 +831,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     document.addEventListener("focusout", hideTooltip);
   });
 
-  // ── detail page: strategist selection + SVG curve chart ──────────────────
+  // ── detail page: checkboxes + SVG curve chart + progress tooltip ─────────
   function readQuery() {
     var params = {};
     var search = window.location.search.substring(1);
@@ -769,10 +858,10 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
 
   function initChart() {
     var dataNode = document.getElementById("curve-data");
-    var select = document.getElementById("strategist-select");
+    var filters = document.getElementById("strategist-filters");
     var chartHost = document.getElementById("curve-chart");
     var legendHost = document.getElementById("curve-legend");
-    if (!dataNode || !select || !chartHost) {
+    if (!dataNode || !chartHost) {
       return;
     }
     var data = JSON.parse(dataNode.textContent);
@@ -783,70 +872,142 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     var query = readQuery();
     var preselectedCondition = query.condition || null;
 
-    var options = data.strategists.slice();
-    if (options.length > 1) {
-      options.push(data.showAllLabel);
-    }
-    options.forEach(function (name) {
-      var option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      select.appendChild(option);
-    });
-    var requested = query.strategist;
-    if (requested && options.indexOf(requested) !== -1) {
-      select.value = requested;
-    }
-    select.disabled = options.length === 0;
-
-    function visibleSeries() {
-      var current = select.value;
-      if (current === data.showAllLabel) {
-        return data.series;
+    var boxes = [];
+    if (filters) {
+      boxes = Array.prototype.slice.call(
+        filters.querySelectorAll('input[type="checkbox"]')
+      );
+      // An overview cell link focuses its strategist (the Vanilla row's cells
+      // match no checkbox and keep everyone checked); direct entry also keeps
+      // everyone checked.
+      if (query.strategist) {
+        var known = boxes.some(function (box) {
+          return box.value === query.strategist;
+        });
+        if (known) {
+          boxes.forEach(function (box) {
+            box.checked = box.value === query.strategist;
+          });
+        }
       }
-      return data.series.filter(function (entry) {
-        return entry.vanilla || entry.strategist === current;
+      boxes.forEach(function (box) {
+        box.addEventListener("change", function () {
+          hideTooltip();
+          render();
+        });
       });
     }
 
+    function visibleSeries() {
+      var checked = {};
+      boxes.forEach(function (box) {
+        checked[box.value] = box.checked;
+      });
+      return data.series.filter(function (entry) {
+        return entry.vanilla || !boxes.length || checked[entry.strategist];
+      });
+    }
+
+    var margin = data.margin;
+    var width = data.chartWidth;
+    var height = data.chartHeight;
+    var plotWidth = width - margin.left - margin.right;
+    var plotHeight = height - margin.top - margin.bottom;
+
+    function x(value) {
+      return margin.left + value * plotWidth;
+    }
+    function y(value) {
+      return margin.top + (1 - value) * plotHeight;
+    }
+
+    var svg = null;
+    var guide = null;        // hover guide: one vertical line + a dot per series
+    var guideLine = null;
+    var guideDots = [];
+    var progressSteps = [];  // sorted union of the visible series' x values
+
+    function collectProgress(series) {
+      var seen = {};
+      progressSteps = [];
+      series.forEach(function (entry) {
+        entry.points.forEach(function (point) {
+          if (!seen[point[0]]) {
+            seen[point[0]] = true;
+            progressSteps.push(point[0]);
+          }
+        });
+      });
+      progressSteps.sort(function (a, b) { return a - b; });
+    }
+
+    function nearestProgress(value) {
+      var best = progressSteps[0];
+      var bestDistance = Math.abs(value - best);
+      for (var i = 1; i < progressSteps.length; i++) {
+        var distance = Math.abs(value - progressSteps[i]);
+        if (distance < bestDistance) {
+          best = progressSteps[i];
+          bestDistance = distance;
+        }
+      }
+      return best;
+    }
+
+    function buildGuide(series) {
+      guide = svgTag("g", { "class": "chart-guide", display: "none" });
+      guideLine = svgTag("line", {
+        y1: y(0), y2: y(1),
+        stroke: "#445164", "stroke-width": 1, "stroke-dasharray": "4 3"
+      });
+      guide.appendChild(guideLine);
+      guideDots = series.map(function (entry) {
+        var dot = svgTag("circle", {
+          r: 4, fill: entry.color, stroke: "#ffffff",
+          "stroke-width": 1.5, display: "none"
+        });
+        guide.appendChild(dot);
+        return { dot: dot, entry: entry };
+      });
+      svg.appendChild(guide);
+    }
+
     function render() {
-      var margin = data.margin;
-      var width = data.chartWidth;
-      var height = data.chartHeight;
-      var plotWidth = width - margin.left - margin.right;
-      var plotHeight = height - margin.top - margin.bottom;
-
-      function x(value) {
-        return margin.left + value * plotWidth;
-      }
-      function y(value) {
-        return margin.top + (1 - value) * plotHeight;
+      var series = visibleSeries();
+      if (!series.length) {
+        svg = null;
+        guide = null;
+        chartHost.textContent = "Check a strategist to show its curves.";
+        if (legendHost) {
+          legendHost.textContent = "";
+        }
+        return;
       }
 
-      var svg = svgTag("svg", {
+      var chart = svgTag("svg", {
         viewBox: "0 0 " + width + " " + height,
         width: "100%",
         preserveAspectRatio: "xMidYMid meet"
       });
       [0, 0.25, 0.5, 0.75, 1].forEach(function (tick) {
-        svg.appendChild(svgTag("line", {
+        chart.appendChild(svgTag("line", {
           x1: x(tick), y1: y(0), x2: x(tick), y2: y(1),
           stroke: "#e0e5eb", "stroke-width": 1
         }));
-        svg.appendChild(svgTag("line", {
+        chart.appendChild(svgTag("line", {
           x1: x(0), y1: y(tick), x2: x(1), y2: y(tick),
           stroke: "#e0e5eb", "stroke-width": 1
         }));
-        svg.appendChild(svgTag("text", {
+        chart.appendChild(svgTag("text", {
           x: x(tick), y: height - margin.bottom + 18,
           "text-anchor": "middle", "font-size": 11, fill: "#687486"
         })).textContent = tick.toFixed(2);
-        svg.appendChild(svgTag("text", {
+        chart.appendChild(svgTag("text", {
           x: margin.left - 8, y: y(tick) + 4,
           "text-anchor": "end", "font-size": 11, fill: "#687486"
         })).textContent = tick.toFixed(2);
       });
-      svg.appendChild(svgTag("text", {
+      chart.appendChild(svgTag("text", {
         x: x(0.5), y: height - 6, "text-anchor": "middle",
         "font-size": 12, fill: "#445164"
       })).textContent = data.xLabel;
@@ -856,9 +1017,8 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
         transform: "rotate(-90 14 " + (margin.top + plotHeight / 2) + ")"
       });
       yLabel.textContent = data.yLabel;
-      svg.appendChild(yLabel);
+      chart.appendChild(yLabel);
 
-      var series = visibleSeries();
       series.forEach(function (entry) {
         if (!entry.points.length) {
           return;
@@ -867,7 +1027,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
           return (index === 0 ? "M" : "L") +
             x(point[0]).toFixed(2) + " " + y(point[1]).toFixed(2);
         }).join(" ");
-        svg.appendChild(svgTag("path", {
+        chart.appendChild(svgTag("path", {
           d: d, fill: "none", stroke: entry.color,
           "stroke-width": entry.width,
           "stroke-dasharray": entry.dash || "none",
@@ -875,14 +1035,18 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
         }));
       });
 
+      svg = chart;
       chartHost.textContent = "";
       chartHost.appendChild(svg);
+      collectProgress(series);
+      buildGuide(series);
+      svg.addEventListener("mousemove", onMove);
+      svg.addEventListener("mouseleave", onLeave);
 
       if (legendHost) {
         legendHost.textContent = "";
         series.forEach(function (entry) {
           var item = document.createElement("li");
-          var label = entry.strategist + " · " + entry.condition;
           if (entry.vanilla) {
             item.className = "vanilla";
           }
@@ -897,13 +1061,63 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
           swatch.style.borderTop = entry.width + "px " +
             (entry.dash ? "dashed" : "solid") + " " + entry.color;
           item.appendChild(swatch);
-          item.appendChild(document.createTextNode(" " + label));
+          item.appendChild(document.createTextNode(" " + entry.label));
           legendHost.appendChild(item);
         });
       }
     }
 
-    select.addEventListener("change", render);
+    function onMove(event) {
+      if (!svg || !guide || !progressSteps.length) {
+        return;
+      }
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width) {
+        return;
+      }
+      var scale = width / rect.width;
+      var localX = (event.clientX - rect.left) * scale;
+      var progress = (localX - margin.left) / plotWidth;
+      progress = Math.max(0, Math.min(1, progress));
+      var step = nearestProgress(progress);
+      var px = x(step);
+      guideLine.setAttribute("x1", px.toFixed(2));
+      guideLine.setAttribute("x2", px.toFixed(2));
+      var lines = ["Turn progress " + step.toFixed(2)];
+      var readings = [];
+      guideDots.forEach(function (item) {
+        var value = null;
+        item.entry.points.forEach(function (point) {
+          if (point[0] === step) {
+            value = point[1];
+          }
+        });
+        if (value === null) {
+          item.dot.setAttribute("display", "none");
+          return;
+        }
+        item.dot.setAttribute("cx", px.toFixed(2));
+        item.dot.setAttribute("cy", y(value).toFixed(2));
+        item.dot.removeAttribute("display");
+        readings.push({ label: item.entry.label, value: value });
+      });
+      guide.removeAttribute("display");
+      readings.sort(function (a, b) { return b.value - a.value; });
+      readings.forEach(function (reading) {
+        lines.push(reading.label + ": " + reading.value.toFixed(3));
+      });
+      if (readings.length) {
+        showChartTooltip(event.clientX, event.clientY, lines.join("\\n"));
+      }
+    }
+
+    function onLeave() {
+      if (guide) {
+        guide.setAttribute("display", "none");
+      }
+      hideTooltip();
+    }
+
     render();
   }
 

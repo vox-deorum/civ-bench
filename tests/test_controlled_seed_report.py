@@ -565,7 +565,23 @@ def test_vanilla_is_separate_condition_row(rendered):
     assert '<tr class="vanilla-row"><th scope="row" class="row-label">Vanilla</th>' in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<tr class="vanilla-row">' in detail
-    assert '<td class="vanilla-value">0.4000</td>' in detail
+    # The strength cell is colored like the overview heatmap: Vanilla 0.40 sits
+    # exactly on the RdYlBu 0.4 anchor.
+    assert (
+        '<td class="vanilla-value" style="background-color:#fee090;'
+        'color:#18202a">0.40</td>' in detail
+    )
+
+
+def test_overview_columns_pair_player_with_civilization(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    assert '<th scope="col">1: Greece</th>' in index
+    assert '<th scope="col">0: Rome</th>' in index  # seed 2 has only Rome
+    # The kimi game gives seed-1 player 0 a second civilization, so the heading
+    # lists both rather than hiding the comparability problem.
+    assert '<th scope="col">0: Egypt, Rome</th>' in index
+    assert "Player 0" not in index and "Player 1" not in index
 
 
 def test_cells_link_with_preselection_query(rendered):
@@ -576,27 +592,68 @@ def test_cells_link_with_preselection_query(rendered):
         'condition=Every-turn"' in index
     )
     assert 'href="seed-1-player-1.html?strategist=Vanilla&amp;condition=Vanilla"' in index
-    # Tooltip carries exact value, civilization, and run count.
-    assert "data-tip=" in index
-    assert "Runs: 3" in index and "Civilization: Rome" in index
+
+
+def test_cell_tooltips_share_one_meaning(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    # Both heatmaps carry the same tooltip per cell: civilization and runs,
+    # adjusted strength, and victory focus.
+    expected = (
+        "data-tip=\"Rome (3 runs)\n"
+        "Adj strength: 0.6000\n"
+        'Victory focus: Science (50.0%)"'
+    )
+    assert index.count(expected) == 2  # the strength and the focus heatmap
+    # A single run reads "1 run".
+    assert 'data-tip="Egypt (1 run)\n' in index
+
+
+def test_strength_scale_is_rdylbu(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    # Vanilla 0.40 lands exactly on the yellow-side anchor #fee090 and Kimi
+    # 0.70 on #abd9e9: the scale runs red at 0, yellow at 0.5, blue at 1.
+    assert "background-color:#fee090" in index
+    assert "background-color:#abd9e9" in index
+    assert "red 0, yellow 0.5, blue 1" in index
 
 
 def test_detail_page_columns_and_run_counts(rendered):
     env, result, out = rendered
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert "6 source run(s)" in detail
-    assert "Run count" in detail
+    # Condensed headers carry the full wording as title tooltips.
+    assert 'title="Unique runs averaged">Runs<' in detail
+    assert 'title="Mean weighted victory probability">Win prob<' in detail
+    assert 'title="Mean adjusted strength">Adj strength<' in detail
+    assert 'title="Dominant victory focus">Focus<' in detail
+    assert 'title="Domination focus %">Dom %<' in detail
     assert "Rotations" not in detail and "rotations" not in detail
-    assert "Mean weighted victory probability" in detail
-    assert "Difference from matched Vanilla adjusted strength" in detail
-    assert "<td>+0.2000</td>" in detail  # 0.60 - 0.40
-    assert "<td>+0.3000</td>" in detail  # Kimi 0.70 - 0.40
-    # The Vanilla row's difference cell is blank.
-    vanilla_row = detail.split('<tr class="vanilla-row">')[1].split("</tr>")[0]
-    assert "<td></td>" in vanilla_row
+    # The difference column is gone; strength and focus cells are colored like
+    # the overview heatmaps.
+    assert "Difference" not in detail
+    assert "<td>+0.2000</td>" not in detail
+    assert ">Science 50%</td>" in detail
+    assert "background-color:#93c293" in detail  # Science 50% focus cell
     # Prev/next/return links stay inside the chapter folder.
     assert 'href="index.html#seed-1"' in detail
     assert 'href="seed-1-player-1.html"' in detail
+
+
+def test_strategist_checkboxes_replace_the_dropdown(rendered):
+    env, result, out = rendered
+    detail = _read(out, "controlled-seed/seed-1-player-0.html")
+    assert "<select" not in detail
+    assert 'id="strategist-filters"' in detail
+    # Everyone is checked by default.
+    assert detail.count('type="checkbox"') == 2
+    assert 'value="GPT-OSS-120B-Simple" checked' in detail
+    assert 'value="Kimi-K2.5" checked' in detail
+    script = _read(out, "assets/controlled-seed-report.js")
+    # The chart compares every checked condition at the hovered progress.
+    assert "Turn progress " in script
+    assert "mousemove" in script
 
 
 def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
@@ -752,9 +809,11 @@ def test_renderer_escapes_labels_and_query_parameters():
     assert "Weird &amp; &lt;Model&gt; | Per 5" in overview
     assert "href=\"seed-1-player-0.html?strategist=Weird+%26+%3CModel%3E&amp;condition=Per+5\"" in overview
     # Attribute values escape embedded quotes.
-    assert 'data-tip="Dominant focus: Science (72.00%)\nCivilization: Civ &quot;X&quot;\nRuns: 2"' in overview
+    assert 'data-tip="Civ &quot;X&quot; (2 runs)\nAdj strength: 0.6000\nVictory focus: Science (72.0%)"' in overview
     detail = pages["controlled-seed/seed-1-player-0.html"]
     assert "Weird &amp; &lt;Model&gt;" in detail
+    # Checkbox values escape the same labels.
+    assert 'value="Weird &amp; &lt;Model&gt;" checked' in detail
     assert "<script" in detail and "../assets/controlled-seed-report.js" in detail
     assert 'href="index.html#seed-1"' in detail
     assert pages["assets/controlled-seed-report.js"].startswith("/* civ-bench")

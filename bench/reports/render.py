@@ -299,8 +299,10 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); white-space: pre-line; font-size: .82rem; pointer-events: none; }
 .focus-legend { display: flex; flex-wrap: wrap; gap: .9rem; margin: .25rem 0 1.5rem; padding: 0; list-style: none; font-size: .85rem; }
 .focus-legend .swatch { display: inline-block; width: .85rem; height: .85rem; margin-right: .3rem; border: 1px solid #44516433; border-radius: .15rem; vertical-align: -0.1em; }
-.chart-controls { display: flex; gap: .55rem; align-items: center; margin: .75rem 0; }
-.curve-chart svg { max-width: 100%; height: auto; }
+.chart-controls { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; margin: .75rem 0; }
+.chart-controls .controls-label { color: #445164; font-weight: 650; }
+.chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
+.curve-chart svg { max-width: 100%; height: auto; cursor: crosshair; }
 .curve-legend { display: flex; flex-wrap: wrap; gap: .8rem; margin: .5rem 0; padding: 0; list-style: none; font-size: .85rem; }
 .curve-legend .curve-swatch { display: inline-block; width: 1.6rem; margin-right: .3rem; vertical-align: middle; }
 .curve-legend li.preselected { border: 1px solid #175ca8; border-radius: .3rem; padding: .05rem .4rem; font-weight: 650; background: #eef3fa; }
