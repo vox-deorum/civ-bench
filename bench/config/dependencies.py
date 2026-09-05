@@ -75,6 +75,8 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_analysis_ref(stage, analysis_id, analysis_ids, enabled_ids)
         if stage.enabled and stage.module in S.STRENGTH_RATING_MODULES:
             _check_ratings_strength_ref(stage, strength_table_ids)
+        if stage.enabled and stage.module == "performance.controlled_seed_report":
+            _check_controlled_seed_strength_ref(stage, strength_table_ids)
 
     nodes = _build_enabled_nodes(cfg, table_keys)
     order = _topo_sort(nodes)
@@ -172,6 +174,17 @@ def _check_ratings_strength_ref(stage: Stage, strength_table_ids: set[str]) -> N
             f"strength-based ratings analysis '{stage.id}' must reference a strength table "
             f"via uses.tables (one of {sorted(strength_table_ids)}); it rates "
             f"adjusted_strength, not panel_data."
+        )
+
+
+def _check_controlled_seed_strength_ref(stage: Stage, strength_table_ids: set[str]) -> None:
+    """The controlled-seed report consumes exactly one configured strength table."""
+    refs = sorted(strength_table_ids.intersection(stage.uses_tables))
+    if len(refs) != 1:
+        raise ConfigError(
+            f"analysis '{stage.id}' (performance.controlled_seed_report) must reference "
+            f"exactly one strength table via uses.tables (one of "
+            f"{sorted(strength_table_ids)}; got {refs})."
         )
 
 

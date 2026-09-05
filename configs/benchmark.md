@@ -596,7 +596,67 @@ Two single-purpose views of how well estimator probabilities are calibrated — 
 // performance.turn_predicted — P(win) / strength trajectory over the game, per estimator
 { "module": "performance.turn_predicted",
   "params": { "aggregate": "mean", "by": "player_type" } }
+
+// performance.controlled_seed_report — report-ready tables for the dedicated controlled-seed
+//   HTML report (report.template: "controlled_seed", §7). Emits seed_player_summary,
+//   seed_player_probability, and seed_player_index; the renderer completes the grid.
+{ "module": "performance.controlled_seed_report",
+  "uses": { "estimators": ["attention"], "tables": ["strength"] },
+  "params": {} }
 ```
+
+**`performance.controlled_seed_report` in detail.** The module aggregates the
+controlled design by `(seed, player_id)` cell so the report can expose
+game-to-game variation per seed. It consumes the canonical `games` table
+(`seed`, `seating_rotation`, experiment membership), the canonical `panel`
+table (player identity, civilization, the four victory-focus ratios), exactly
+one strength adjust table (`weighted_strength`, `adjusted_strength`), and
+exactly one estimator (per-turn `predicted_win_probability`). Key rules:
+
+- **Condition pairing must be enabled** (§2.2); the stage also accepts
+  `params.condition_pairing` as an override. `player_type` splits into its base
+  strategist identity and display condition (base label, then configured
+  suffixes); each cell averages every unique run for its
+  `(seed, player_id, strategist, condition)` key — seating rotations and
+  genuine repeated games contribute equally, and no confidence interval is
+  computed.
+- **The dedicated Vanilla baseline.** The configured strength stage's
+  `baseline_experiment` (§5.1) is the sole Vanilla source, and it must be set.
+  Baseline rows bypass condition splitting and canonicalize to
+  `strategist = "Vanilla"`, `condition = "Vanilla"` (the catalog label); the
+  report places that row before strategist rows. Baseline strength and
+  probability evidence matches by `(seed, player_id)`, averaging all baseline
+  rotations and repeated games; the Vanilla row carries its own unique-game run
+  count, and treatment rows keep their own run counts even when the matched
+  baseline mean came from a different number of runs. Vanilla opponents from
+  treatment conditions are never substituted when the baseline is missing.
+- **Curves.** Each individual game's predicted-win-probability curve is
+  linearly interpolated onto a fixed 101-point normalized-progress grid from 0
+  to 1, only inside that run's observed progress range (no extrapolation, no
+  endpoint holding); each grid point averages exactly the runs covering it.
+  One prediction per `(game_id, player_id, turn_progress)` is required —
+  conflicting duplicate progress points are an analysis error, as are duplicate
+  panel or strength records per `(game_id, player_id)`. Runs are unique
+  `game_id`s.
+- **Scope.** Only rows with both `seed != -1` and `seating_rotation != -1`
+  participate; uncontrolled rows are excluded from mixed inputs, and an input
+  with no controlled rows is a clear analysis error. The module reads its
+  inputs as a census of the controlled design: it does not apply the global
+  `data.filter` (an `only_llm` or `min_games` filter would punch holes in the
+  seed grid and remove the dedicated Vanilla baseline). Narrow the inputs by
+  controlling what is extracted.
+- **Focus.** The four final victory-focus ratios average per cell before the
+  dominant focus is chosen; exact ties resolve in the order Domination,
+  Culture, Diplomatic, Science.
+- **Baseline gaps are not fatal.** A `(seed, player_id)` pair without matched
+  baseline rows keeps its treatment rows with blank differences and a visible
+  page note; a pair without usable prediction rows keeps its scalar summary and
+  marks the curve unavailable.
+
+The emitted tables carry ordering and color metadata in the result manifest
+(catalog strategist order, configured condition order, `configs/models.json`
+colors), so the report stage rebuilds the presentation without reading the
+catalogs or canonical tables.
 
 **Optional `performance.*` (off by default — registry-reserved, shipped only in `benchmark.full.template.json`):**
 
@@ -665,6 +725,7 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `performance.score_ratio` | Final-score effects | Estimates how player identity, civilization, and other factors affect final score share (regression analysis). |
 | `performance.strength_panel` | Adjusted-strength summary | Summarizes model-adjusted strength, uncertainty, and experiment coverage for each player identity (bootstrap confidence intervals). |
 | `performance.turn_predicted` | Win-probability trends | Shows how each player identity's predicted chance of winning changes from the opening turns through the end of the game. |
+| `performance.controlled_seed_report` | Controlled seed comparison | Aggregates controlled-seed games by seed and final seat into the tables behind the dedicated controlled-seed HTML report. |
 | `exploratory.model_token_costs` | Model usage and cost | Summarizes token use and estimated US-dollar cost by model and player type. |
 | `exploratory.cost_vs_rating` | Cost versus skill | Compares each player identity's average model cost per game with its estimated skill rating. |
 
@@ -677,13 +738,14 @@ identity; they cannot run, so they never appear on a report.
 
 ```jsonc
 "report": {
-  "template": "default",                 // template name in the bench/reports/ registry (only "default" today)
+  "template": "default",                 // "default" (family chapters) | "controlled_seed" (§7.1)
   "out_dir": "reports/",                 // authored under the base output root (§2.1); run writes <root><suffix>/<name>/
-  "formats": ["md", "html"],             // md + html implemented; pdf is schema-reserved (errors at render time)
+  "formats": ["md", "html"],             // md + html implemented; pdf is schema-reserved (errors at render time);
+                                          //   the controlled_seed template renders html only (omitted ⇒ ["html"])
   "sections": null,                      // null = every enabled analysis (canonical family order, members in dep order);
-                                         //   or an explicit ordered list of stage ids to include (authored order kept)
+                                          //   or an explicit ordered list of stage ids to include (authored order kept)
   "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
-                                         // null = a summary card for every resolved section; a list selects compact overview cards
+                                          // null = a summary card for every resolved section; a list selects compact overview cards
   "section_overrides": {                 // optional inline-artifact selection by analysis stage id
     "bt_main": {"tables": ["ratings"], "figures": ["ratings"]}
   },
@@ -699,6 +761,57 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 `overview_sections` controls the compact cards in `report.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact eight-section list shown above. Every card shows the analysis's one-sentence result summary, and the same sentence appears in its detailed section. A legacy or custom analysis without a summary receives an explicit fallback sentence in both views. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
 **Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `report.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: no timestamps, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+
+### 7.1 The `controlled_seed` template
+
+The specialized template for the controlled-seed comparison report (see
+[benchmark.controlled.template.json](benchmark.controlled.template.json), the
+tracked example). It requires **exactly one** report section — an enabled,
+non-empty `performance.controlled_seed_report` analysis (§6.2) — and rejects any
+other section. `formats` must be HTML-only; omitting it defaults to
+`["html"]`. The template loads the section's three persisted tables through the
+report build context (a containment-checked loader for the full named CSV
+artifacts of each selected manifest; the report stage never reads canonical
+tables or estimator predictions directly), so `civ-bench report` re-renders the
+site from artifacts alone.
+
+The site is self-contained:
+
+```text
+<report-dir>/
+  report.html                          # two heatmap tables per controlled seed
+  seed-<seed>-player-<player_id>.html  # one detail page per available pair
+  assets/report.css
+  assets/controlled-seed-report.js     # deterministic vanilla JS, no packages/network
+  assets/<analysis-id>/*.csv           # the three source tables
+```
+
+- **Seed overview.** Each seed gets two heatmaps on the same axes: rows are
+  strategist `|` condition combinations (catalog strategist order, configured
+  condition order), columns are final `player_id` values. The dedicated
+  `Vanilla | Vanilla` condition renders as a separate, visually isolated row
+  before the strategist rows. The renderer completes the global row and column
+  grid and leaves unobserved combinations blank. The first heatmap shows mean
+  `adjusted_strength` on a fixed 0-to-1 color scale (rounded value in the cell);
+  the second annotates the dominant victory focus (name and percentage, a
+  stable categorical color per strategy with intensity by share). A cell
+  tooltip shows the exact value, civilization, and run count, and clicking a
+  cell opens the matching `(seed, player_id)` detail page with that strategist
+  and condition preselected (encoded in the query string).
+- **Seed-player detail page.** The header shows the seed, player ID, matched
+  civilization, and total source runs, with previous/next player links and a
+  return link to the seed overview. Multiple civilizations on one pair produce
+  a visible comparability warning. The victory-probability chart draws each
+  run's interpolated curve averaged on the fixed 101-point grid (§6.2): a
+  strategist selector shows all of that strategist's conditions together, the
+  matched Vanilla curve stays visible as a thicker reference line, and an
+  explicit `Show all` choice inspects every curve (never the default). The
+  comparison table keeps one row per strategist-condition combination plus the
+  Vanilla row — strategist, condition, run count, mean weighted victory
+  probability, mean adjusted strength, difference from the matched Vanilla
+  adjusted strength, the dominant focus, and the four focus percentages — with
+  the Vanilla row and its adjusted-strength value highlighted. Missing
+  baselines and missing prediction rows are visible page notes, never fatal.
 
 **The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module instance's resolved friendly identity, including the grouped BT or PL identity selected from `group_by`, so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
@@ -722,3 +835,4 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured `configuredSyncRandSeed` must equal `configuredMapRandSeed` — a mismatch **aborts extraction** with a policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1` — `0` is Civ's "pick random" and rejected for controlled runs — and rotations are `≥ 0`). Per-player `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.
 15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"`, `"best"`, or a `-`-prefixed suffix and, with an explicit list, a suffix must be a member (`"base"` and `"best"` need no membership). `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.
 16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.
+17. **Controlled-seed report wiring** (§6.2, §7.1): `report.template` must name a registered template (`default` or `controlled_seed`). A `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`. The `controlled_seed` template requires HTML-only `formats` (omitted ⇒ `["html"]`) and exactly one compatible, non-empty report section; a non-HTML format or an incompatible section is a render-time error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points.

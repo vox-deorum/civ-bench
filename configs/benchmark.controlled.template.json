@@ -1,0 +1,96 @@
+{
+  "name": "controlled-seed-2026",
+  "friendly_name": "Controlled seed comparison 2026",
+  "description": "TEMPLATE for the dedicated controlled-seed report (tracked example — copy to a local, gitignored configs/benchmark*.json to run). Selects the performance.controlled_seed_report analysis and the controlled_seed report template: one HTML overview with two heatmaps per controlled seed plus one detail page per (seed, final player position). The strength stage's baseline_experiment is the sole dedicated Vanilla source; condition pairing must stay enabled (it defines the Every-turn / Per-5 condition rows). The report renders HTML only.",
+
+  "seed": 42,
+
+  "output": {
+    "root": "reports",
+    "suffix": ""
+  },
+
+  "presentation": {
+    "condition_pairing": {
+      "enabled": true,
+      "suffixes": null,
+      "base_label": "Every-turn",
+      "sort_condition": "base"
+    }
+  },
+
+  "data": {
+    "extract": {
+      "enabled": false,
+      "runs_dir": "runs/",
+      "outputs": ["turns", "panel", "games", "tokens"],
+      "max_dbs": null,
+      "prune_missing": false,
+      "force_rebuild": false,
+      "issues_path": "runs/import_issues.csv"
+    },
+    "tables": {
+      "turns": "runs/turn_data.csv",
+      "panel": "runs/panel_data.csv",
+      "games": "runs/game_data.csv",
+      "tokens": "runs/model_token_usage.csv"
+    },
+    "filter": null
+  },
+
+  "estimators": [
+    {
+      "id": "attention",
+      "model": "attention_mlp",
+      "fit": "pretrained",
+      "predict": "in_sample",
+      "enabled": true,
+      "predict_subset": "all",
+      "save_predictions": "reports/estimators/attention/predictions.csv",
+      "pretrained": {
+        "model_dir": "pretrained/attention_mlp/"
+      }
+    }
+  ],
+
+  "adjust": [
+    {
+      "id": "strength",
+      "module": "strength",
+      "enabled": true,
+      "uses": { "estimators": ["attention"] },
+      "save": "reports/adjust/player_strength_panel.csv",
+      "params": {
+        "turn_progress_min": 0.2,
+        "weight": "turn_progress",
+        "relative_to": null,
+        "enforce_winner": true,
+        "civ_adjust": "ols_logit",
+        "block": "auto",
+        "baseline_experiment": "vanilla-standard-fixed",
+        "post_cell_normalize": "none"
+      }
+    }
+  ],
+
+  "analyses": [
+    {
+      "id": "controlled_seed",
+      "module": "performance.controlled_seed_report",
+      "enabled": true,
+      "uses": { "estimators": ["attention"], "tables": ["strength"] },
+      "params": {}
+    }
+  ],
+
+  "report": {
+    "template": "controlled_seed",
+    "out_dir": "reports/",
+    "formats": ["html"],
+    "sections": null,
+    "overview_sections": null,
+    "section_overrides": {},
+    "title": null,
+    "include_disabled": false
+  }
+}

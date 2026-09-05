@@ -31,6 +31,7 @@ The repo tracks **example** run-specs as `configs/*.template.json`. They are doc
 - [configs/benchmark.full.template.json](../configs/benchmark.full.template.json) is the kitchen sink: core plus every optional or reserved module, shipped with `"enabled": false`.
 - [configs/benchmark.pretrained.template.json](../configs/benchmark.pretrained.template.json) is a load-only driver that uses pre-trained estimators (zero training).
 - [configs/benchmark.cross.template.json](../configs/benchmark.cross.template.json) is the "cross" variant: train on non-LLM seats, predict everyone, write to a separate `reports-cross/` root.
+- [configs/benchmark.controlled.template.json](../configs/benchmark.controlled.template.json) is the dedicated **controlled-seed report**: per-seed heatmaps and per-seed-player detail pages from the controlled design.
 
 ```powershell
 # Copy a template, then edit data.extract.runs_dir / data.tables.* / pretrained.model_dir

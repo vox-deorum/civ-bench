@@ -28,10 +28,12 @@ import pandas as pd
 from ..config import RunConfig
 from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
+from .context import ReportBuildContext
+from .controlled_seed import render_controlled_seed_site
 from .errors import ReportError
-from .model import Download, Figure, Section, Table
+from .model import ControlledSeedDocument, Download, Figure, Section, Table
 from .render import render_html_site, render_markdown, render_stylesheet
-from .templates import family_of, family_sort_index, get_template
+from .templates import family_of, family_sort_index, get_template, template_formats
 
 # Inline tables are capped so a large audit trail (e.g. cell baselines) does not
 # bloat the document; the full data is always one click away via the copied CSV.
@@ -175,6 +177,7 @@ def _build_section(
     assets_root: Path,
     warnings: list[str],
     override: Optional[dict] = None,
+    context: Optional[ReportBuildContext] = None,
 ) -> Section:
     manifest = _read_manifest(cfg, stage_id)
     src_dir = _analyses_dir(cfg, stage_id)
@@ -252,6 +255,11 @@ def _build_section(
         )
         if rel_csv is None:
             continue
+        # Every successfully copied table is loadable in full through the build
+        # context (a specialized template may need more than the capped inline
+        # frame).
+        if context is not None:
+            context.record_table(stage_id, tbl["name"], src_dir, tbl["file"])
         if tbl["name"] in inline_tables:
             frame = pd.read_csv(src)
             shown = frame.head(MAX_TABLE_ROWS)
@@ -369,12 +377,21 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     template_name = report_cfg.get("template") or "default"
     template = get_template(template_name)
 
-    formats = list(report_cfg.get("formats") or ["md", "html"])
+    # An omitted `formats` list defaults to what the template supports; a present
+    # list must stick to the rendered formats and to the template's own subset.
+    template_supported = template_formats(template_name)
+    formats = list(report_cfg.get("formats") or template_supported)
     unsupported = [f for f in formats if f not in _SUPPORTED_FORMATS]
     if unsupported:
         raise ReportError(
             f"report.formats: {unsupported} not implemented yet (md/html only); "
             f"`pdf` is schema-reserved. Remove it from report.formats."
+        )
+    disallowed = [f for f in formats if f not in template_supported]
+    if disallowed:
+        raise ReportError(
+            f"report.formats: the '{template_name}' template renders "
+            f"{template_supported} only; remove {disallowed} from report.formats."
         )
 
     warnings: list[str] = []
@@ -395,6 +412,17 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     )
     assets_root = staging / "assets"
     assets_root.mkdir()
+    title = report_cfg.get("title") or cfg.friendly_name or cfg.name
+    meta = {
+        "title": title,
+        "run_name": cfg.name,
+        "seed": cfg.seed,
+        "config_path": str(cfg.config_path),
+        "output_root": cfg.output.resolved_root,
+        "description": cfg.description,
+        "overview_section_ids": overview_ids,
+    }
+    context = ReportBuildContext(meta=meta)
     try:
         sections = [
             _build_section(
@@ -403,44 +431,45 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
                 assets_root,
                 warnings,
                 override=section_overrides.get(sid),
+                context=context,
             )
             for sid in section_ids
         ]
+        context.sections = sections
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
     written_rel: list[Path] = []
     try:
-        title = report_cfg.get("title") or cfg.friendly_name or cfg.name
-        meta = {
-            "title": title,
-            "run_name": cfg.name,
-            "seed": cfg.seed,
-            "config_path": str(cfg.config_path),
-            "output_root": cfg.output.resolved_root,
-            "description": cfg.description,
-            "overview_section_ids": overview_ids,
-        }
-        document = template(meta, sections)
+        document = template(context)
 
-        for fmt in formats:
-            if fmt == "md":
-                path = staging / "report.md"
-                path.write_text(render_markdown(document), encoding="utf-8")
-                written_rel.append(Path("report.md"))
-                continue
-
+        if isinstance(document, ControlledSeedDocument):
+            # The controlled-seed site: overview + one page per seed-player pair.
             stylesheet = assets_root / "report.css"
             stylesheet.write_text(render_stylesheet(), encoding="utf-8")
-            for filename, text in render_html_site(document).items():
-                (staging / filename).write_text(text, encoding="utf-8")
-                written_rel.append(Path(filename))
             written_rel.append(Path("assets") / "report.css")
+            for filename, text in render_controlled_seed_site(document).items():
+                path = staging / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                written_rel.append(Path(filename))
+        else:
+            for fmt in formats:
+                if fmt == "md":
+                    path = staging / "report.md"
+                    path.write_text(render_markdown(document), encoding="utf-8")
+                    written_rel.append(Path("report.md"))
+                    continue
 
-        cleanup_warning = _replace_report_dir(staging, out_dir)
-        if cleanup_warning:
-            warnings.append(cleanup_warning)
+                stylesheet = assets_root / "report.css"
+                stylesheet.write_text(render_stylesheet(), encoding="utf-8")
+                for filename, text in render_html_site(document).items():
+                    (staging / filename).write_text(text, encoding="utf-8")
+                    written_rel.append(Path(filename))
+                written_rel.append(Path("assets") / "report.css")
+
+        warnings.extend(_replace_report_dir(staging, out_dir))
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -454,22 +483,74 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     )
 
 
-def _replace_report_dir(staging: Path, out_dir: Path) -> Optional[str]:
-    """Replace a generated report directory after the complete site is ready."""
+def _replace_report_dir(staging: Path, out_dir: Path) -> list[str]:
+    """Publish the staged report site, replacing any previous report.
+
+    Prefers the atomic route: rename the previous report away, move the staged
+    site into its place, then delete the old copy. Windows denies renaming a
+    directory that another program holds open (an Explorer window, an editor,
+    a terminal), so a denied rename falls back to copying the staged files over
+    the previous report in place and removing obsolete ones. A file that stays
+    locked becomes a warning, never a failed run.
+    """
     backup = staging.with_name(staging.name + ".bak")
 
     had_previous = out_dir.exists()
     if had_previous:
-        out_dir.replace(backup)
+        try:
+            out_dir.replace(backup)
+        except OSError as exc:
+            return _publish_in_place(staging, out_dir, reason=str(exc))
     try:
         staging.replace(out_dir)
     except BaseException:
         if had_previous and backup.exists() and not out_dir.exists():
             backup.replace(out_dir)
         raise
+    warnings: list[str] = []
     if backup.exists():
         try:
             shutil.rmtree(backup)
         except OSError as exc:
-            return f"could not remove prior report backup '{backup}': {exc}"
-    return None
+            warnings.append(f"could not remove prior report backup '{backup}': {exc}")
+    return warnings
+
+
+def _publish_in_place(staging: Path, out_dir: Path, reason: str) -> list[str]:
+    """Copy the staged site over the previous report and drop obsolete files.
+
+    The fallback for a report directory that cannot be renamed away: each
+    staged file overwrites its previous copy, files the new report no longer
+    contains are removed, and a file another program keeps locked is reported
+    as a warning instead of failing the run.
+    """
+    warnings = [
+        f"could not rename the previous report directory ({reason}); "
+        "updated its files in place"
+    ]
+    keep: set[Path] = set()
+    for src in sorted(p for p in staging.rglob("*") if p.is_file()):
+        rel = src.relative_to(staging)
+        keep.add(rel)
+        dst = out_dir / rel
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+        except OSError as exc:
+            warnings.append(f"could not update report file '{dst}': {exc}")
+    for existing in sorted(p for p in out_dir.rglob("*") if p.is_file()):
+        if existing.relative_to(out_dir) in keep:
+            continue
+        try:
+            existing.unlink()
+        except OSError as exc:
+            warnings.append(f"could not remove obsolete report file '{existing}': {exc}")
+    # Children sort after their parents, so reverse order removes a directory
+    # only after obsolete files have left it empty.
+    for directory in sorted((p for p in out_dir.rglob("*") if p.is_dir()), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    shutil.rmtree(staging, ignore_errors=True)
+    return warnings

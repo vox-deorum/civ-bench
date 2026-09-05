@@ -223,7 +223,7 @@ The modules, grouped into five families:
 - **ratings** rate skill: `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups`. Per-strategy Elo is `group_by: ["player_type", "strategy"]`, and confidence intervals are a `bootstrap` param, both on the ordinary fit rather than separate modules.
 - **prediction** scores the predictor: `evaluate`, `compare`. These opt in to scoring every enabled estimator by default; add `uses.estimators` only to narrow.
 - **calibration** checks honesty: `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline`.
-- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`.
+- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`. The last one emits the tables behind the dedicated controlled-seed HTML report (see the `controlled_seed` report template below).
 - **exploratory**: `model_token_costs` (uses the token table and pricing from `models.json`).
 
 Each module instance resolves a coded friendly name and one-line description from its parameters; `name` and `description` here override them for this one section on the report. The fitted rating modules use a distinct strategy identity when `group_by` includes `strategy`, so no config name override is needed for that variant. The resolved identity is persisted in the analysis manifest. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
@@ -248,9 +248,9 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 
 ```jsonc
 "report": {
-  "template": "default",          // only "default" today
+  "template": "default",          // "default" or "controlled_seed" (see below)
   "out_dir": "reports/",          // under the resolved output root
-  "formats": ["md", "html"],      // md and html implemented
+  "formats": ["md", "html"],      // md and html implemented; controlled_seed renders html only
   "sections": null,               // null = every enabled analysis in canonical family order;
                                   //   or an explicit ordered list of stage ids to curate
   "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
@@ -268,6 +268,8 @@ Each section is headed by the module instance's resolved friendly name (the per-
 `section_overrides` narrows an analysis's inline artifacts. For each stage id, `tables` and `figures` are optional lists of manifest names. A supplied list replaces that dimension's normal inline list. An omitted dimension keeps the default list, and hidden artifacts remain downloadable. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped.
 
 HTML also writes one page for every family represented in `sections`: `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html`. The output directory contains `report.html`, `report.md`, `assets/report.css`, and the self-contained `assets/` tree. Each analysis persists a `result.json` beside its artifacts, so `civ-bench report` re-renders the documents from disk, deterministically and byte-identically, without re-running any analysis.
+
+The **`controlled_seed`** template is the second shipped template: the dedicated controlled-seed report. It requires exactly one report section (an enabled `performance.controlled_seed_report` analysis) and renders HTML only, so an omitted `formats` list defaults to `["html"]`. The site is one overview page with two heatmaps per controlled seed (mean adjusted strength and dominant victory focus, with the dedicated `Vanilla | Vanilla` condition as a separate isolated row) plus one detail page per `(seed, player position)` pair with victory-probability curves and a per-condition comparison table. See [configs/benchmark.md](../configs/benchmark.md) section 7.1 and the tracked [configs/benchmark.controlled.template.json](../configs/benchmark.controlled.template.json) example.
 
 ---
 

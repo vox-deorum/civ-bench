@@ -1,5 +1,17 @@
 # Controlled seed comparison report
 
+<!-- PARITY: this feature is BUILT. The sections below are the as-built design; see
+     configs/benchmark.md §6.2 (the analysis) and §7.1 (the template) for the user-facing
+     schema docs, and tests/test_controlled_seed_report.py for the verified behavior. -->
+
+**Status: built & validated.** As-built notes on top of the original design:
+
+- The analysis module is `bench/analyses/performance/controlled_seed_report.py`; the renderer is `bench/reports/controlled_seed.py`; the build context is `bench/reports/context.py`; the document model addition is `ControlledSeedDocument` in `bench/reports/model.py`.
+- The module reads its inputs as a census of the controlled design: it does not apply the global `data.filter`, because an `only_llm` or `min_games` filter would punch holes in the seed grid and remove the dedicated Vanilla baseline.
+- A missing `baseline_experiment` on the strength stage is a configuration error (the report has no dedicated Vanilla source at all). A configured baseline that lacks rows for a specific `(seed, player_id)` pair is not fatal: the pair keeps blank differences and a visible page note.
+- Template-name membership and the exactly-one-estimator / one-strength-table references are validated at config load; the HTML-only formats rule and the exactly-one-section rule are enforced at render time.
+- Previous and next player links on a detail page wrap cyclically within the seed's available player list, so both links always exist.
+
 ## Goal
 
 Add a dedicated HTML report for controlled experiments. The report exposes game-to-game variation without repeating the aggregate rankings already covered by the standard report.

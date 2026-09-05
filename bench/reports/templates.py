@@ -1,23 +1,37 @@
 """Report templates: assemble produced :class:`Section`s into a document (stage 5).
 
-A *template* is a pure function ``(meta, sections) -> ReportDocument``. It decides
-structure only — grouping, ordering, headings, intro prose — never *which*
-analyses ran (that is the run-spec's job) and never an analysis's own content
-(that is the module's job). The shipped ``default`` template groups sections into
-the five analysis families (ratings / prediction / calibration / performance /
+A *template* is a pure function over the :class:`~bench.reports.context.ReportBuildContext`
+(run metadata + resolved sections + the full-artifact loader) returning a document
+model. It decides structure only — grouping, ordering, headings, intro prose — never
+*which* analyses ran (that is the run-spec's job) and never an analysis's own content
+(that is the module's job). The shipped ``default`` template groups sections into the
+five analysis families (ratings / prediction / calibration / performance /
 exploratory), preserving the dependency order the runner resolved, so no analysis
 hardcodes its place in the document (invariant 3).
 
+The ``controlled_seed`` template builds the dedicated
+:class:`~bench.reports.model.ControlledSeedDocument` for the controlled-seed report:
+it requires exactly one ``performance.controlled_seed_report`` section and loads that
+section's three persisted tables through the build context.
+
 Register a new template by adding it to :data:`TEMPLATES`; the run-spec selects it
-by ``report.template`` (default ``"default"``).
+by ``report.template`` (default ``"default"``). :data:`TEMPLATE_FORMATS` declares the
+formats each template renders and the default used when ``report.formats`` is omitted.
 """
 
 from __future__ import annotations
 
 from typing import Callable
 
+from ..config import schema as S
+from .context import ReportBuildContext
 from .errors import ReportError
-from .model import FamilyGroup, ReportDocument, Section
+from .model import (
+    ControlledSeedDocument,
+    FamilyGroup,
+    ReportDocument,
+    Section,
+)
 
 # Friendly titles for the known module families; an unknown family falls back to
 # a title-cased version of its registry prefix (so a future family renders too).
@@ -85,8 +99,10 @@ def _summarize_family(group: FamilyGroup) -> str:
     return f"This page brings together the {noun} for {_join_titles(titles)}."
 
 
-def default_template(meta: dict, sections: list[Section]) -> ReportDocument:
+def default_template(ctx: ReportBuildContext) -> ReportDocument:
     """The default report layout: family chapters in dependency order."""
+    meta = ctx.meta
+    sections = ctx.sections
     groups = _group_by_family(sections)
     for group in groups:
         group.summary = _summarize_family(group)
@@ -118,12 +134,71 @@ def default_template(meta: dict, sections: list[Section]) -> ReportDocument:
     )
 
 
-TEMPLATES: dict[str, Callable[[dict, list[Section]], ReportDocument]] = {
+CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
+CONTROLLED_SEED_TABLES = (
+    "seed_player_summary",
+    "seed_player_probability",
+    "seed_player_index",
+)
+
+
+def controlled_seed_template(ctx: ReportBuildContext) -> ControlledSeedDocument:
+    """Build the controlled-seed document from its single analysis section.
+
+    The template is strict about its input: exactly one section, and it must be
+    an enabled, non-empty ``performance.controlled_seed_report`` section. Any
+    other section in the resolved report is incompatible with this template.
+    """
+    sections = ctx.sections
+    if len(sections) != 1 or sections[0].module != CONTROLLED_SEED_MODULE:
+        raise ReportError(
+            "the controlled_seed template requires exactly one report section, the "
+            f"'{CONTROLLED_SEED_MODULE}' analysis (resolved: "
+            f"{[f'{s.id} ({s.module})' for s in sections]}). Curate report.sections "
+            "to contain only the controlled-seed report stage."
+        )
+    section = sections[0]
+    if section.empty:
+        raise ReportError(
+            f"report section '{section.id}' produced no artifacts; the controlled_seed "
+            "template has nothing to render."
+        )
+    tables = {
+        name: ctx.load_table(section.id, name) for name in CONTROLLED_SEED_TABLES
+    }
+    return ControlledSeedDocument(
+        title=ctx.meta["title"],
+        run_name=ctx.meta["run_name"],
+        seed=ctx.meta["seed"],
+        config_path=ctx.meta["config_path"],
+        output_root=ctx.meta["output_root"],
+        description=ctx.meta.get("description", "") or "",
+        section_id=section.id,
+        summary=section.summary,
+        metadata=dict(section.metadata or {}),
+        summary_table=tables["seed_player_summary"],
+        probability_table=tables["seed_player_probability"],
+        index_table=tables["seed_player_index"],
+        downloads=list(section.downloads),
+    )
+
+
+TEMPLATES: dict[str, Callable[[ReportBuildContext], object]] = {
     "default": default_template,
+    "controlled_seed": controlled_seed_template,
 }
 
+# Formats each template renders, in default order; `report.formats` for a
+# template must be a subset (the first entry is the omitted-formats default).
+TEMPLATE_FORMATS: dict[str, list[str]] = dict(S.TEMPLATE_FORMATS)
 
-def get_template(name: str) -> Callable[[dict, list[Section]], ReportDocument]:
+
+def template_formats(name: str) -> list[str]:
+    """The formats a template supports (unknown templates fall back to md+html)."""
+    return list(TEMPLATE_FORMATS.get(name, ["md", "html"]))
+
+
+def get_template(name: str) -> Callable[[ReportBuildContext], object]:
     if name not in TEMPLATES:
         raise ReportError(
             f"unknown report template '{name}'. Available: {sorted(TEMPLATES)}."

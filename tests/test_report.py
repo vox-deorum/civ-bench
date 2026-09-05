@@ -14,6 +14,7 @@ and hermetic while testing exactly the report-stage contract.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -208,6 +209,58 @@ def test_rerender_is_byte_stable(report_env):
         if path.is_file()
     }
     assert second == first
+
+
+# ── publishing a previous report directory ─────────────────────────────────────
+def _deny_renames(monkeypatch):
+    """Simulate Windows denying every directory rename (WinError 5)."""
+    def denied(self, target):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(Path, "replace", denied)
+
+
+def test_locked_report_dir_falls_back_to_in_place_update(report_env, monkeypatch):
+    # A report directory held open by another program cannot be renamed away,
+    # so publishing must overwrite its files in place instead of failing.
+    run_report(report_env)
+    out = report_dir(report_env)
+    fresh_md = (out / "report.md").read_bytes()
+    (out / "report.md").write_bytes(b"stale bytes")
+    (out / "stale.html").write_text("old", encoding="utf-8")
+
+    _deny_renames(monkeypatch)
+    result = run_report(report_env)
+
+    assert any("updated its files in place" in w for w in result.warnings)
+    assert (out / "report.md").read_bytes() == fresh_md
+    assert not (out / "stale.html").exists()  # obsolete file removed
+    assert not any(p.name.startswith(f".{out.name}.tmp") for p in out.parent.iterdir())
+
+
+def test_locked_obsolete_file_is_a_warning_not_a_failure(report_env, monkeypatch):
+    run_report(report_env)
+    out = report_dir(report_env)
+    stale = out / "stale.html"
+    stale.write_text("old", encoding="utf-8")
+
+    real_unlink = Path.unlink
+
+    def denied_unlink(self, missing_ok=False):
+        if self.name == "stale.html":
+            raise PermissionError(5, "Access is denied")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    _deny_renames(monkeypatch)
+    monkeypatch.setattr(Path, "unlink", denied_unlink)
+    result = run_report(report_env)
+
+    assert any(
+        "could not remove obsolete report file" in w and "stale.html" in w
+        for w in result.warnings
+    )
+    assert stale.exists()  # kept because it is locked, but the run succeeded
+    assert (out / "report.md").exists()
 
 
 # ── section curation ────────────────────────────────────────────────────────────

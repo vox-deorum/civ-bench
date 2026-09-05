@@ -427,6 +427,15 @@ def _validate_analysis(
             _validate_group_by(params.get("group_by"), groupings, where)
             _validate_bootstrap(params.get("bootstrap"), where)
 
+    # The controlled-seed report rates exactly one estimator's predictions.
+    if module == "performance.controlled_seed_report":
+        est = (entry.get("uses") or {}).get("estimators") or []
+        if len(est) != 1:
+            raise ConfigError(
+                f"{where}.uses.estimators: performance.controlled_seed_report requires "
+                f"exactly one estimator reference (got {est})."
+            )
+
     if "enabled" in entry:
         entry["enabled"] = coerce_bool(entry["enabled"], f"{where}.enabled")
 
@@ -562,8 +571,14 @@ def _validate_groupings(groupings: dict) -> None:
 def _validate_report(report: dict) -> None:
     _require_mapping(report, "report")
     _check_keys(report, S.REPORT_KEYS, "report")
-    if "template" in report:
-        _check_type(report["template"], (str,), "report.template")
+    template = report.get("template")
+    if template is not None:
+        _check_type(template, (str,), "report.template")
+        if template not in S.REPORT_TEMPLATES:
+            raise ConfigError(
+                f"report.template: unknown template '{template}'. "
+                f"Available: {sorted(S.REPORT_TEMPLATES)}."
+            )
     if "out_dir" in report:
         _check_type(report["out_dir"], (str,), "report.out_dir")
     if "title" in report and report["title"] is not None:

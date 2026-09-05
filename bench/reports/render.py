@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import html as _html
 
-from .model import FamilyGroup, ReportDocument, Section, Table
+from .model import ReportDocument, Section, Table
 
 
 def _slug(text: str) -> str:
@@ -263,6 +263,32 @@ td:first-child, th:first-child { text-align: left; }
 details.downloads { margin: 1.25rem 0 2rem; border: 1px solid #d8dee6; border-radius: .4rem; padding: .65rem .8rem; background: #fbfcfd; }
 details.downloads summary { cursor: pointer; font-weight: 650; }
 details.downloads ul { margin-bottom: .25rem; }
+/* controlled-seed report */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; clip: rect(0 0 0 0); overflow: hidden; white-space: nowrap; }
+.controlled-content { max-width: 92rem; margin-left: auto; margin-right: auto; padding: 2.25rem 2rem 4rem; }
+.page-nav { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 1.25rem; }
+.page-nav .return-link { font-weight: 650; }
+.warning { margin: .6rem 0; border-left: 4px solid #c28e21; border-radius: .25rem; padding: .5rem .75rem; color: #6b5312; background: #fdf6e3; }
+.heat-figure { margin: 1rem 0 1.75rem; }
+.heat-figure figcaption { margin-bottom: .4rem; color: #445164; font-size: .92rem; font-weight: 650; }
+table.heatmap { font-size: .85rem; }
+table.heatmap th, table.heatmap td { text-align: center; white-space: nowrap; }
+table.heatmap .row-label { text-align: left; white-space: normal; min-width: 13rem; }
+.heat-cell { padding: 0; }
+.heat-cell a { display: block; padding: .38rem .55rem; color: inherit; text-decoration: none; }
+.heat-cell a:hover, .heat-cell a:focus-visible { outline: 2px solid #175ca8; outline-offset: -2px; }
+.heat-cell-empty { background: transparent; }
+tbody.vanilla-body tr.vanilla-row th, tbody.vanilla-body tr.vanilla-row td { border-top: 3px double #8d99a9; border-bottom: 3px double #8d99a9; background: #f3f0e8; }
+tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient(rgba(255,255,255,.35), rgba(255,255,255,.35)); }
+.heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); white-space: pre-line; font-size: .82rem; pointer-events: none; }
+.focus-legend { display: flex; flex-wrap: wrap; gap: .9rem; margin: .25rem 0 1.5rem; padding: 0; list-style: none; font-size: .85rem; }
+.focus-legend .swatch { display: inline-block; width: .85rem; height: .85rem; margin-right: .3rem; border: 1px solid #44516433; border-radius: .15rem; vertical-align: -0.1em; }
+.chart-controls { display: flex; gap: .55rem; align-items: center; margin: .75rem 0; }
+.curve-chart svg { max-width: 100%; height: auto; }
+.curve-legend { display: flex; flex-wrap: wrap; gap: .8rem; margin: .5rem 0; padding: 0; list-style: none; font-size: .85rem; }
+.curve-legend .curve-swatch { display: inline-block; width: 1.6rem; margin-right: .3rem; vertical-align: middle; }
+.curve-legend li.preselected { border: 1px solid #175ca8; border-radius: .3rem; padding: .05rem .4rem; font-weight: 650; background: #eef3fa; }
+table.comparison td.vanilla-value { font-weight: 700; }
 @media (max-width: 820px) {
   .sidebar { position: static; width: auto; max-height: none; }
   .sidebar ul ul { display: none; }

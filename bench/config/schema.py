@@ -166,6 +166,7 @@ ANALYSIS_MODULES = {
     "performance.strength_panel",
     "performance.turn_predicted",
     "performance.permutation_importance",
+    "performance.controlled_seed_report",
     # exploratory.*
     "exploratory.model_token_costs",
     "exploratory.cost_vs_rating",
@@ -201,6 +202,7 @@ ANALYSIS_PARAM_KEYS = {
         "condition_pairing",
     },
     "performance.turn_predicted": {"aggregate", "by"},
+    "performance.controlled_seed_report": {"condition_pairing"},
     "exploratory.model_token_costs": {
         "currency", "by_player_type", "by_strategist", "condition_pairing",
     },
@@ -224,3 +226,9 @@ REPORT_KEYS = {
 }
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}
+REPORT_TEMPLATES = {"default", "controlled_seed"}
+# Formats each template can render; also the default when `formats` is omitted.
+TEMPLATE_FORMATS = {
+    "default": ["md", "html"],
+    "controlled_seed": ["html"],
+}

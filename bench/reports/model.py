@@ -99,3 +99,49 @@ class ReportDocument:
     @property
     def n_sections(self) -> int:
         return sum(len(g.sections) for g in self.groups)
+
+
+@dataclass
+class ControlledSeedDocument:
+    """The document behind the dedicated controlled-seed HTML report.
+
+    Built by the ``controlled_seed`` template from one
+    ``performance.controlled_seed_report`` section's persisted tables. It carries
+    the three report-ready tables plus the ordering and color metadata the
+    analysis recorded in its manifest, so the renderer needs no catalog or
+    canonical-table access.
+    """
+
+    title: str
+    run_name: str
+    seed: int
+    config_path: str
+    output_root: str
+    description: str = ""
+    section_id: str = ""
+    summary: str = ""
+    metadata: dict = field(default_factory=dict)
+    summary_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    probability_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    index_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    downloads: list[Download] = field(default_factory=list)
+
+    @property
+    def vanilla_label(self) -> str:
+        return str(self.metadata.get("vanilla_label", "Vanilla"))
+
+    @property
+    def base_label(self) -> str:
+        return str(self.metadata.get("base_label", "Base"))
+
+    @property
+    def strategist_order(self) -> list[str]:
+        return list(self.metadata.get("strategist_order") or [])
+
+    @property
+    def condition_order(self) -> list[str]:
+        return list(self.metadata.get("condition_order") or [])
+
+    @property
+    def strategist_colors(self) -> dict[str, str]:
+        return dict(self.metadata.get("strategist_colors") or {})

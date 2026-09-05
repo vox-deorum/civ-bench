@@ -23,6 +23,7 @@ from .calibration import (
 from .errors import AnalysisError
 from .exploratory import ExploratoryCostVsRating, ExploratoryModelTokenCosts
 from .performance import (
+    PerformanceControlledSeedReport,
     PerformanceExperimentCompleteness,
     PerformanceScoreRatio,
     PerformanceStrengthPanel,
@@ -55,6 +56,7 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "performance.score_ratio": PerformanceScoreRatio,
     "performance.strength_panel": PerformanceStrengthPanel,
     "performance.turn_predicted": PerformanceTurnPredicted,
+    "performance.controlled_seed_report": PerformanceControlledSeedReport,
     # exploratory.*
     "exploratory.model_token_costs": ExploratoryModelTokenCosts,
     "exploratory.cost_vs_rating": ExploratoryCostVsRating,
