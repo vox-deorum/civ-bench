@@ -571,14 +571,6 @@ def _validate_groupings(groupings: dict) -> None:
 def _validate_report(report: dict) -> None:
     _require_mapping(report, "report")
     _check_keys(report, S.REPORT_KEYS, "report")
-    template = report.get("template")
-    if template is not None:
-        _check_type(template, (str,), "report.template")
-        if template not in S.REPORT_TEMPLATES:
-            raise ConfigError(
-                f"report.template: unknown template '{template}'. "
-                f"Available: {sorted(S.REPORT_TEMPLATES)}."
-            )
     if "out_dir" in report:
         _check_type(report["out_dir"], (str,), "report.out_dir")
     if "title" in report and report["title"] is not None:

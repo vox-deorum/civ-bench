@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html as _html
 
+from .controlled_seed import render_controlled_seed_site
 from .model import ReportDocument, Section, Table
 
 
@@ -356,7 +357,8 @@ def _page_start(doc: ReportDocument, page_title: str) -> list[str]:
 
 
 def render_html_site(doc: ReportDocument) -> dict[str, str]:
-    """Render the overview and one HTML page per represented analysis family."""
+    """Render the overview, one HTML page per represented analysis family, and
+    (when the document carries it) the controlled-seed heatmap annex."""
     anchors = _build_anchors(doc)
     filenames = _family_filenames(doc)
     family_for = {
@@ -401,6 +403,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
             _render_section_html(section, parts, anchors[id(section)])
         parts.append("</main></body></html>")
         pages[filenames[id(group)]] = "\n".join(parts) + "\n"
+    if doc.controlled_seed is not None:
+        pages.update(render_controlled_seed_site(doc.controlled_seed))
     return pages
 
 

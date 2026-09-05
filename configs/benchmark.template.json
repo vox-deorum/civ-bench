@@ -228,7 +228,6 @@
   ],
 
   "report": {
-    "template": "default",
     "out_dir": "reports/",
     "formats": ["md", "html"],
     "sections": null,

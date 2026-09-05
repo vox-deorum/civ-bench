@@ -215,7 +215,6 @@ TURN_PREDICTED_AGGREGATE = {"mean", "median"}
 
 # ── report (§7) ────────────────────────────────────────────────────────────
 REPORT_KEYS = {
-    "template",
     "out_dir",
     "formats",
     "sections",
@@ -226,9 +225,5 @@ REPORT_KEYS = {
 }
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}
-REPORT_TEMPLATES = {"default", "controlled_seed"}
-# Formats each template can render; also the default when `formats` is omitted.
-TEMPLATE_FORMATS = {
-    "default": ["md", "html"],
-    "controlled_seed": ["html"],
-}
+# Formats the report renders; also the default when `report.formats` is omitted.
+REPORT_DEFAULT_FORMATS = ["md", "html"]

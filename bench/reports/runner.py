@@ -2,8 +2,9 @@
 
 Walks each produced analysis's ``result.json`` manifest (written by the analysis
 runner) in dependency order, copies its figures/tables into a self-contained
-``assets/`` tree under the report directory, builds a :class:`ReportDocument` via
-the selected template, and renders it to the configured formats (md / html).
+``assets/`` tree under the report directory, builds the report document
+(family chapters, plus the controlled-seed heatmap annex when the report
+carries that analysis), and renders it to the configured formats (md / html).
 
 This is the milestone stage: it proves the full **extract → estimators → adjust →
 analyses → report** pipeline end-to-end. Because it reads artifacts from disk (not
@@ -26,14 +27,14 @@ from typing import Optional
 import pandas as pd
 
 from ..config import RunConfig
+from ..config import schema as S
 from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .context import ReportBuildContext
-from .controlled_seed import render_controlled_seed_site
 from .errors import ReportError
-from .model import ControlledSeedDocument, Download, Figure, Section, Table
+from .model import Download, Figure, Section, Table
 from .render import render_html_site, render_markdown, render_stylesheet
-from .templates import family_of, family_sort_index, get_template, template_formats
+from .templates import default_template, family_of, family_sort_index
 
 # Inline tables are capped so a large audit trail (e.g. cell baselines) does not
 # bloat the document; the full data is always one click away via the copied CSV.
@@ -374,24 +375,15 @@ def _copy_asset(
 def run_report(cfg: RunConfig) -> ReportRunResult:
     """Render the report for ``cfg`` from the produced analysis artifacts."""
     report_cfg = cfg.report or {}
-    template_name = report_cfg.get("template") or "default"
-    template = get_template(template_name)
 
-    # An omitted `formats` list defaults to what the template supports; a present
-    # list must stick to the rendered formats and to the template's own subset.
-    template_supported = template_formats(template_name)
-    formats = list(report_cfg.get("formats") or template_supported)
+    # An omitted `formats` list defaults to md + html; a present list must stick
+    # to the formats the report actually renders (`pdf` is schema-reserved).
+    formats = list(report_cfg.get("formats") or S.REPORT_DEFAULT_FORMATS)
     unsupported = [f for f in formats if f not in _SUPPORTED_FORMATS]
     if unsupported:
         raise ReportError(
             f"report.formats: {unsupported} not implemented yet (md/html only); "
             f"`pdf` is schema-reserved. Remove it from report.formats."
-        )
-    disallowed = [f for f in formats if f not in template_supported]
-    if disallowed:
-        raise ReportError(
-            f"report.formats: the '{template_name}' template renders "
-            f"{template_supported} only; remove {disallowed} from report.formats."
         )
 
     warnings: list[str] = []
@@ -421,6 +413,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "output_root": cfg.output.resolved_root,
         "description": cfg.description,
         "overview_section_ids": overview_ids,
+        "formats": formats,
     }
     context = ReportBuildContext(meta=meta)
     try:
@@ -442,32 +435,28 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
 
     written_rel: list[Path] = []
     try:
-        document = template(context)
+        document = default_template(context)
 
-        if isinstance(document, ControlledSeedDocument):
-            # The controlled-seed site: overview + one page per seed-player pair.
+        if "md" in formats:
+            path = staging / "report.md"
+            path.write_text(render_markdown(document), encoding="utf-8")
+            written_rel.append(Path("report.md"))
+        if "html" in formats:
             stylesheet = assets_root / "report.css"
             stylesheet.write_text(render_stylesheet(), encoding="utf-8")
             written_rel.append(Path("assets") / "report.css")
-            for filename, text in render_controlled_seed_site(document).items():
+            # The family pages plus, when the document carries it, the
+            # controlled-seed heatmap annex.
+            for filename, text in render_html_site(document).items():
                 path = staging / filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
                 written_rel.append(Path(filename))
-        else:
-            for fmt in formats:
-                if fmt == "md":
-                    path = staging / "report.md"
-                    path.write_text(render_markdown(document), encoding="utf-8")
-                    written_rel.append(Path("report.md"))
-                    continue
-
-                stylesheet = assets_root / "report.css"
-                stylesheet.write_text(render_stylesheet(), encoding="utf-8")
-                for filename, text in render_html_site(document).items():
-                    (staging / filename).write_text(text, encoding="utf-8")
-                    written_rel.append(Path(filename))
-                written_rel.append(Path("assets") / "report.css")
+        elif document.controlled_seed is not None:
+            warnings.append(
+                "report.formats excludes html; the controlled-seed heatmap "
+                "pages are HTML-only and were skipped."
+            )
 
         warnings.extend(_replace_report_dir(staging, out_dir))
     except BaseException:

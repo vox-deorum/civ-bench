@@ -1,6 +1,11 @@
-"""Render a :class:`ControlledSeedDocument` to the controlled-seed HTML site (stage 5).
+"""Build and render the report's controlled-seed HTML pages (stage 5).
 
-The site is self-contained and deterministic: one overview page with two heatmap
+:func:`controlled_seed_document` turns the resolved ``performance.controlled_seed_report``
+section into a :class:`~bench.reports.model.ControlledSeedDocument` (the default
+document carries it as its ``controlled_seed`` field); :func:`render_controlled_seed_site`
+renders that document into the annex pages of the report site.
+
+The pages are self-contained and deterministic: one overview page with two heatmap
 tables per controlled seed (mean adjusted strength on a fixed 0-1 scale, and the
 dominant victory focus with a stable categorical color per strategy), one detail
 page per ``(seed, player_id)`` pair, and one static vanilla-JavaScript asset for
@@ -18,11 +23,68 @@ from __future__ import annotations
 
 import html as _html
 import json
+from typing import Optional
 from urllib.parse import urlencode
 
 import numpy as np
 
+from .context import ReportBuildContext
+from .errors import ReportError
 from .model import ControlledSeedDocument
+
+CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
+CONTROLLED_SEED_TABLES = (
+    "seed_player_summary",
+    "seed_player_probability",
+    "seed_player_index",
+)
+
+# The overview page of the controlled-seed annex. It lives beside the family
+# report's own report.html, which links here through the analysis section.
+CONTROLLED_SEED_OVERVIEW = "controlled-seed.html"
+
+
+# ── document building ─────────────────────────────────────────────────────────
+def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeedDocument]:
+    """Build the controlled-seed document when the report carries its analysis.
+
+    Returns ``None`` when no ``performance.controlled_seed_report`` section is
+    among the resolved sections, or when that section produced no artifacts (the
+    section then renders as an ordinary empty section and the heatmap pages are
+    skipped). Config validation allows at most one enabled instance of the
+    analysis, so a resolved report contains at most one such section.
+    """
+    sections = [s for s in ctx.sections if s.module == CONTROLLED_SEED_MODULE]
+    if not sections:
+        return None
+    if len(sections) > 1:
+        raise ReportError(
+            "the report carries more than one "
+            f"'{CONTROLLED_SEED_MODULE}' section "
+            f"({[s.id for s in sections]}); the heatmap pages render from a "
+            "single section."
+        )
+    section = sections[0]
+    if section.empty:
+        return None
+    tables = {
+        name: ctx.load_table(section.id, name) for name in CONTROLLED_SEED_TABLES
+    }
+    return ControlledSeedDocument(
+        title=ctx.meta["title"],
+        run_name=ctx.meta["run_name"],
+        seed=ctx.meta["seed"],
+        config_path=ctx.meta["config_path"],
+        output_root=ctx.meta["output_root"],
+        description=ctx.meta.get("description", "") or "",
+        section_id=section.id,
+        summary=section.summary,
+        metadata=dict(section.metadata or {}),
+        summary_table=tables["seed_player_summary"],
+        probability_table=tables["seed_player_probability"],
+        index_table=tables["seed_player_index"],
+        downloads=list(section.downloads),
+    )
 
 # Stable categorical colors for the four victory-focus strategies.
 FOCUS_COLORS = {
@@ -278,6 +340,9 @@ def _render_overview(doc: ControlledSeedDocument) -> str:
     parts.append("</head><body>")
     parts.append('<a class="skip-link" href="#main-content">Skip to content</a>')
     parts.append('<main class="content controlled-content" id="main-content">')
+    parts.append('<nav class="page-nav" aria-label="Report navigation">')
+    parts.append('<a href="report.html">← Full report</a>')
+    parts.append("</nav>")
     parts.append(f"<h1>{_esc(doc.title)}</h1>")
     if doc.description:
         parts.append(f'<p class="caption">{_esc(doc.description)}</p>')
@@ -504,7 +569,7 @@ def _render_detail(
     if prev_row is not None:
         prev_seed, prev_player = int(prev_row["seed"]), int(prev_row["player_id"])
         parts.append(f'<a href="{_page_filename(prev_seed, prev_player)}">← Player {prev_player}</a>')
-    parts.append(f'<a href="report.html#seed-{seed}" class="return-link">Seed {seed} overview</a>')
+    parts.append(f'<a href="{CONTROLLED_SEED_OVERVIEW}#seed-{seed}" class="return-link">Seed {seed} overview</a>')
     if next_row is not None:
         next_seed, next_player = int(next_row["seed"]), int(next_row["player_id"])
         parts.append(f'<a href="{_page_filename(next_seed, next_player)}">Player {next_player} →</a>')
@@ -568,7 +633,7 @@ def _render_detail(
 # ── site assembly ─────────────────────────────────────────────────────────────
 def render_controlled_seed_site(doc: ControlledSeedDocument) -> dict[str, str]:
     """Render the controlled overview and every seed-player page (+ the JS asset)."""
-    pages: dict[str, str] = {"report.html": _render_overview(doc)}
+    pages: dict[str, str] = {CONTROLLED_SEED_OVERVIEW: _render_overview(doc)}
     rows = doc.index_table.to_dict("records")
     by_seed: dict[int, list[dict]] = {}
     for row in rows:

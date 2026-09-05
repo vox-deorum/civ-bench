@@ -202,7 +202,7 @@ def _spec(turns_csv, model_dir, save_predictions, extra_estimator=None):
             "enabled": True, "uses": {"estimators": ["score"]},
             "params": {"metrics": ["roc_auc"]},
         }],
-        "report": {"template": "default", "out_dir": "reports/", "formats": ["md"]},
+        "report": {"out_dir": "reports/", "formats": ["md"]},
     }
 
 
@@ -316,7 +316,7 @@ def _train_spec(turns_csv, save_predictions, *, model="score", predict="in_sampl
             "enabled": True, "uses": {"estimators": [model]},
             "params": {"metrics": ["roc_auc"]},
         }],
-        "report": {"template": "default", "out_dir": "reports/", "formats": ["md"]},
+        "report": {"out_dir": "reports/", "formats": ["md"]},
     }
 
 

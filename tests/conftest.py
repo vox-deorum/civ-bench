@@ -243,7 +243,6 @@ def _make_dev_spec() -> dict:
             },
         ],
         "report": {
-            "template": "default",
             "out_dir": "reports/",
             "formats": ["md", "html"],
             "sections": None,

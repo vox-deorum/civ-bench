@@ -1,11 +1,11 @@
-"""The report build context handed to templates (stage 5).
+"""The report build context handed to document builders (stage 5).
 
-A template is a pure function over this context: it receives the run metadata,
+A builder is a pure function over this context: it receives the run metadata,
 the resolved sections, and a containment-checked loader for the *full* named CSV
 artifacts of each selected analysis manifest. The loader is what lets a
-specialized template (e.g. ``controlled_seed``) rebuild complete tables from
-persisted artifacts without the report stage ever reading canonical tables or
-estimator predictions directly.
+specialized document (e.g. the controlled-seed annex) rebuild complete tables
+from persisted artifacts without the report stage ever reading canonical
+tables or estimator predictions directly.
 """
 
 from __future__ import annotations

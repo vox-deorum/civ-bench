@@ -488,7 +488,7 @@ def _run_spec(turns_path, pred_path, panel_path, games_path, save_path, params, 
             "uses": {"tables": ["strength"]},
             "params": {"group_by": ["player_type"], "ref": "Vanilla"},
         }],
-        "report": {"template": "default", "out_dir": "reports/", "formats": ["md"]},
+        "report": {"out_dir": "reports/", "formats": ["md"]},
     }
 
 

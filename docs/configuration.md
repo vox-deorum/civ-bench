@@ -223,7 +223,7 @@ The modules, grouped into five families:
 - **ratings** rate skill: `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups`. Per-strategy Elo is `group_by: ["player_type", "strategy"]`, and confidence intervals are a `bootstrap` param, both on the ordinary fit rather than separate modules.
 - **prediction** scores the predictor: `evaluate`, `compare`. These opt in to scoring every enabled estimator by default; add `uses.estimators` only to narrow.
 - **calibration** checks honesty: `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline`.
-- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`. The last one emits the tables behind the dedicated controlled-seed HTML report (see the `controlled_seed` report template below).
+- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`. The last one emits the tables behind the report's controlled-seed heatmap pages (see below).
 - **exploratory**: `model_token_costs` (uses the token table and pricing from `models.json`).
 
 Each module instance resolves a coded friendly name and one-line description from its parameters; `name` and `description` here override them for this one section on the report. The fitted rating modules use a distinct strategy identity when `group_by` includes `strategy`, so no config name override is needed for that variant. The resolved identity is persisted in the analysis manifest. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
@@ -248,9 +248,9 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 
 ```jsonc
 "report": {
-  "template": "default",          // "default" or "controlled_seed" (see below)
   "out_dir": "reports/",          // under the resolved output root
-  "formats": ["md", "html"],      // md and html implemented; controlled_seed renders html only
+  "formats": ["md", "html"],      // md and html implemented; pdf is schema-reserved;
+                                  //   an omitted formats list defaults to ["md", "html"]
   "sections": null,               // null = every enabled analysis in canonical family order;
                                   //   or an explicit ordered list of stage ids to curate
   "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
@@ -261,7 +261,7 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 }
 ```
 
-The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above. The template adds one summary sentence for the run and each represented family page. Every analysis contributes one result summary sentence, which is reused in its overview card and detailed section.
+The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above. The report adds one summary sentence for the run and each represented family page. Every analysis contributes one result summary sentence, which is reused in its overview card and detailed section.
 
 Each section is headed by the module instance's resolved friendly name (the per-stage `name` override wins when present) with its resolved description underneath. For fitted ratings, `group_by: ["player_type", "strategy"]` selects the strategy-specific name and description in the code. The raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
 
@@ -269,7 +269,7 @@ Each section is headed by the module instance's resolved friendly name (the per-
 
 HTML also writes one page for every family represented in `sections`: `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html`. The output directory contains `report.html`, `report.md`, `assets/report.css`, and the self-contained `assets/` tree. Each analysis persists a `result.json` beside its artifacts, so `civ-bench report` re-renders the documents from disk, deterministically and byte-identically, without re-running any analysis.
 
-The **`controlled_seed`** template is the second shipped template: the dedicated controlled-seed report. It requires exactly one report section (an enabled `performance.controlled_seed_report` analysis) and renders HTML only, so an omitted `formats` list defaults to `["html"]`. The site is one overview page with two heatmaps per controlled seed (mean adjusted strength and dominant victory focus, with the dedicated `Vanilla | Vanilla` condition as a separate isolated row) plus one detail page per `(seed, player position)` pair with victory-probability curves and a per-condition comparison table. See [configs/benchmark.md](../configs/benchmark.md) section 7.1 and the tracked [configs/benchmark.controlled.template.json](../configs/benchmark.controlled.template.json) example.
+The report also renders the **controlled-seed heatmap pages** when the resolved sections include an enabled, non-empty `performance.controlled_seed_report` analysis. The annex is one overview page, `controlled-seed.html`, with two heatmaps per controlled seed (mean adjusted strength and dominant victory focus, with the dedicated `Vanilla | Vanilla` condition as a separate isolated row), plus one detail page per `(seed, player position)` pair with victory-probability curves and a per-condition comparison table. The analysis's section links to `controlled-seed.html` from its downloads list. The pages are HTML-only: a `report.formats` list without `html` skips them with a warning and omits the link. See [configs/benchmark.md](../configs/benchmark.md) section 7.1 for details.
 
 ---
 

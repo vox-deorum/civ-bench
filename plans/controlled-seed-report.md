@@ -1,22 +1,23 @@
 # Controlled seed comparison report
 
 <!-- PARITY: this feature is BUILT. The sections below are the as-built design; see
-     configs/benchmark.md §6.2 (the analysis) and §7.1 (the template) for the user-facing
-     schema docs, and tests/test_controlled_seed_report.py for the verified behavior. -->
+     configs/benchmark.md §6.2 (the analysis) and §7.1 (the heatmap pages) for the
+     user-facing schema docs, and tests/test_controlled_seed_report.py for the
+     verified behavior. -->
 
 **Status: built & validated.** As-built notes on top of the original design:
 
-- The analysis module is `bench/analyses/performance/controlled_seed_report.py`; the renderer is `bench/reports/controlled_seed.py`; the build context is `bench/reports/context.py`; the document model addition is `ControlledSeedDocument` in `bench/reports/model.py`.
+- The analysis module is `bench/analyses/performance/controlled_seed_report.py`; `bench/reports/controlled_seed.py` owns the annex end-to-end (the `controlled_seed_document` builder and the `render_controlled_seed_site` renderer); the build context is `bench/reports/context.py`; the document model addition is `ControlledSeedDocument` in `bench/reports/model.py`, carried on `ReportDocument.controlled_seed` with `render_html_site` emitting its pages.
 - The module reads its inputs as a census of the controlled design: it does not apply the global `data.filter`, because an `only_llm` or `min_games` filter would punch holes in the seed grid and remove the dedicated Vanilla baseline.
 - A missing `baseline_experiment` on the strength stage is a configuration error (the report has no dedicated Vanilla source at all). A configured baseline that lacks rows for a specific `(seed, player_id)` pair is not fatal: the pair keeps blank differences and a visible page note.
-- Template-name membership and the exactly-one-estimator / one-strength-table references are validated at config load; the HTML-only formats rule and the exactly-one-section rule are enforced at render time.
+- The exactly-one-estimator / one-strength-table references and the at-most-one-enabled-instance rule are validated at config load; the HTML-only formats rule is enforced at render time (`report.formats` without `html` skips the pages with a warning and omits the section's link).
 - Previous and next player links on a detail page wrap cyclically within the seed's available player list, so both links always exist.
 
 ## Goal
 
-Add a dedicated HTML report for controlled experiments. The report exposes game-to-game variation without repeating the aggregate rankings already covered by the standard report.
+Add the controlled-seed heatmap pages as an annex of the report. The pages expose game-to-game variation without repeating the aggregate rankings already covered by the family pages.
 
-The report has two levels:
+The annex has two levels:
 
 1. An overview with two heatmaps for every controlled seed.
 2. One detail page for every `(seed, player_id)` pair.
@@ -113,31 +114,30 @@ Only rows with both `seed != -1` and `seating_rotation != -1` participate. Exclu
 
 ## Report template and output
 
-Add a `controlled_seed` report template. It requires exactly one enabled `performance.controlled_seed_report` section and supports HTML output only. When `formats` is omitted for this template, default it to `["html"]`. The standard template and its family pages remain unchanged.
+The heatmap pages render automatically as an annex of the single report: when the resolved sections include an enabled, non-empty `performance.controlled_seed_report` analysis, the report also emits them. At most one enabled instance is allowed per run. The pages are HTML-only: a `report.formats` list without `html` skips them with a warning and omits the analysis section's link to `controlled-seed.html`; an omitted `formats` list defaults to `["md", "html"]`. The family pages are unchanged.
 
-The report stage continues to render persisted analysis artifacts. It must not read canonical tables or estimator predictions directly. Introduce a report build context that contains run metadata, resolved sections, and a containment-checked loader for full named CSV artifacts from each selected analysis manifest. Adapt the default template to this context without changing its output.
+The report stage continues to render persisted analysis artifacts. It must not read canonical tables or estimator predictions directly. Introduce a report build context that contains run metadata, resolved sections, and a containment-checked loader for full named CSV artifacts from each selected analysis manifest. Adapt the default document builder to this context without changing its output.
 
-Add a `ControlledSeedDocument` report model and a dedicated controlled-seed HTML renderer. The `controlled_seed` template loads the three required analysis tables through the build context and constructs this document. `run_report` dispatches on the returned document type: the existing `ReportDocument` keeps the family renderer, while `ControlledSeedDocument` produces only the controlled overview and seed-player pages.
+Add a `ControlledSeedDocument` report model and a controlled-seed HTML renderer, both in `bench/reports/controlled_seed.py`: `controlled_seed_document` loads the three required analysis tables through the build context and constructs the document, and `render_controlled_seed_site` renders it. The document rides on `ReportDocument.controlled_seed`, and `render_html_site` emits its pages beside the family pages.
 
-Write this self-contained output:
+The annex adds these files to the report directory:
 
 ```text
 <report-dir>/
-  report.html
+  controlled-seed.html
   seed-<seed>-player-<player_id>.html
-  assets/report.css
   assets/controlled-seed-report.js
   assets/<analysis-id>/*.csv
 ```
 
 Use accessible HTML tables for the heatmaps, with deterministic vanilla JavaScript for filtering, tooltips, and page selection. Do not add a browser-side package or network dependency. Encode the selected strategist and condition in the detail-page query string so overview links remain stable.
 
-Add a tracked controlled-report config example that selects the new analysis and template. Update `configs/benchmark.md` with the analysis inputs, aggregation rules, baseline behavior, template restriction, and output layout.
+`configs/benchmark.full.template.json` wires the analysis with `"enabled": false`. Update `configs/benchmark.md` with the analysis inputs, aggregation rules, baseline behavior, the automatic annex rendering, and the output layout.
 
 ## Validation and failure behavior
 
-- Config validation requires one estimator reference and one strength-table reference for `performance.controlled_seed_report`.
-- `report.template: "controlled_seed"` requires HTML-only formats and exactly one compatible report section.
+- Config validation requires one estimator reference and one strength-table reference for `performance.controlled_seed_report`, and allows at most one enabled instance per run.
+- The pages render only when `html` is among `report.formats`; otherwise the run warns, skips the pages, and omits the analysis section's link to `controlled-seed.html`.
 - A missing dedicated baseline leaves baseline curves and differences unavailable, with a visible page note. It is not fatal.
 - A condition missing a seed-player combination produces a blank cell in the completed heatmap grid and no detail-table row for that unobserved combination.
 - A seed-player pair with no usable prediction rows keeps its scalar summary and marks the probability curve unavailable.
@@ -168,8 +168,8 @@ Add a tracked controlled-report config example that selects the new analysis and
 - Show run count but no rotations-represented column on detail pages.
 - Emphasize the Vanilla curve and strength value when present, and show an unavailable note when absent.
 - Escape labels and query parameters safely.
-- Reject incompatible sections and non-HTML formats for the specialized template.
-- Default an omitted controlled-template format list to HTML.
+- Link the analysis's section to `controlled-seed.html` from its downloads list when html is rendered.
+- Warn, skip the pages, and omit the link when `report.formats` excludes html.
 - Render a comparability warning when a seed-player pair has multiple civilizations.
 - Preserve the existing default report output and deterministic re-render tests.
 

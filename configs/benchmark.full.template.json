@@ -124,6 +124,7 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
+        "baseline_experiment": "vanilla-standard-fixed",
         "post_cell_normalize": "none"
       }
     }
@@ -274,6 +275,13 @@
       "params": { "aggregate": "mean", "by": "player_type" }
     },
     {
+      "id": "controlled_seed",
+      "module": "performance.controlled_seed_report",
+      "enabled": false,
+      "uses": { "estimators": ["attention"], "tables": ["strength"] },
+      "params": {}
+    },
+    {
       "id": "perf_perm_importance",
       "module": "performance.permutation_importance",
       "enabled": false,
@@ -316,7 +324,6 @@
   ],
 
   "report": {
-    "template": "default",
     "out_dir": "reports/",
     "formats": ["md", "html"],
     "sections": null,

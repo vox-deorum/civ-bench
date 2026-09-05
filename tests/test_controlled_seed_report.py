@@ -1,11 +1,11 @@
-"""Controlled-seed report tests (analysis module + report template/renderer).
+"""Controlled-seed report tests (analysis module + report annex/renderer).
 
 Everything runs on small synthetic controlled-design fixtures (no machine data
 roots, per AGENTS.md): two seeds, two final player positions, two seating
 rotations, a dedicated Vanilla baseline experiment, and treatment experiments
 carrying the catalog's ``-Per-5`` condition suffix. The report tests fabricate
 real artifacts by running the analysis once, then render through
-``run_report`` with the ``controlled_seed`` template.
+``run_report``; the controlled-seed heatmap pages ride along automatically.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from bench.analyses.performance.controlled_seed_report import (
 )
 from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
-from bench.reports import ReportError, run_report
+from bench.reports import run_report
 from bench.reports.controlled_seed import render_controlled_seed_site
 from bench.reports.model import ControlledSeedDocument
 from bench.reports.runner import report_dir
@@ -176,8 +176,8 @@ def _make_spec(dev_spec, paths, tmp_path) -> dict:
         "params": {},
     }]
     spec["report"] = {
-        "template": "controlled_seed", "out_dir": str(tmp_path / "out") + "/",
-        "formats": ["html"], "sections": None, "overview_sections": None,
+        "out_dir": str(tmp_path / "out") + "/",
+        "formats": ["md", "html"], "sections": None, "overview_sections": None,
         "section_overrides": {}, "title": None, "include_disabled": False,
     }
     return spec
@@ -461,15 +461,31 @@ def test_config_requires_one_strength_table_reference(tmp_path, write_spec, dev_
         load_config(write_spec(spec))
 
 
-def test_config_rejects_unknown_report_template(tmp_path, write_spec, dev_spec):
+def test_config_rejects_removed_template_key(tmp_path, write_spec, dev_spec):
     paths = _build_csvs(tmp_path)
     spec = _make_spec(dev_spec, paths, tmp_path)
-    spec["report"]["template"] = "fancy"
-    with pytest.raises(ConfigError, match="unknown template"):
+    spec["report"]["template"] = "default"
+    with pytest.raises(ConfigError, match="unknown key"):
         load_config(write_spec(spec))
 
 
-# ── report: rendering the controlled-seed site ────────────────────────────────
+def test_config_rejects_two_enabled_controlled_seed_analyses(
+    tmp_path, write_spec, dev_spec
+):
+    paths = _build_csvs(tmp_path)
+    spec = _make_spec(dev_spec, paths, tmp_path)
+    spec["analyses"].append({
+        "id": "controlled_seed_again",
+        "module": "performance.controlled_seed_report",
+        "enabled": True,
+        "uses": {"estimators": ["est"], "tables": ["strength"]},
+        "params": {},
+    })
+    with pytest.raises(ConfigError, match="at most one"):
+        load_config(write_spec(spec))
+
+
+# ── report: rendering the controlled-seed pages ───────────────────────────────
 @pytest.fixture
 def rendered(env):
     env()
@@ -482,10 +498,11 @@ def _read(out, name):
     return (out / name).read_text(encoding="utf-8")
 
 
-def test_controlled_report_writes_html_only_site(rendered):
+def test_controlled_pages_ride_along_with_the_family_report(rendered):
     env, result, out = rendered
     expected = {
-        "report.html",
+        "report.md", "report.html", "performance.html",
+        "controlled-seed.html",
         "seed-1-player-0.html", "seed-1-player-1.html",
         "seed-2-player-0.html", "seed-2-player-1.html",
         "assets/report.css", "assets/controlled-seed-report.js",
@@ -499,14 +516,18 @@ def test_controlled_report_writes_html_only_site(rendered):
     # The analysis's three tables are copied into the self-contained asset tree.
     for table in ("seed_player_summary", "seed_player_probability", "seed_player_index"):
         assert (out / "assets" / "controlled_seed" / f"{table}.csv").exists()
-    assert not (out / "report.md").exists()
-    assert result.formats == ["html"]
+    assert result.formats == ["md", "html"]
     assert result.n_sections == 1
+    # The family report links to the heatmap pages from the section's downloads.
+    markdown = _read(out, "report.md")
+    assert "[Controlled-seed heatmap pages (HTML)](controlled-seed.html)" in markdown
+    performance = _read(out, "performance.html")
+    assert 'href="controlled-seed.html"' in performance
 
 
 def test_two_heatmaps_per_seed_and_blank_cells(rendered):
     env, result, out = rendered
-    overview = _read(out, "report.html")
+    overview = _read(out, "controlled-seed.html")
     assert overview.count('<figure class="heat-figure">') == 4  # 2 seeds x 2 heatmaps
     assert overview.count("<h2") == 3  # seed 1, seed 2, source tables
     assert overview.count('id="seed-1"') == 1 and overview.count('id="seed-2"') == 1
@@ -515,11 +536,13 @@ def test_two_heatmaps_per_seed_and_blank_cells(rendered):
     assert overview.count("heat-cell-empty") == 24
     # One isolated vanilla tbody per heatmap.
     assert overview.count('<tbody class="vanilla-body">') == 4
+    # The annex links back to the family report overview.
+    assert '<a href="report.html">← Full report</a>' in overview
 
 
 def test_vanilla_is_separate_condition_row(rendered):
     env, result, out = rendered
-    overview = _read(out, "report.html")
+    overview = _read(out, "controlled-seed.html")
     assert '<tr class="vanilla-row"><th scope="row" class="row-label">Vanilla</th>' in overview
     detail = _read(out, "seed-1-player-0.html")
     assert '<tr class="vanilla-row">' in detail
@@ -528,7 +551,7 @@ def test_vanilla_is_separate_condition_row(rendered):
 
 def test_cells_link_with_preselection_query(rendered):
     env, result, out = rendered
-    overview = _read(out, "report.html")
+    overview = _read(out, "controlled-seed.html")
     assert (
         'href="seed-1-player-0.html?strategist=GPT-OSS-120B-Simple&amp;'
         'condition=Every-turn"' in overview
@@ -552,6 +575,8 @@ def test_detail_page_columns_and_run_counts(rendered):
     # The Vanilla row's difference cell is blank.
     vanilla_row = detail.split('<tr class="vanilla-row">')[1].split("</tr>")[0]
     assert "<td></td>" in vanilla_row
+    # The return link targets the annex overview, not the family report page.
+    assert 'href="controlled-seed.html#seed-1"' in detail
 
 
 def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
@@ -588,22 +613,33 @@ def test_controlled_re_render_is_byte_stable(rendered):
     assert second == first
 
 
-def test_controlled_template_rejects_non_html_formats(env):
-    env.cfg.report["formats"] = ["md", "html"]
-    with pytest.raises(ReportError, match="renders"):
-        run_report(env.cfg)
+def test_controlled_pages_skipped_without_html_format(env):
+    env.cfg.report["formats"] = ["md"]
+    env()
+    result = run_report(env.cfg)
+    out = report_dir(env.cfg)
+    assert result.formats == ["md"]
+    assert (out / "report.md").exists()
+    assert not (out / "controlled-seed.html").exists()
+    assert not any(out.glob("seed-*-player-*.html"))
+    # The pages are html-only, so the run warns and the section drops the link
+    # instead of pointing at a page that was never written.
+    assert any("HTML-only" in warning for warning in result.warnings)
+    assert "controlled-seed.html" not in _read(out, "report.md")
 
 
-def test_controlled_template_defaults_omitted_formats_to_html(env):
+def test_omitted_formats_default_to_md_and_html(env):
     env.cfg.report["formats"] = None
     env()
     result = run_report(env.cfg)
-    assert result.formats == ["html"]
-    assert (report_dir(env.cfg) / "report.html").exists()
-    assert not (report_dir(env.cfg) / "report.md").exists()
+    out = report_dir(env.cfg)
+    assert result.formats == ["md", "html"]
+    assert (out / "report.md").exists()
+    assert (out / "report.html").exists()
+    assert (out / "controlled-seed.html").exists()
 
 
-def test_controlled_template_rejects_incompatible_sections(tmp_path, write_spec, dev_spec):
+def test_controlled_pages_render_alongside_other_sections(tmp_path, write_spec, dev_spec):
     paths = _build_csvs(tmp_path)
     spec = _make_spec(dev_spec, paths, tmp_path)
     spec["analyses"].append({
@@ -614,8 +650,12 @@ def test_controlled_template_rejects_incompatible_sections(tmp_path, write_spec,
     catalog = Catalog.from_run_config(cfg)
     run_analysis(cfg, _stage_raw(), catalog=catalog)
     _emit_empty_manifest(cfg, "pred_compare")
-    with pytest.raises(ReportError, match="exactly one report section"):
-        run_report(cfg)
+    result = run_report(cfg)
+    out = report_dir(cfg)
+    assert result.n_sections == 2
+    assert (out / "controlled-seed.html").exists()
+    assert (out / "prediction.html").exists()
+    assert (out / "performance.html").exists()
 
 
 def _emit_empty_manifest(cfg, sid):
@@ -679,7 +719,7 @@ def _tiny_doc() -> ControlledSeedDocument:
 
 def test_renderer_escapes_labels_and_query_parameters():
     pages = render_controlled_seed_site(_tiny_doc())
-    overview = pages["report.html"]
+    overview = pages["controlled-seed.html"]
     assert "Weird &amp; &lt;Model&gt; | Per 5" in overview
     assert "Report &amp; &lt;Summary&gt;" in overview
     assert "href=\"seed-1-player-0.html?strategist=Weird+%26+%3CModel%3E&amp;condition=Per+5\"" in overview
@@ -688,4 +728,5 @@ def test_renderer_escapes_labels_and_query_parameters():
     detail = pages["seed-1-player-0.html"]
     assert "Weird &amp; &lt;Model&gt;" in detail
     assert "<script" in detail and "assets/controlled-seed-report.js" in detail
+    assert 'href="controlled-seed.html#seed-1"' in detail
     assert pages["assets/controlled-seed-report.js"].startswith("/* civ-bench")

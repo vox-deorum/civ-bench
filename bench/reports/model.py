@@ -84,7 +84,12 @@ class FamilyGroup:
 
 @dataclass
 class ReportDocument:
-    """The full report: a title, run provenance, and grouped sections."""
+    """The full report: a title, run provenance, and grouped sections.
+
+    When the resolved sections carry the controlled-seed analysis,
+    ``controlled_seed`` holds the annex document behind the heatmap pages; the
+    html site renders it, a markdown-only render skips it.
+    """
 
     title: str
     run_name: str
@@ -95,6 +100,7 @@ class ReportDocument:
     groups: list[FamilyGroup] = field(default_factory=list)
     intro: str = ""
     overview_sections: list[Section] = field(default_factory=list)
+    controlled_seed: Optional["ControlledSeedDocument"] = None
 
     @property
     def n_sections(self) -> int:
@@ -103,12 +109,13 @@ class ReportDocument:
 
 @dataclass
 class ControlledSeedDocument:
-    """The document behind the dedicated controlled-seed HTML report.
+    """The document behind the report's controlled-seed heatmap pages.
 
-    Built by the ``controlled_seed`` template from one
-    ``performance.controlled_seed_report`` section's persisted tables. It carries
-    the three report-ready tables plus the ordering and color metadata the
-    analysis recorded in its manifest, so the renderer needs no catalog or
+    Built by :func:`bench.reports.controlled_seed.controlled_seed_document`
+    from one ``performance.controlled_seed_report`` section's persisted tables
+    and carried on the :class:`ReportDocument`. It carries the three
+    report-ready tables plus the ordering and color metadata the analysis
+    recorded in its manifest, so the renderer needs no catalog or
     canonical-table access.
     """
 

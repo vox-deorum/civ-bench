@@ -31,7 +31,6 @@ The repo tracks **example** run-specs as `configs/*.template.json`. They are doc
 - [configs/benchmark.full.template.json](../configs/benchmark.full.template.json) is the kitchen sink: core plus every optional or reserved module, shipped with `"enabled": false`.
 - [configs/benchmark.pretrained.template.json](../configs/benchmark.pretrained.template.json) is a load-only driver that uses pre-trained estimators (zero training).
 - [configs/benchmark.cross.template.json](../configs/benchmark.cross.template.json) is the "cross" variant: train on non-LLM seats, predict everyone, write to a separate `reports-cross/` root.
-- [configs/benchmark.controlled.template.json](../configs/benchmark.controlled.template.json) is the dedicated **controlled-seed report**: per-seed heatmaps and per-seed-player detail pages from the controlled design.
 
 ```powershell
 # Copy a template, then edit data.extract.runs_dir / data.tables.* / pretrained.model_dir
@@ -184,7 +183,7 @@ civ-bench run --config configs/benchmark.dev.json --skip extract       # reuse e
 
 **Train models locally.** Use [configs/benchmark.template.json](../configs/benchmark.template.json), where each estimator has `fit: "train"`. The attention model also has a `tune` block for Optuna hyperparameter search. Local training takes much longer than loading snapshots.
 
-**Turn on an optional analysis.** The full template lists optional modules with `"enabled": false`. When an implementation exists, flip the flag to `true` (or copy the entry into your config) and it joins the run. Registry-reserved placeholders fail loudly if enabled before their implementation lands, which is intentional.
+**Turn on an optional analysis.** The full template lists optional modules with `"enabled": false`. When an implementation exists, flip the flag to `true` (or copy the entry into your config) and it joins the run. Registry-reserved placeholders fail loudly if enabled before their implementation lands, which is intentional. One such entry is `performance.controlled_seed_report`: enable it on controlled-design data (with condition pairing enabled and a strength-stage `baseline_experiment` set) and the report gains the per-seed heatmap pages and per-seed-player detail pages.
 
 ---
 

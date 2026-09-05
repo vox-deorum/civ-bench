@@ -78,7 +78,7 @@ def report_env(tmp_path, write_spec, dev_spec):
          "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
     ]
     # out_dir authored as the tmp root so it re-roots there; <name> is appended.
-    spec["report"] = {"template": "default", "out_dir": root + "/", "formats": ["md", "html"],
+    spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"],
                       "sections": None,
                       "overview_sections": [
                           "pred_metrics", "cal_reliability", "explore_token_costs"
@@ -396,12 +396,6 @@ def test_malformed_manifest_cleans_unique_staging_directory(report_env):
 def test_unsupported_format_is_loud(report_env):
     report_env.report["formats"] = ["md", "pdf"]
     with pytest.raises(ReportError, match="pdf"):
-        run_report(report_env)
-
-
-def test_unknown_template_is_loud(report_env):
-    report_env.report["template"] = "fancy"
-    with pytest.raises(ReportError, match="unknown report template"):
         run_report(report_env)
 
 

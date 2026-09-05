@@ -78,9 +78,30 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
         if stage.enabled and stage.module == "performance.controlled_seed_report":
             _check_controlled_seed_strength_ref(stage, strength_table_ids)
 
+    _check_single_controlled_seed_report(cfg)
+
     nodes = _build_enabled_nodes(cfg, table_keys)
     order = _topo_sort(nodes)
     return ResolvedGraph(nodes=nodes, order=order)
+
+
+def _check_single_controlled_seed_report(cfg: RunConfig) -> None:
+    """At most one enabled controlled-seed report per run.
+
+    The analysis aggregates the entire controlled design into the tables behind
+    the report's heatmap pages, so a second instance would render duplicate
+    pages over the same data.
+    """
+    ids = [
+        s.id for s in cfg.analyses
+        if s.enabled and s.module == "performance.controlled_seed_report"
+    ]
+    if len(ids) > 1:
+        raise ConfigError(
+            "at most one enabled performance.controlled_seed_report analysis is "
+            f"allowed per run (found {ids}); the report renders its heatmap "
+            "pages from that single section."
+        )
 
 
 def _validate_unique_ids(cfg: RunConfig) -> dict[str, str]:
