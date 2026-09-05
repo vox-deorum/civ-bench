@@ -1,4 +1,4 @@
-"""Stage 5 — report tests.
+"""Stage 5 report tests.
 
 Exercise the report stage on fabricated analysis manifests (no machine data roots,
 per AGENTS.md): section resolution (null = enabled analyses in canonical family
@@ -7,8 +7,8 @@ asset copying into a self-contained tree, empty-section handling, determinism
 (byte-stable re-render), and the loud error when a manifest is missing.
 
 The report reads each analysis's ``result.json`` from disk, so we fabricate those
-directly rather than running the (heavy) analysis modules — keeping the suite fast
-and hermetic while testing exactly the report-stage contract.
+directly rather than running the (heavy) analysis modules; that keeps the suite
+fast and hermetic while testing exactly the report-stage contract.
 """
 
 from __future__ import annotations

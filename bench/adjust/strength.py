@@ -1,7 +1,7 @@
 """Strength-panel derivation (the one place ``prepare_strength_data`` lives now).
 
 Ported and consolidated from ``../vox-deorum-analysis/performance/turn_predicted.ipynb``
-(also copied into ``ratings/iterative_bt.py`` in the old repo — both are replaced
+(also copied into ``ratings/iterative_bt.py`` in the old repo; both are replaced
 by this module). Turns an estimator's per-turn ``predicted_win_probability`` into
 a per-player-game ``adjusted_strength`` panel:
 
@@ -13,10 +13,10 @@ a per-player-game ``adjusted_strength`` panel:
 
 Parity notes (so ``block:"none"`` reproduces the legacy per-row values):
   * the estimator's ``predictions.csv`` carries an UNROUNDED ``turn_progress``; the
-    legacy pipeline groups/weights on ``round(turn/max_turn, 2)`` — we re-round here.
+    legacy pipeline groups/weights on ``round(turn/max_turn, 2)``; we re-round here.
   * the ``turn_progress_min`` filter is a strict ``>``.
   * ``eps = 1e-5`` (``bench.stats.transforms.LOGIT_EPS``) matches the legacy clip.
-  * the legacy Step-6 non-LLM game filter is intentionally NOT applied — the panel
+  * the legacy Step-6 non-LLM game filter is intentionally NOT applied; the panel
     keeps every experiment so ``ref="Vanilla"`` / the baseline pathways resolve.
 """
 
@@ -208,7 +208,7 @@ def fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> tuple[dict, pd.DataFr
     all get the same, correct value); no hardcoded omitted civ.
 
     Shared with the ratings bootstrap (``analyses.ratings.bootstrap.readjust``) so a
-    replicate's civ refit is byte-identical to the adjust stage's — the bootstrap's
+    replicate's civ refit is byte-identical to the adjust stage's: the bootstrap's
     previous private copy diverged (it recomputed −sum inside the omitted loop while
     mutating the dict, mis-scaling every omitted civ after the first).
     """
@@ -221,7 +221,7 @@ def fit_civ_effects(df: pd.DataFrame, catalog: Catalog) -> tuple[dict, pd.DataFr
     )
     try:
         fit = ols(formula, data=df).fit()
-    except Exception as exc:  # patsy/statsmodels — surface loudly with context
+    except Exception as exc:  # patsy/statsmodels; surface loudly with context
         raise AdjustError(
             f"strength: OLS civilization fit failed ({exc}). The fit needs the "
             f"vanilla reference player_type '{vanilla}' present in the panel and a "
@@ -497,7 +497,7 @@ def build_strength_panel(
         cell_baseline_series = _cell_baseline_per_row(df, selected, sel_map)
 
         # A controlled row whose selected baseline cell is missing. EXPLICIT is
-        # fatal — the designated baseline source is meant to span the whole grid,
+        # fatal: the designated baseline source is meant to span the whole grid,
         # so a hole there is a config/data error. IMPLICIT (self-coverage) degrades
         # gracefully: incomplete self-coverage is expected (rotation sparsity), so
         # we still adjust every cell that HAS a baseline and fall the rest back to
@@ -524,7 +524,7 @@ def build_strength_panel(
             )
             warnings_out.append(
                 f"implicit self-coverage incomplete: {n_cells} controlled row(s) in "
-                f"cell(s) {cells} have no own Vanilla VPAI baseline — those rows fall "
+                f"cell(s) {cells} have no own Vanilla VPAI baseline; those rows fall "
                 f"back to {fallback}; the complete cells still use the start-cell "
                 f"baseline (report-only)."
             )

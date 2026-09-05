@@ -1,4 +1,4 @@
-"""Stage 4 — analyses tests.
+"""Stage 4: analyses tests.
 
 Exercise the pluggable analysis layer on tiny synthetic fixtures (no machine data
 roots, per AGENTS.md): the registry + context wiring, per-module param validation,
@@ -680,7 +680,7 @@ def test_validator_flags_unconsumable_state():
 
 def test_seating_open_cells_equal_completeness_missing():
     """The cells the seating file leaves open == the games the completeness report flags
-    missing — so the runner (which plays open cells) plays exactly civ-bench's gaps."""
+    missing, so the runner (which plays open cells) plays exactly civ-bench's gaps."""
     from bench.analyses.performance.seating import generate_seating_files
     from bench.analyses.performance.strength_panel import build_experiment_completeness
 
@@ -1319,7 +1319,7 @@ def test_fit_civ_effects_is_shared_and_zero_sum(env):
     from bench.analyses.ratings import bootstrap as boot
 
     # The bootstrap refits civ effects with the SAME implementation as the adjust
-    # stage — no diverged private copy (whose ≥2-omitted-civ handling was wrong).
+    # stage; no diverged private copy (whose ≥2-omitted-civ handling was wrong).
     assert boot.fit_civ_effects is strength_mod.fit_civ_effects
 
     df = pd.read_csv(env.cfg.adjust[0].raw["save"])

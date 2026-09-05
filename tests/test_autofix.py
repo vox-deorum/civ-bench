@@ -3,8 +3,8 @@
 ``civ-bench run``/``extract`` repair the malformed DBs recorded in
 ``import_issues.csv`` and re-import so the ledger reflects the fixed state, unless
 disabled via ``data.extract.auto_fix`` / ``--no-fix``. These tests target the
-orchestrator [`cli._extract_with_autofix`] — the order of the three steps and every
-short-circuit guard — plus the config/flag toggle wiring, with fakes for the
+orchestrator [`cli._extract_with_autofix`] (the order of the three steps and every
+short-circuit guard) plus the config/flag toggle wiring, with fakes for the
 (separately-tested) ``run_extract`` and ``run_fix`` so no SQLite corruption is needed.
 """
 
@@ -55,7 +55,7 @@ def _issues_log() -> ImportIssueLog:
 
 
 def _carried_forward_log(tmp_path: Path) -> ImportIssueLog:
-    """A truthy log with NO fresh issues — one game carried over from a prior run.
+    """A truthy log with NO fresh issues: one game carried over from a prior run.
 
     Built the way the extract runner builds it: load the prior ledger and reconcile
     (the game's DB still exists), but record nothing this run, so ``_fresh`` is empty.
@@ -111,7 +111,7 @@ def _install(monkeypatch, extract_results, *, fix_result=None, fix_error=None) -
         return fix_result
 
     monkeypatch.setattr(cli, "run_extract", fake_extract)
-    # run_fix is imported inside the helper via ``from .fix import run_fix`` — patch the
+    # run_fix is imported inside the helper via ``from .fix import run_fix``: patch the
     # package attribute so the runtime lookup resolves to the fake.
     monkeypatch.setattr("bench.fix.run_fix", fake_fix)
     return state

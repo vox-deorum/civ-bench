@@ -61,7 +61,7 @@ class RatingsAnalysis(Analysis):
         ``load_table`` has already dropped malformed-DB games; no rating filters are
         applied here. This is the population the bootstrap resamples and re-adjusts,
         so a replicate's civ-OLS refit sees exactly the rows the adjust stage fit on
-        (including the Vanilla reference that only_llm / min_games later drop — the
+        (including the Vanilla reference that only_llm / min_games later drop, the
         cause of the vanished-Vanilla all-NaN CIs).
         """
         table_id = ctx.strength_table_id()
@@ -409,7 +409,7 @@ class RatingsAnalysis(Analysis):
         Both pathways hold the per-cell baseline constant across replicates,
         reading it from the adjust stage's persisted ``cell_baseline.csv`` trail
         (computed once from the full, unfiltered panel) rather than recomputing
-        it from each rating-filtered resample — so the replicate baseline always
+        it from each rating-filtered resample, so the replicate baseline always
         matches the point estimate and rating filters (only_llm/min_games) cannot
         drop the reference rows. Explicit baselines key on ``(seed, player_id)``;
         implicit baselines key on ``(experiment, seed, player_id)``.

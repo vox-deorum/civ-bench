@@ -43,7 +43,7 @@ ref_slot <- paste0(reference_type, "_0")
 vanilla_ref <- match(ref_slot, slot_ids)
 log_worth_all <- coef(mod, ref = vanilla_ref)
 # Standard errors come from the variance-covariance matrix, whose information matrix
-# can be singular (non-positive-definite) for sparse/disconnected ranking data —
+# can be singular (non-positive-definite) for sparse/disconnected ranking data;
 # vcov.PlackettLuce then aborts inside chol(). The point estimates (coef) are
 # unaffected, so treat a vcov failure as "SEs unavailable" (NA) and still emit the
 # log-worth / Elo ratings, rather than killing the whole `civ-bench run`.

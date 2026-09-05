@@ -113,7 +113,7 @@ results <- data.frame(
 for (pt in player_types) {
   subset <- slot_results[slot_results$player_type == pt, ]
   n <- nrow(subset)
-  # Exclude reference slots (se = 0) — they are fixed anchor points
+  # Exclude reference slots (se = 0): they are fixed anchor points
   est <- subset[subset$se_log_worth > 0, ]
   if (nrow(est) == 0) {
     # All slots are reference level (only the reference type)

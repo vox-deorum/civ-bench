@@ -2,7 +2,7 @@
 
 This file is for AI coding agents working on the CivBench repository. It captures the writing style we want and gives a quick orientation to the project. NEVER STAGE YOUR CHANGES UNLESS EXPLICITLY ASKED! However, if a change gets externally staged, it is from the human reviewer.
 
-`civ-bench` is a modular, JSON-configurable Python **benchmark harness** for LLM strategists in *Civilization V: Vox Populi* (via the Vox Deorum platform). Point it at raw game-run data, hand it a config, and it produces a report — extraction, analysis, and rendering all driven by JSON.
+`civ-bench` is a modular, JSON-configurable Python **benchmark harness** for LLM strategists in *Civilization V: Vox Populi* (via the Vox Deorum platform). Point it at raw game-run data, hand it a config, and it produces a report: extraction, analysis, and rendering are all driven by JSON.
 
 ## Use Subagents Whenever Appropriate
 

@@ -1,9 +1,9 @@
-"""``calibration.cell_baseline`` (controlled-design only) — implicit-vs-explicit
+"""``calibration.cell_baseline`` (controlled-design only): implicit-vs-explicit
 cell-baseline heatmap.
 
 Consumes the adjust stage's ``cell_baseline.csv`` (+ ``cell_coverage.csv`` for
 missing-cell marking) and renders, **per seed**, a diverging heatmap whose rows
-are conditions (``experiment`` — the implicit per-experiment baselines) and whose
+are conditions (``experiment``: the implicit per-experiment baselines) and whose
 columns are that seed's ``(seed, player_id)`` cells, each labelled with the
 seat-bound ``civilization``. Cell colour = ``cell_baseline`` on the logit scale,
 with shared robust symmetric limits across the per-seed facets (percentile-clipped
@@ -12,7 +12,7 @@ cell is annotated with ``n_vanilla`` (the baseline's support) and baseline win
 rate when available, and missing cells (``cell_coverage.missing`` /
 ``n_vanilla == 0``) are hatched.
 
-The explicit pathway — the single shared baseline spanning the whole grid — is
+The explicit pathway, the single shared baseline spanning the whole grid, is
 pinned as a top reference row separated by a rule, so each implicit condition reads
 against it directly. The explicit condition's *own* implicit row is dropped: it
 averages the same Vanilla cells as the explicit baseline, so it would just duplicate
@@ -36,7 +36,7 @@ from ..base import Analysis, AnalysisContext, AnalysisResult
 # The enforced-winner / clip sentinel on the logit scale (relative_strength == 1-eps).
 # This is specific to relative_to="game_leader" (where every game's leader is pinned to
 # 1.0). Under relative_to unset/"none" (absolute strength) no cell sits on this rail, so
-# the annotation simply flags nothing — harmless, just less informative in that mode.
+# the annotation simply flags nothing; harmless, just less informative in that mode.
 _SENTINEL = float(logit(np.array([1.0 - LOGIT_EPS]))[0])
 _SENTINEL_TOL = 0.5
 _EXPLICIT_ROW = "(explicit baseline)"
@@ -118,7 +118,7 @@ class CalibrationCellBaseline(Analysis):
             explicit_exp = explicit["experiment"].iloc[0]
         for exp in sorted(implicit["experiment"].unique()):
             # The explicit condition's own implicit baseline IS the explicit baseline
-            # (same Vanilla cells, same average) — skip the duplicate row.
+            # (same Vanilla cells, same average), so skip the duplicate row.
             if exp == explicit_exp:
                 continue
             row_specs.append((exp, "implicit", implicit[implicit["experiment"] == exp]))
@@ -152,7 +152,7 @@ class CalibrationCellBaseline(Analysis):
             vlim=vlim,
             mask=pd.DataFrame(mask, index=index, columns=col_labels),
             sentinel_mask=pd.DataFrame(sentinel, index=index, columns=col_labels),
-            title=f"Cell baseline (logit scale) — seed {seed}",
+            title=f"Cell baseline (logit scale): seed {seed}",
             cbar_label="cell_baseline (logit)",
             xlabel="(seed, player_id) cell → civilization",
             ylabel="condition",

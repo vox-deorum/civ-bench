@@ -1,8 +1,8 @@
-"""``prediction.compare`` — cross-estimator agreement.
+"""``prediction.compare``: cross-estimator agreement.
 
 Ported from ``predict/visualize_model_comparison.ipynb``: merge every referenced
 estimator's predictions on ``(game_id, player_id, turn)`` and report how much the
-models agree — pairwise probability correlation (R²) and within-decision rank
+models agree: pairwise probability correlation (R²) and within-decision rank
 agreement (Spearman ρ on the per-``(game_id, turn)`` player ranking). No
 parametric hypothesis test (the source computes correlations + heatmaps only).
 """

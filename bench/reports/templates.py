@@ -2,7 +2,7 @@
 
 A builder is a pure function over the :class:`~bench.reports.context.ReportBuildContext`
 (run metadata + resolved sections + the full-artifact loader) returning a document
-model. It decides structure only — grouping, ordering, headings, intro prose — never
+model. It decides structure only (grouping, ordering, headings, intro prose), never
 *which* analyses ran (that is the run-spec's job) and never an analysis's own content
 (that is the module's job). The default layout groups sections into the five analysis
 families (ratings / prediction / calibration / performance / exploratory), preserving
@@ -65,7 +65,7 @@ def _group_by_family(sections: list[Section]) -> list[FamilyGroup]:
 
     Ordering is therefore the runner's responsibility: the default path hands us
     sections already sorted into canonical family order, while an explicit
-    ``report.sections`` list hands us the author's exact order — either way we keep
+    ``report.sections`` list hands us the author's exact order. Either way we keep
     it (invariant 3: the template never reorders behind the config's back)."""
     groups: dict[str, FamilyGroup] = {}
     order: list[str] = []

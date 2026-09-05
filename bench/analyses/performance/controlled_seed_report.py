@@ -1,16 +1,16 @@
-"""``performance.controlled_seed_report`` — report-ready tables for the controlled-seed report.
+"""``performance.controlled_seed_report``: report-ready tables for the controlled-seed report.
 
 The data side of the dedicated controlled-seed HTML report (see
 ``plans/controlled-seed-report.md``). The module consumes the canonical ``games``
 and ``panel`` tables, one configured strength adjust table, and exactly one
 estimator, then emits three deterministic, report-ready tables:
 
-* ``seed_player_summary`` — one row per observed ``(seed, player_id, strategist,
+* ``seed_player_summary``: one row per observed ``(seed, player_id, strategist,
   condition)`` plus one dedicated Vanilla row per ``(seed, player_id)`` covered by
   the strength stage's ``baseline_experiment``.
-* ``seed_player_probability`` — mean victory-probability curves on the fixed
+* ``seed_player_probability``: mean victory-probability curves on the fixed
   101-point normalized-progress grid for the same keys.
-* ``seed_player_index`` — one row per available ``(seed, player_id)`` page.
+* ``seed_player_index``: one row per available ``(seed, player_id)`` page.
 
 The renderer completes the global row/column grid and leaves unobserved
 combinations blank; this module emits only observed combinations. Ordering and

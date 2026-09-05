@@ -5,7 +5,7 @@ heatmap) and available to any analysis rendering a logit-scale, zero-centered
 matrix. Provides robust symmetric colour limits (percentile-clipped so a sentinel
 value does not saturate the scale) and supports a hatched mask for missing cells.
 
-Imports matplotlib/seaborn, so — like the rest of :mod:`bench.plotting` — it is
+Imports matplotlib/seaborn, so (like the rest of :mod:`bench.plotting`) it is
 off the import-light config/dry-run path.
 """
 

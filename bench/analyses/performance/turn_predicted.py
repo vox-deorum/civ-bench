@@ -1,4 +1,4 @@
-"""``performance.turn_predicted`` — per-identity predicted win-probability over time.
+"""``performance.turn_predicted``: per-identity predicted win-probability over time.
 
 Ported from ``performance/turn_predicted.ipynb`` (Part A): aggregate an
 estimator's per-turn ``predicted_win_probability`` per identity (``by``, default
@@ -44,7 +44,7 @@ class PerformanceTurnPredicted(Analysis):
         for est in estimators:
             pred = ctx.load_predictions(est)
             # Inner join: both inputs already exclude flagged problem games, so a
-            # prediction row with no panel identity is a genuine gap — drop it rather
+            # prediction row with no panel identity is a genuine gap, so drop it rather
             # than resurrect a fake ``Player <id>`` player_type that would pollute the
             # per-identity aggregation.
             df = pred.merge(panel, on=["game_id", "player_id"], how="inner")

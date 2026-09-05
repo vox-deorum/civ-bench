@@ -1,7 +1,7 @@
 {
   "name": "staff-standard-2026",
   "friendly_name": "Staff benchmark 2026, standard 8-seat map",
-  "description": "TEMPLATE (tracked example — copy to a local, gitignored configs/benchmark*.json to run). Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.template.json for the opt-in extras. `catalogs` omitted; catalog-using stages resolve sibling defaults only when needed.",
+  "description": "TEMPLATE (tracked example: copy to a local, gitignored configs/benchmark*.json to run). Lean CORE run: which strategist is stronger (ratings) + how good is the win predictor (prediction + calibration), plus the strength panel that feeds ratings and a cost-efficiency axis. strategy-Elo is a group_by param, not a module. See benchmark.full.template.json for the opt-in extras. `catalogs` omitted; catalog-using stages resolve sibling defaults only when needed.",
   "seed": 42,
 
   "filters": {

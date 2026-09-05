@@ -9,7 +9,7 @@ full-sample point estimate.
 
 Concretely (benchmark.md / stage3 §5.1): rows the panel marks ``adjust_method ==
 "civ"`` get the civ-OLS refit per replicate (it is re-estimated from the sample).
-``"cell"`` rows — both implicit and explicit ``baseline_experiment`` — use the
+``"cell"`` rows (both implicit and explicit ``baseline_experiment``) use the
 **fixed** per-cell baseline persisted in ``cell_baseline.csv`` by the adjust stage
 (computed once from the full, unfiltered panel). The cell baseline is held
 constant across replicates rather than recomputed from each resample: recomputing
@@ -86,8 +86,8 @@ def readjust(
     """Recompute ``adjusted_strength`` on a resampled panel.
 
     The civ OLS is re-fit from the resample (it is re-estimated from the sample);
-    the per-cell baseline is **fixed** — taken from ``fixed_cell_baseline`` (the
-    adjust stage's persisted full-panel trail), not recomputed from the resample —
+    the per-cell baseline is **fixed**, taken from ``fixed_cell_baseline`` (the
+    adjust stage's persisted full-panel trail), not recomputed from the resample,
     so replicates stay scaled exactly like the point estimate (option C). Requires
     the panel's persisted ``logit_strength`` + ``adjust_method`` columns. A
     ``"cell"`` row whose fixed baseline is absent falls back to civ/relative.
@@ -99,7 +99,7 @@ def readjust(
     civ_adjust = params.get("civ_adjust", "ols_logit")
     baseline_experiment = params.get("baseline_experiment")
 
-    # Refit civ effects on the whole resampled (pre-narrowing) panel — this is the
+    # Refit civ effects on the whole resampled (pre-narrowing) panel; this is the
     # SAME population the adjust stage fits on, so the refit matches the point
     # estimate (the shared fit_civ_effects, not a diverged local copy).
     civ_effects: dict[str, float] = {}
@@ -160,9 +160,9 @@ def run_bootstrap(
     """Run ``n`` replicates and return the point estimate joined with percentile CIs.
 
     Each replicate resamples the **full** (problem-excluded, pre-narrowing) panel,
-    re-runs the strength adjustment on it (``refit_strength`` — the civ OLS refit
+    re-runs the strength adjustment on it (``refit_strength``: the civ OLS refit
     needs the full population, incl. the Vanilla reference the rating filters drop),
-    optionally applies ``narrow`` (the rating-population filters — only_llm /
+    optionally applies ``narrow`` (the rating-population filters, only_llm /
     min_games) *after* readjustment, then fits the rating via ``calculator`` (margin
     frozen by the caller for BT).
 
@@ -185,7 +185,7 @@ def run_bootstrap(
             if narrow is not None:
                 resampled = narrow(resampled)
             rating = calculator(resampled)
-        except Exception as exc:  # a degenerate/singular replicate — count, don't hide
+        except Exception as exc:  # a degenerate/singular replicate; count, don't hide
             failures += 1
             last_error = exc
             continue

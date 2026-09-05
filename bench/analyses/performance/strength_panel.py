@@ -1,4 +1,4 @@
-"""``performance.strength_panel`` — per-identity strength summary + coverage report.
+"""``performance.strength_panel``: per-identity strength summary + coverage report.
 
 Consumes the adjust stage's ``strength`` table and reports, per identity (``by``,
 default ``player_type``), the mean of ``metric`` (default ``adjusted_strength``)
@@ -10,7 +10,7 @@ several exist), falling back to 5 when no ratings stage supplies one.
 
 This module also **owns** the controlled-design cell-coverage report: it renders
 ``cell_coverage.csv`` (which ``(seed, player_id)`` cells of the entirety each
-controlled experiment is missing) once, here, as its completeness table —
+controlled experiment is missing) once, here, as its completeness table:
 ``calibration.cell_baseline`` only *consumes* that file to mark missing cells.
 """
 
@@ -324,7 +324,7 @@ class PerformanceStrengthPanel(Analysis):
         # by the adjust stage before any post_cell_normalize), i.e. "your strength -
         # matched Vanilla VPAI baseline in this cell" on the logit scale. NaN for
         # non-cell rows, so this view only appears in controlled runs. Vanilla is NOT
-        # forced to 0 — it is summarized like every identity so the report shows where
+        # forced to 0; it is summarized like every identity so the report shows where
         # it actually lands.
         adv_note = ""
         advantage_col = "cell_logit_advantage"

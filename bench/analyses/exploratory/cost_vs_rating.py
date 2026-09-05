@@ -1,4 +1,4 @@
-"""``exploratory.cost_vs_rating`` — average token cost versus Elo rating."""
+"""``exploratory.cost_vs_rating``: average token cost versus Elo rating."""
 
 from __future__ import annotations
 

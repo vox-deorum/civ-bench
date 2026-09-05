@@ -1,4 +1,4 @@
-"""``prediction.evaluate`` — multi-metric scoring table per estimator.
+"""``prediction.evaluate``: multi-metric scoring table per estimator.
 
 Ported from the comparison logic in ``predict/visualize_model_comparison.ipynb``
 + ``models/compare_models.py``: for each resolved estimator (``uses.estimators``

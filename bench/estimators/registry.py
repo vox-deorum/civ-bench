@@ -3,7 +3,7 @@
 Maps a string ``model`` id (as used in ``configs/models.json`` and an estimator
 entry's ``model`` field) to its predictor class, and dispatches :func:`load_model`
 on a saved dir's ``metadata.model_class``. Unlike the source, xgboost is imported
-directly (no ``HAS_XGBOOST`` soft-fail) per AGENTS.md — every dependency is
+directly (no ``HAS_XGBOOST`` soft-fail) per AGENTS.md: every dependency is
 mandatory.
 """
 

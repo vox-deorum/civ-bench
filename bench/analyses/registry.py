@@ -1,10 +1,10 @@
-"""Analysis-module registry — name → :class:`Analysis` subclass (stage 4).
+"""Analysis-module registry: name → :class:`Analysis` subclass (stage 4).
 
 The JSON ``analyses[].module`` string selects an implemented module here. The
 schema registry (``bench.config.schema.ANALYSIS_MODULES``) is broader: it also
 lists the **reserved optional** modules (``enabled:false`` in
 ``benchmark.full.template.json``) so the config validates, but those have no class
-yet — selecting an unimplemented module at run time fails loud here. Importing
+yet; selecting an unimplemented module at run time fails loud here. Importing
 this module pulls matplotlib/statsmodels (and, for ratings, calls Rscript), so it
 is loaded only from the CLI run path, never the import-light config layer.
 """

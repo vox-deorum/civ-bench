@@ -10,7 +10,7 @@ PYTHON="${CIV_BENCH_PYTHON:-python3}"
 
 echo "Using ${PYTHON} ($("${PYTHON}" --version 2>&1))"
 
-# --- Python dependencies (all required — no optional extras) ----------------
+# --- Python dependencies (all required, no optional extras) ------------------
 PY_DEPS=(
     pandas numpy scipy statsmodels matplotlib seaborn plotly
     scikit-learn tabulate
@@ -29,7 +29,7 @@ if [ -f "${REPO_ROOT}/pyproject.toml" ]; then
     echo "Installing civ-bench (editable)"
     "${PYTHON}" -m pip install -e "${REPO_ROOT}"
 else
-    echo "No pyproject.toml yet — skipping editable install of civ-bench."
+    echo "No pyproject.toml yet; skipping editable install of civ-bench."
 fi
 
 # --- Verify every Python import --------------------------------------------

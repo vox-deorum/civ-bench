@@ -1,31 +1,31 @@
 """Pure-Python recovery for malformed game SQLite DBs (``civ-bench fix`` core).
 
 ``runs/import_issues.csv`` lists games whose DB raises ``database disk image is
-malformed``. Such files still open in DB Browser and most of their data is readable
-— the damage is usually a single corrupt page or a corrupt index, not a wholesale
-loss. There is no ``sqlite3`` CLI on this machine, so the shell ``.recover`` command
+malformed``. Such files still open in DB Browser and most of their data is readable:
+the damage is usually a single corrupt page or a corrupt index, not a wholesale loss.
+There is no ``sqlite3`` CLI on this machine, so the shell ``.recover`` command
 is unavailable; :func:`repair_database` recovers as much as possible into a fresh
 database using only the stdlib ``sqlite3`` module.
 
-The source is always opened **read-only + immutable** — ``immutable=1`` tells SQLite
+The source is always opened **read-only + immutable**: ``immutable=1`` tells SQLite
 to trust the on-disk image as-is rather than try to lock or roll back a journal,
 which is exactly what lets a malformed image be read page-by-page (the same reason a
 viewer can open it). The source file is never mutated; recovery writes only ``dst``.
 
 Strategy is layered, cheapest first:
 
-* **iterdump** — replay a clean SQL dump into a fresh DB. Complete and pristine when
+* **iterdump**: replay a clean SQL dump into a fresh DB. Complete and pristine when
   the corruption does not sit on any page the dump must read.
-* **tolerant rebuild** — recreate each table from ``sqlite_master``, copy its rows
+* **tolerant rebuild**: recreate each table from ``sqlite_master``, copy its rows
   while skipping corrupt pages (recovering rows on *both* sides of a bad page via a
   rowid range walk), then rebuild indexes/triggers/views from the recovered data.
 
 Acceptance is **best-effort**: a result is kept when it opens, passes
-``PRAGMA quick_check``, and recovered at least one table — even if a few unreadable
+``PRAGMA quick_check``, and recovered at least one table, even if a few unreadable
 rows had to be dropped. Completeness is then measured honestly against a raw page scan
 of the source (``rows_on_disk``): how many user rows physically exist versus how many the
 walk reached. That ground truth, not the walk's own skip counters (which silently miss
-rows leapt over on a corrupt page), is what the caller reports — typically ~100%, with
+rows leapt over on a corrupt page), is what the caller reports: typically ~100%, with
 only the handful of rows on a physically corrupt page lost.
 """
 
@@ -43,14 +43,14 @@ _DUMP_CHUNK = 8 << 20
 # Initial rowid window for the range-scan recovery path; narrowed on a corrupt page.
 _RANGE_STEP = 1000
 # Empty windows grow (×4, capped) to leap across gaps fast; after this many consecutive
-# empties the walk stops — corruption can yield a garbage MAX(rowid) (billions), so we
+# empties the walk stops: corruption can yield a garbage MAX(rowid) (billions), so we
 # cannot trust the upper bound and instead detect "past the real data" by the empty run.
 _GAP_GROW = 4
 _GAP_MAX = 1 << 16
 _EMPTY_LIMIT = 64
 # A corrupt page returns an *error* (not an empty window), which the walk crosses one
 # unreadable rowid at a time. After this many consecutive single-rowid failures with no
-# row in between, the b-tree is unreadable from here on — stop rather than grind toward
+# row in between, the b-tree is unreadable from here on: stop rather than grind toward
 # the open upper bound. A localized bad page is a handful of rows, far below this.
 _SKIP_LIMIT = 10000
 # Open upper bound for the rowid walk when MAX(rowid) is itself unreadable; the empty-run
@@ -68,11 +68,11 @@ class RepairReport:
     Two distinct kinds of loss are reported separately, because they are not the same
     severity:
 
-    * ``tables_partial`` — tables that **were** recovered but lost some rows to a corrupt
+    * ``tables_partial``: tables that **were** recovered but lost some rows to a corrupt
       page (the table and the rest of its rows are intact). ``rows_skipped`` is the total
       row count across these.
-    * ``objects_skipped`` — schema objects **dropped** entirely: a table whose CREATE
-      failed, or an index/trigger/view that could not be rebuilt from the recovered data.
+    * ``objects_skipped``: schema objects **dropped** entirely (a table whose CREATE
+      failed, or an index/trigger/view that could not be rebuilt from the recovered data).
 
     Keeping them apart is why a few unreadable rows in ``GameEvents`` no longer reads as
     "dropped the GameEvents table".
@@ -80,7 +80,7 @@ class RepairReport:
     ``rows_on_disk`` is an independent ground-truth count of how many *user-table* rows are
     physically present in the source file (a raw page scan, not a b-tree walk, with schema
     and ``sqlite_%`` shadow rows subtracted), so the caller can report recovery completeness
-    honestly — ``rows_recovered`` of ``rows_on_disk`` — instead of guessing from the walk's
+    honestly (``rows_recovered`` of ``rows_on_disk``) instead of guessing from the walk's
     skip counters, which silently miss rows leapt over on corrupt pages. ``0`` if uncomputed.
     """
 
@@ -122,7 +122,7 @@ def _count_rows_on_disk(path: str) -> int | None:
 
     Independent of the b-tree (which the corruption damaged): every page is classified by
     its first byte and a *table-leaf* page (``0x0D``) carries its live cell count in bytes
-    3–4 of its header. Summing those counts gives the ground-truth number of rows on disk —
+    3–4 of its header. Summing those counts gives the ground-truth number of rows on disk:
     the honest denominator for "recovered N of M". Page 1's b-tree header sits just after
     the 100-byte database header. Overflow/interior/index/freelist pages are not table
     leaves and are correctly ignored. Returns ``None`` if the file cannot be read as SQLite.
@@ -351,17 +351,17 @@ def _copy_by_rowid(src: sqlite3.Connection, dst: sqlite3.Connection, name: str, 
     no re-bisecting a run). A window with rows resets to the data batch size; an *empty*
     window grows (×4) to leap across gaps. Because a corrupt page can return a garbage
     ``MAX(rowid)``, the upper bound is not trusted: the walk stops after ``_EMPTY_LIMIT``
-    consecutive empty windows — game-DB rowids are contiguous, so empties only pile up once
+    consecutive empty windows: game-DB rowids are contiguous, so empties only pile up once
     we are past the real data. Rows on **both** sides of a bad page are recovered.
 
     A rowid table can *always* be range-walked, so unreadable ``MIN/MAX(rowid)`` is not a
     reason to truncate: it just means the corrupt page sits on the b-tree's leftmost or
     rightmost path. We default the lower bound to 1 (game event logs are append-only from
-    rowid 1) and leave the upper bound open. The walk only gives up — reporting
-    ``truncated`` — after ``_SKIP_LIMIT`` consecutive unreadable rowids, i.e. the b-tree is
+    rowid 1) and leave the upper bound open. The walk only gives up (reporting
+    ``truncated``) after ``_SKIP_LIMIT`` consecutive unreadable rowids, i.e. the b-tree is
     damaged beyond a single bad page and cannot be read further.
     """
-    dst.execute(f"DELETE FROM {_q(name)}")  # restart clean — a corrupt cursor can't resume
+    dst.execute(f"DELETE FROM {_q(name)}")  # restart clean: a corrupt cursor can't resume
     dst.commit()
 
     lo, hi = _rowid_bounds(src, name)
@@ -385,11 +385,11 @@ def _copy_by_rowid(src: sqlite3.Connection, dst: sqlite3.Connection, name: str, 
             # outright: only skips that are followed by more recovered rows are real
             # interior losses. A run of skips with no data after is end-probing past the
             # last good row (a corrupt page makes a lookup error instead of returning
-            # empty), so it is discarded when the walk ends — never reported as lost rows.
+            # empty), so it is discarded when the walk ends, never reported as lost rows.
             pending += 1
             skip_streak += 1
             start += 1
-            if skip_streak >= _SKIP_LIMIT:  # b-tree unreadable from here — stop, don't grind
+            if skip_streak >= _SKIP_LIMIT:  # b-tree unreadable from here: stop, don't grind
                 truncated = True
                 break
             continue
@@ -404,7 +404,7 @@ def _copy_by_rowid(src: sqlite3.Connection, dst: sqlite3.Connection, name: str, 
             step = min(_GAP_MAX, step * _GAP_GROW)  # leap across empty space
         dst.commit()
         start = end + 1
-    return copied, skipped, truncated  # trailing `pending` discarded — speculative, not lost
+    return copied, skipped, truncated  # trailing `pending` discarded: speculative, not lost
 
 
 def _copy_table(
@@ -419,7 +419,7 @@ def _copy_table(
     try:
         return _bulk_copy(src, dst, name, insert), 0, None
     except sqlite3.DatabaseError:
-        pass  # a page in this table is corrupt — drop to recovery
+        pass  # a page in this table is corrupt, so drop to recovery
 
     if without_rowid:
         try:
@@ -496,10 +496,10 @@ def _try_tolerant_rebuild(
             recovered.append(name)
             rows_recovered += copied
             rows_skipped += skipped
-            if note:  # table kept, but some rows were lost — record it as partial, not dropped
+            if note:  # table kept, but some rows were lost: record it as partial, not dropped
                 partial_tables.append(note)
 
-        # Rebuild indexes/triggers/views last, from the recovered data — a corrupt
+        # Rebuild indexes/triggers/views last, from the recovered data: a corrupt
         # index is a common root cause, so rebuilding it clean is the actual fix.
         for type_, name, sql in others:
             try:

@@ -1,8 +1,8 @@
 """Statistics layer: OLS regression wrapper with clustered/weighted fits.
 
 Ported from ``shared/regression_utilities.py`` (the old paper repo). This is real
-analysis code — imported by ``performance.score_ratio``, ``ratings.matchups``
-(``validate_ols``), and ``adjust/strength.py``'s civ-adjustment — so it lives under
+analysis code, imported by ``performance.score_ratio``, ``ratings.matchups``
+(``validate_ols``), and ``adjust/strength.py``'s civ-adjustment, so it lives under
 ``stats/``, not ``plotting/``. The source's regression-suite / coefficient-heatmap
 and logistic helpers were unused in this pipeline and have been removed; only the
 ``fit_regression`` wrapper and its :class:`RegressionResult` remain.

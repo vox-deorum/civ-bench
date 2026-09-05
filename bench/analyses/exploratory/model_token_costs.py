@@ -1,4 +1,4 @@
-"""``exploratory.model_token_costs`` — token usage × pricing per model.
+"""``exploratory.model_token_costs``: token usage × pricing per model.
 
 Ported from ``exploratory/model_token_costs.ipynb``: from ``model_token_usage``,
 compute per-row cost = ``input_tokens/1e6 * input_price + (reasoning+output)/1e6

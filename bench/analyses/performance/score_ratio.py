@@ -1,4 +1,4 @@
-"""``performance.score_ratio`` — OLS of a panel target on identity + civilization.
+"""``performance.score_ratio``: OLS of a panel target on identity + civilization.
 
 Ported from ``performance/panel_score_ratio.ipynb``: fit
 ``score_ratio ~ C(civilization, Sum) + C(player_type, Treatment(ref=Vanilla))``

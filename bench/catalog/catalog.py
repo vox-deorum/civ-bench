@@ -3,7 +3,7 @@
 Ports ``shared/model_catalog.py`` + ``shared/experiments.py`` into a single
 config-driven object. Unlike the old module-global helpers (which read a fixed
 ``shared/config`` dir), :class:`Catalog` is constructed from explicit file paths
-— normally resolved from the run-spec's ``catalogs`` block — so nothing is
+(normally resolved from the run-spec's ``catalogs`` block), so nothing is
 hardcoded (invariant 1: config over code).
 
 The headline addition over the old code is the **orthodox ``player_type``
@@ -11,7 +11,7 @@ composition** (benchmark.md §3.3): :meth:`Catalog.compose_player_type` builds t
 identity from the per-player game metadata (``model-{id}`` + ``strategist-{id}``)
 via a ``player_type_template`` + alias maps, then applies the unified
 ``player_type_labels`` map. The legacy per-seat ``condition_player_mapping`` is
-demoted to :meth:`Catalog.fallback_player_type` — used only for games that
+demoted to :meth:`Catalog.fallback_player_type`, used only for games that
 predate the metadata.
 """
 
@@ -207,8 +207,8 @@ class Catalog:
 
         Consulted only after an exact key miss, so a literal condition key always
         wins. Among the wildcard keys (those containing ``*``) that match, the
-        **most specific** wins — the one with the most non-wildcard characters,
-        ties broken lexicographically — so a broad ``*`` never shadows a narrower
+        **most specific** wins (the one with the most non-wildcard characters,
+        ties broken lexicographically), so a broad ``*`` never shadows a narrower
         ``oss-*-per-5``. Returns the matched entry (a string or ``(slot)`` dict,
         interpreted exactly like an exact-key entry) or ``None``.
         """

@@ -1,4 +1,4 @@
-"""``ratings.plackett_luce`` — Plackett-Luce MLE Elo (R ``PlackettLuce``).
+"""``ratings.plackett_luce``: Plackett-Luce MLE Elo (R ``PlackettLuce``).
 
 Deterministic full-ranking MLE; no margin/weighting. The bundled R script accepts
 a reference player_type (generalized from the legacy hardcoded ``Vanilla``) so the

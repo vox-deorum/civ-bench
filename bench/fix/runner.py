@@ -1,7 +1,7 @@
 """``civ-bench fix`` orchestrator: repair the malformed DBs in ``import_issues.csv``.
 
 Reads the malformed-DB ledger written by the extract stage. A flagged game is rarely
-a single corrupt file — the same interrupted write that broke the main game DB can
+a single corrupt file: the same interrupted write that broke the main game DB can
 also break the player-level telemetry DBs saved alongside it. So for each flagged
 game ``fix`` examines **every related ``.db``**: the game DB (``{uuid}_{ts}.db``) and
 its trace exports (``{uuid}-player-*.db``), matched by the game's uuid prefix (the
@@ -11,12 +11,12 @@ Each related DB is checked with ``PRAGMA quick_check``:
 
 * **already healthy** → left exactly as found, with no backup (nothing changed, so
   there is no ``.bak`` to keep);
-* **corrupt** → recovered into a fresh file, then swapped in — the original is kept as
+* **corrupt** → recovered into a fresh file, then swapped in: the original is kept as
   ``<name>.db.bak`` and the recovered DB written as ``<name>.db``;
 * **unrecoverable** → left exactly as found and reported.
 
 A failure on one file never aborts the rest of the batch. Scope is deliberately
-narrow — ``fix`` only repairs files; it does **not** rewrite ``import_issues.csv``
+narrow: ``fix`` only repairs files; it does **not** rewrite ``import_issues.csv``
 (only ``extract`` owns that ledger). After fixing, re-run
 ``civ-bench extract --force-rebuild`` to re-read the repaired DBs and clear the report.
 """
@@ -80,7 +80,7 @@ def _read_issue_rows(path: str) -> list[dict]:
     """Issue rows (``db_name``/``game_id``) from ``import_issues.csv``.
 
     A missing/empty/unreadable report yields ``[]`` (with a warning) rather than an
-    error — ``fix`` simply has nothing to do. Rows are deduped by ``game_id`` (the
+    error; ``fix`` simply has nothing to do. Rows are deduped by ``game_id`` (the
     ledger's own key): all of a game's related DBs are gathered from one row.
     """
     if not path or not Path(path).exists():
@@ -159,7 +159,7 @@ def _process_one(
 ) -> FixOutcome:
     """Examine one related DB; repair + swap it only if it is actually corrupt. Never raises."""
     if dry_run:
-        # Preview only — skip the (potentially large) quick_check scans; the real run
+        # Preview only: skip the (potentially large) quick_check scans; the real run
         # classifies each file as healthy or repairable.
         return FixOutcome(db_name, game_id, "dry-run", path=full_path)
 
@@ -208,11 +208,11 @@ def run_fix(
     """Repair the malformed DBs (and their related trace DBs) named in ``import_issues.csv``.
 
     Raises :class:`FixError` for an operational failure (a ``runs_dir`` that does not
-    exist while there are DBs to repair) — distinct from a per-file ``failed`` outcome.
+    exist while there are DBs to repair), distinct from a per-file ``failed`` outcome.
 
     ``only_game_ids`` (``None`` = repair everything recorded, the standalone
     ``civ-bench fix`` behaviour) narrows the batch to the ledger rows whose dedupe key
-    (``game_id`` or, absent that, ``db_name``) is in the set — used by auto-fix to
+    (``game_id`` or, absent that, ``db_name``) is in the set, used by auto-fix to
     repair only the games that failed *this* run, not the whole carried-forward ledger.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
@@ -230,7 +230,7 @@ def run_fix(
     if only_game_ids is not None:
         rows = [r for r in rows if (r["game_id"] or r["db_name"]) in only_game_ids]
     if not rows:
-        print("No problem databases recorded — nothing to fix.")
+        print("No problem databases recorded: nothing to fix.")
         return result
 
     if not os.path.isdir(runs_dir):
@@ -270,7 +270,7 @@ def _print_outcome(outcome: FixOutcome) -> None:
     """One human-readable line per DB, in the extract-runner style."""
     rep = outcome.report
     if outcome.status == "repaired" and rep is not None:
-        # Lead with the on-disk ground truth (page scan) — it catches rows the walk's skip
+        # Lead with the on-disk ground truth (page scan): it catches rows the walk's skip
         # counter silently misses. Fall back to the skip count only when no scan was made.
         if rep.rows_on_disk and rep.rows_on_disk > rep.rows_recovered:
             missing = rep.rows_on_disk - rep.rows_recovered
@@ -293,7 +293,7 @@ def _print_outcome(outcome: FixOutcome) -> None:
         for note in rep.objects_skipped:  # objects dropped entirely
             print(f"             - dropped {note}")
     elif outcome.status == "healthy":
-        print(f"  [healthy]  {outcome.db_name} — already valid, left as-is")
+        print(f"  [healthy]  {outcome.db_name}: already valid, left as-is")
     elif outcome.status == "dry-run":
         print(f"  [would examine] {outcome.db_name} → {outcome.path}")
     else:
@@ -321,5 +321,5 @@ def _print_summary(result: FixResult) -> None:
             "import_issues.csv."
         )
     for outcome in result.failed:
-        print(f"civ-bench: fix — could not repair {outcome.db_name}: {outcome.detail}",
+        print(f"civ-bench: fix: could not repair {outcome.db_name}: {outcome.detail}",
               file=sys.stderr)

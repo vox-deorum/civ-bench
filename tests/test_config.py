@@ -27,7 +27,7 @@ def test_dev_config_loads(dev_spec, write_spec):
 def test_real_dev_config_smoke():
     """When the machine-specific dev config is present, it still validates.
 
-    No content assertions — the file is hand-edited locally, so only its
+    No content assertions: the file is hand-edited locally, so only its
     loadability is contracted here.
     """
     assert load_config(DEV_CONFIG) is not None
@@ -40,7 +40,7 @@ def test_pretrained_template_loads(configs_dir):
 
 
 def test_default_train_template_loads(configs_dir):
-    """The default (train-based) template validates — incl. features.include: null."""
+    """The default (train-based) template validates, incl. features.include: null."""
     cfg = load_config(configs_dir / "benchmark.template.json")
     assert cfg.output.resolved_root == "reports"
     fits = {e.id: e.raw["fit"] for e in cfg.estimators}
@@ -360,7 +360,7 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
 
 
 def test_estimator_needs_validated(dev_spec, write_spec):
-    # Estimators carry no `uses`, so `needs` is their only edge — a dangling ref
+    # Estimators carry no `uses`, so `needs` is their only edge; a dangling ref
     # must fail loudly at load (not be silently dropped at DAG build).
     dev_spec["estimators"][0]["needs"] = ["ghost"]
     path = write_spec(dev_spec)

@@ -1,4 +1,4 @@
-"""``performance.experiment_completeness`` — controlled game-grid completeness.
+"""``performance.experiment_completeness``: controlled game-grid completeness.
 
 Reports compact experiment-level completeness against the controlled
 ``seed × seating_rotation`` grid, actionable duplicate game ids for cleanup, and

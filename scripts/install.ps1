@@ -15,7 +15,7 @@ $Python = if ($env:CIV_BENCH_PYTHON) { $env:CIV_BENCH_PYTHON } else { 'python' }
 $pyVersion = & $Python --version
 Write-Host "Using $Python ($pyVersion)" -ForegroundColor Cyan
 
-# --- Python dependencies (all required — no optional extras) ----------------
+# --- Python dependencies (all required, no optional extras) ------------------
 $PyDeps = @(
     'pandas', 'numpy', 'scipy', 'statsmodels', 'matplotlib', 'seaborn', 'plotly',
     'scikit-learn', 'tabulate',
@@ -33,7 +33,7 @@ if (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) {
     Write-Host "Installing civ-bench (editable)" -ForegroundColor Cyan
     & $Python -m pip install -e $RepoRoot
 } else {
-    Write-Host "No pyproject.toml yet — skipping editable install of civ-bench." -ForegroundColor Yellow
+    Write-Host "No pyproject.toml yet; skipping editable install of civ-bench." -ForegroundColor Yellow
 }
 
 # --- Verify every Python import --------------------------------------------

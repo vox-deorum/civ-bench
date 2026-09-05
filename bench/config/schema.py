@@ -113,7 +113,7 @@ PRETRAINED_KEYS = {"model_dir"}
 ADJUST_KEYS = {"id", "module", "enabled", "uses", "save", "needs", "params"}
 ADJUST_MODULES = {"strength"}
 USES_KEYS = {"estimators", "tables", "analyses"}
-# strength params (§5.1) — enum domains validated in stage 0
+# strength params (§5.1); enum domains validated in stage 0
 STRENGTH_PARAM_KEYS = {
     "turn_progress_min",
     "weight",

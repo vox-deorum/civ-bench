@@ -4,11 +4,11 @@ Dependency semantics live in :mod:`bench.config.dependencies`, where the graph
 is resolved and cached at config-load time. Edges come from three places
 (benchmark.md §1), all resolved into one topological order before anything runs:
 
-1. **Kind ordering (implicit)** — extract → estimators → adjust → analyses →
+1. **Kind ordering (implicit)**: extract → estimators → adjust → analyses →
    report. Concretely: every estimator depends on ``extract`` (it re-infers on
    the canonical turns table); ``report`` depends on every enabled analysis.
-2. **`needs` (explicit)** — extra ordering the harness cannot infer.
-3. **`uses` (referential)** — an estimator id, table name, or analysis id in a
+2. **`needs` (explicit)**: extra ordering the harness cannot infer.
+3. **`uses` (referential)**: an estimator id, table name, or analysis id in a
    stage's ``uses`` block creates an edge automatically (to the producing
    estimator / adjust / analysis stage, or to extract for a canonical table).
    Estimator-consuming analyses with omitted/empty ``uses.estimators`` depend
@@ -111,7 +111,7 @@ def render_dag(dag: Dag, cfg: RunConfig) -> str:
         module = node.raw.get("module")
         kind_label = node.kind if not module else f"{node.kind}:{module}"
         deps = sorted(node.deps)
-        dep_str = ", ".join(deps) if deps else "—"
+        dep_str = ", ".join(deps) if deps else "(none)"
         lines.append(
             f"  {i:>2}. {nid:<{width}}  [{kind_label}]  <- {dep_str}"
         )

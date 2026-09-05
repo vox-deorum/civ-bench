@@ -3,8 +3,8 @@
 When a game's SQLite DB is corrupt, the four exporters can no longer pull its
 rows. Rather than print an opaque per-player ``database disk image is malformed``
 line that names neither the game nor its experiment/seed/rotation, each failure
-site records an :class:`ImportIssue` here. The log dedups **by game_id** — a game
-that fails in several stages becomes one entry whose ``stages`` set lists each —
+site records an :class:`ImportIssue` here. The log dedups **by game_id** (a game
+that fails in several stages becomes one entry whose ``stages`` set lists each),
 so cross-stage records also recover ``seed``/``seating_rotation`` from whichever
 stage *could* read the metadata.
 
@@ -34,7 +34,7 @@ from .utilities import (
 DEFAULT_ISSUES_PATH = "runs/import_issues.csv"
 
 # ``seed``/``seating_rotation`` value used when the DB was too corrupt to read its
-# ``GameMetadata`` — kept distinct from the legitimate ``-1`` UNCONTROLLED sentinel.
+# ``GameMetadata``, kept distinct from the legitimate ``-1`` UNCONTROLLED sentinel.
 UNKNOWN = "unknown"
 
 ISSUE_FIELDNAMES = [
@@ -66,8 +66,8 @@ def read_problem_game_ids(path: str) -> set[str]:
 
     The downstream consumer of the malformed-DB log: analyses read this to drop
     problem games (whose stale, identity-less rows otherwise poison ratings) from
-    their inputs. A missing/empty/unreadable report yields an empty set — never an
-    error — so analyses still run when no issues were ever recorded.
+    their inputs. A missing/empty/unreadable report yields an empty set (never an
+    error), so analyses still run when no issues were ever recorded.
     """
     if not path or not Path(path).exists():
         return set()
@@ -129,7 +129,7 @@ def _best_effort_seeding(metadata) -> tuple:
     """``(seed, seating_rotation)`` from metadata, or ``(UNKNOWN, UNKNOWN)``.
 
     ``extract_seeding_fields`` can itself raise (an ``ExtractError`` on a
-    controlled-seed mismatch, or anything if ``metadata`` is junk) — for issue
+    controlled-seed mismatch, or anything if ``metadata`` is junk); for issue
     reporting we only want a best-effort read, never a second failure.
     """
     if not metadata:
@@ -147,7 +147,7 @@ class ImportIssueLog:
     The log is reconciled against the prior report rather than clobbering it: it
     carries an existing report's issues forward except where a stage *re-examined*
     the game this run (then the fresh verdict wins) or the game's DB is gone. This
-    keeps issues durable across incremental runs — e.g. a corrupt player-trace on a
+    keeps issues durable across incremental runs, e.g. a corrupt player-trace on a
     game that still produced token rows is skipped next run, so without carry-over
     its issue would silently vanish.
     """
@@ -161,7 +161,7 @@ class ImportIssueLog:
     def load(self, path: str) -> None:
         """Seed the prior-report state from an existing ``import_issues.csv``.
 
-        A missing/empty/unreadable report is not fatal — extraction must still run;
+        A missing/empty/unreadable report is not fatal: extraction must still run;
         we just start with no history (and re-discover anything still failing).
         """
         if not Path(path).exists():
@@ -252,7 +252,7 @@ class ImportIssueLog:
         seed, rotation = _best_effort_seeding(metadata)
 
         # Mark this game as freshly failed THIS run. reconcile() never touches
-        # _fresh, so a carried-forward prior issue stays non-fresh — which is what
+        # _fresh, so a carried-forward prior issue stays non-fresh, which is what
         # lets auto-fix fire only on genuinely-new failures (WS3).
         self._fresh.add(gid)
 

@@ -1,4 +1,4 @@
-"""``ratings.matchups`` — empirical head-to-head matrices + OLS validation.
+"""``ratings.matchups``: empirical head-to-head matrices + OLS validation.
 
 Ported from ``ratings/matchups.py``: for every pair of player types that met in a
 game, report the win rate ``P(A stronger than B)`` with ties split 0.5/0.5
@@ -25,11 +25,12 @@ def create_matchup_matrix(strength_df: pd.DataFrame):
     """Empirical P(A has higher adjusted strength than B), ties counted as 0.5.
 
     p-values are a **paired** t-test on the within-game (A, B) strength pairs
-    (``ttest_rel``, equivalent to ``ttest_1samp(A - B, 0)`` used by the mean matrix)
-    — the samples are aligned per game, not two independent groups, so ``f_oneway``
-    was the wrong test. Counting exact ties as 0.5 (rather than a loss for both)
-    restores ``P(i,j) + P(j,i) = 1``; the strength stage's ``enforce_winner`` can
-    manufacture exact 1.0 ties, so ties are not merely a rounding artefact.
+    (``ttest_rel``, equivalent to ``ttest_1samp(A - B, 0)`` used by the mean
+    matrix). The samples are aligned per game, not two independent groups, so
+    ``f_oneway`` was the wrong test. Counting exact ties as 0.5 (rather than a
+    loss for both) restores ``P(i,j) + P(j,i) = 1``; the strength stage's
+    ``enforce_winner`` can manufacture exact 1.0 ties, so ties are not merely a
+    rounding artefact.
     """
     from scipy.stats import ttest_rel
 

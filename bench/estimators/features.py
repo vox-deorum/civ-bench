@@ -12,7 +12,7 @@ transforms that re-inference needs so the rebuilt feature matrix matches the
 5. ``prepare_features`` selects the modelling columns + ID columns
 
 Training-only concerns (CV split generation, resampling/SMOTE) are **not** ported
-here — they belong to the ``fit:"train"`` pipeline in stage 6.
+here: they belong to the ``fit:"train"`` pipeline in stage 6.
 
 ``turn_progress`` used as a *feature* is the unrounded ``turn / max_turn`` that
 :func:`add_relative_features` computes (the loaders' rounded ``turn_progress`` is

@@ -2,7 +2,7 @@
 
 One row per game: ``game_id, timestamp, experiment, seed, seating_rotation``. The
 ``seed`` / ``seating_rotation`` carry the ``-1`` uncontrolled sentinel (rule 14);
-per-player ``config_slot`` is **not** here — it lives in ``panel_data``. Unlike the
+per-player ``config_slot`` is **not** here (it lives in ``panel_data``). Unlike the
 source, which read only filenames, this opens each game DB to pull the controlled
 seeds/rotation from ``GameMetadata``.
 """
@@ -30,7 +30,7 @@ def extract_game_row(db_path, issues=None) -> dict | None:
     """Build the ``game_data`` row for one game DB.
 
     Returns ``None`` (skipping the game) when the DB cannot be opened or its
-    ``GameMetadata`` cannot be read — recording an :class:`ImportIssue` instead of
+    ``GameMetadata`` cannot be read, recording an :class:`ImportIssue` instead of
     writing a misleading ``seed=-1`` row or crashing the run.
     """
     game_id = get_game_id_from_path(db_path)
@@ -52,7 +52,7 @@ def extract_game_row(db_path, issues=None) -> dict | None:
         seed = seeding.seed
         seating_rotation = seeding.seating_rotation
     except sqlite3.DatabaseError as exc:
-        # Malformed/locked image — record and skip. A controlled-seed mismatch
+        # Malformed/locked image: record and skip. A controlled-seed mismatch
         # (ExtractError) is a hard policy abort, not a DB fault: let it propagate.
         record_db_failure(issues, stage="games", db_path=db_path, exc=exc)
         return None

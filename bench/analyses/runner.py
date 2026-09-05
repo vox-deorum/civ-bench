@@ -2,15 +2,15 @@
 
 Executes one ``analyses`` node from the resolved DAG: builds the
 :class:`AnalysisContext` (output-root-aware table/estimator resolvers), runs the
-registered module, then persists the returned :class:`AnalysisResult` — tables to
-CSV and figures to PNG under ``<root>/analyses/<id>/`` — and returns a small
+registered module, then persists the returned :class:`AnalysisResult` (tables to
+CSV and figures to PNG under ``<root>/analyses/<id>/``) and returns a small
 summary object for the CLI / report stage.
 
 Alongside the artifacts it writes a small ``result.json`` **manifest** (id,
 module, summary, metadata, ordered table/figure filenames, empty flag). The
 manifest is what makes the report stage (stage 5) re-renderable from disk: a
 plain ``civ-bench report`` reads each enabled analysis's manifest + artifacts
-without re-running the module (invariant 3 — reports are generated, never
+without re-running the module (invariant 3: reports are generated, never
 authored).
 
 Imports matplotlib (figures), statsmodels (regressions), and optionally calls

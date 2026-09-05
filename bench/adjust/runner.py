@@ -94,7 +94,7 @@ def run_adjust(
     if catalog is None:
         catalog = Catalog.from_run_config(cfg)
 
-    # Exclude malformed-DB games from the adjust inputs too — otherwise a flagged
+    # Exclude malformed-DB games from the adjust inputs too; otherwise a flagged
     # game's stale rows still shape the civ-OLS / cell-baseline fits, and every
     # ratings analysis reads an adjusted_strength panel built partly on bad data.
     from ..extract.issues import read_problem_game_ids, resolve_issues_path

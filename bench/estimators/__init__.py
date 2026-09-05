@@ -1,4 +1,4 @@
-"""Estimators layer — prediction-model producers (tune / train / load / infer).
+"""Estimators layer: prediction-model producers (tune / train / load / infer).
 
 Stage 2 ships the **load-only** path: :func:`run_estimator` resolves a
 ``fit:"pretrained"`` entry, loads a saved ``model_dir`` via :func:`load_model`
@@ -6,7 +6,7 @@ Stage 2 ships the **load-only** path: :func:`run_estimator` resolves a
 table to emit ``predictions.csv``. Training/tuning land in stage 6.
 
 This package pulls heavy deps (torch / xgboost) on import, so import it lazily
-from the CLI run path — never from the import-light config/pipeline layers.
+from the CLI run path, never from the import-light config/pipeline layers.
 """
 
 from __future__ import annotations

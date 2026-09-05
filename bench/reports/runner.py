@@ -108,14 +108,14 @@ def _resolve_section_ids(cfg: RunConfig, warnings: list[str]) -> list[str]:
                 f"stage id {sorted(all_ids)}."
             )
         if sid in out:
-            warnings.append(f"section '{sid}' listed more than once in report.sections — kept once.")
+            warnings.append(f"section '{sid}' listed more than once in report.sections; kept once.")
             continue
         if sid not in enabled:
             if include_disabled:
                 out.append(sid)
             else:
                 warnings.append(
-                    f"section '{sid}' is disabled and include_disabled is false — skipped."
+                    f"section '{sid}' is disabled and include_disabled is false; skipped."
                 )
             continue
         out.append(sid)
@@ -322,7 +322,7 @@ def _inline_artifact_names(
 
 
 def _caption(stage_id: str, name: str) -> str:
-    return f"{stage_id} — {name}" if name != stage_id else stage_id
+    return f"{stage_id}: {name}" if name != stage_id else stage_id
 
 
 def _copy_asset(
@@ -351,7 +351,7 @@ def _copy_asset(
             )
             return None
     if not src.exists():
-        warnings.append(f"section '{stage_id}': asset '{src}' is missing — skipped.")
+        warnings.append(f"section '{stage_id}': asset '{src}' is missing; skipped.")
         return None
     rel_norm = rel_within.replace("\\", "/")
     dst = asset_dir / rel_norm
@@ -362,7 +362,7 @@ def _copy_asset(
     resolved = dst.resolve()
     if resolved != asset_root and asset_root not in resolved.parents:
         warnings.append(
-            f"section '{stage_id}': asset path '{rel_within}' escapes the asset tree — skipped."
+            f"section '{stage_id}': asset path '{rel_within}' escapes the asset tree; skipped."
         )
         return None
     dst.parent.mkdir(parents=True, exist_ok=True)

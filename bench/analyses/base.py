@@ -4,7 +4,7 @@ Every analysis module is a self-contained unit behind the :class:`Analysis`
 interface; the JSON ``analyses[].module`` string selects it from the registry
 (:mod:`bench.analyses.registry`). An analysis consumes its declared inputs via
 the :class:`AnalysisContext` and returns an :class:`AnalysisResult` (tables +
-figures + summary) — it never writes files itself (the runner persists the
+figures + summary); it never writes files itself (the runner persists the
 result), so the same module is reusable from a notebook, a test, or the report.
 """
 
@@ -36,7 +36,7 @@ class AnalysisResult:
     filename); ``figures`` values are matplotlib ``Figure`` objects. An analysis
     that legitimately produces nothing for the given inputs (e.g.
     ``calibration.cell_baseline`` on a fully uncontrolled run) returns an empty
-    result — :meth:`is_empty` is true and the runner records it without error.
+    result: :meth:`is_empty` is true and the runner records it without error.
 
     ``artifacts`` is the escape hatch for files that are neither a tabular CSV
     nor a figure (e.g. the generated ``seating/*.seating.json`` files): it maps a
@@ -253,7 +253,7 @@ class AnalysisContext:
         """game_ids recorded as malformed in ``import_issues.csv`` (cached).
 
         Resolved from ``data.extract.issues_path`` (default ``runs/import_issues.csv``)
-        and read raw, NOT output-suffix-rooted — the issues report is a ``runs/``
+        and read raw, NOT output-suffix-rooted: the issues report is a ``runs/``
         artifact shared across configs, not a per-output table.
         """
         cached = getattr(self, "_problem_ids_cache", None)
@@ -341,7 +341,7 @@ class AnalysisContext:
         """Read an estimator's predictions, dropping flagged problem games.
 
         Predictions carry a ``game_id`` column, so the same malformed-DB exclusion
-        applied to :meth:`load_table` is applied here too — otherwise a flagged
+        applied to :meth:`load_table` is applied here too; otherwise a flagged
         game's stale rows would still poison prediction-consuming analyses (the
         exclusion the docstring on ``_drop_problem_games`` promises for *every*
         analysis input). A no-op when ``usecols`` omits ``game_id``.

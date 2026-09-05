@@ -2,7 +2,7 @@
 
 Departure from the source (``plans/stage1.md``): each row carries the orthodox
 ``player_type`` (composed once per (game, player) and broadcast across that
-player's turns, §3.3). It stores **no** ``seed`` and no seating columns — the
+player's turns, §3.3). It stores **no** ``seed`` and no seating columns; the
 strength stage joins ``seed`` from ``game_data`` by ``game_id`` where it needs the
 start-cell. Everything else (the carry-forward flavor/strategy logic) is verbatim.
 """
@@ -140,7 +140,7 @@ def _fetch_flavor_events(cursor, major_players):
         rationale = row[3 + len(FLAVOR_COLUMNS)]
         changes_json = row[4 + len(FLAVOR_COLUMNS)]
         # An actual flavor-number change. NULL/empty rows are not changes (and
-        # are not decisions either) — keeping them out of is_changed ensures
+        # are not decisions either), so keeping them out of is_changed ensures
         # is_changed=1 always implies is_decision=1 (a change is a decision).
         is_changed = 0 if changes_json in (None, "", "[]", '["Rationale"]') else 1
 
@@ -490,12 +490,12 @@ def extract_game_turn_data(db_path, catalog: Optional[Catalog] = None, issues=No
         conn.close()
         return turn_data
     except ExtractError:
-        # A controlled-seed mismatch (rule 14) is a hard policy abort — it must
+        # A controlled-seed mismatch (rule 14) is a hard policy abort: it must
         # propagate even on a turns-only run, never be swallowed into [].
         conn.close()
         raise
     except sqlite3.DatabaseError as exc:
-        # Malformed/locked image — record once and skip the game.
+        # Malformed/locked image: record once and skip the game.
         record_db_failure(issues, stage="turns", db_path=db_path, exc=exc, metadata=metadata)
         conn.close()
         return []

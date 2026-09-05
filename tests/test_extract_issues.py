@@ -1,4 +1,4 @@
-"""Stage 1 — malformed-DB import-issue recording tests.
+"""Stage 1: malformed-DB import-issue recording tests.
 
 A corrupt game DB must no longer (a) crash the run, (b) emit all-N/A panel rows,
 or (c) leave a print that names neither the game nor its experiment/seed/rotation.
@@ -6,7 +6,7 @@ Each failure site records a single :class:`ImportIssue` (deduped by game_id acro
 stages); the log prints a grouped summary and persists ``import_issues.csv``.
 
 Fixtures are tiny and synthetic (no machine data roots, per AGENTS.md): a corrupt
-DB is just a file with a non-SQLite header — its first query raises
+DB is just a file with a non-SQLite header; its first query raises
 ``sqlite3.DatabaseError`` ("file is not a database"), the same path a
 "database disk image is malformed" image takes.
 """
@@ -285,7 +285,7 @@ def test_record_marks_game_fresh(tmp_path):
 
 
 def test_carried_forward_prior_is_not_fresh(tmp_path):
-    # A prior-run issue folded in by reconcile() must NOT count as fresh — otherwise
+    # A prior-run issue folded in by reconcile() must NOT count as fresh; otherwise
     # auto-fix would re-attempt an already-unrecoverable game every run.
     report = _written_report(tmp_path, stage="panel", message="boom")
     log = ImportIssueLog()

@@ -8,7 +8,7 @@ when controlled seating rotates a model through different seats.
 
 This is the single source of truth for ``player_type``: the same map feeds
 ``panel_data``, ``turn_data`` (broadcast per (game, player)), and
-``model_token_usage`` — replacing the old load-time ``(condition, player_id)``
+``model_token_usage``, replacing the old load-time ``(condition, player_id)``
 seat merge, which survives only as a fallback for legacy games with no metadata.
 """
 

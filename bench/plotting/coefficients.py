@@ -84,7 +84,7 @@ def deviation_coefficients(model, reference_type):
 
     Uses a Treatment-coded OLS model and linear contrasts to get proper CIs/p-values
     for every player type (including the reference). The returned effects are
-    deviations from the grand mean — not relative to the reference category.
+    deviations from the grand mean, not from the reference category.
     """
     params = model.params
     pt_vars = [c for c in params.index if 'player_type' in c]

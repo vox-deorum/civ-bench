@@ -52,7 +52,7 @@ def test_read_problem_game_ids_returns_game_id_set(tmp_path):
 def test_read_problem_game_ids_tolerates_garbage(tmp_path):
     report = tmp_path / "import_issues.csv"
     report.write_bytes(b"\x00\x01 not,a,valid\ncsv at all")
-    # A corrupt report must not abort analyses — just yields nothing.
+    # A corrupt report must not abort analyses; it just yields nothing.
     assert isinstance(read_problem_game_ids(str(report)), set)
 
 

@@ -2,7 +2,7 @@
 (ported from ``shared/regression_utilities.py``).
 
 Imported by ``performance.score_ratio``, ``ratings.matchups``, and
-``adjust/strength.py``. Pulls statsmodels — NOT on the dry-run path.
+``adjust/strength.py``. Pulls statsmodels, NOT on the dry-run path.
 """
 
 from __future__ import annotations

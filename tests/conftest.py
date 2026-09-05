@@ -2,7 +2,7 @@
 
 Tests live at ``civ-bench/tests/`` and run with ``pytest`` from the repo root
 (``pip install -e ".[test]"`` first). They exercise the stage-0 scaffold: config
-load/validation, the DAG, and the orthodox player_type composition — no stage
+load/validation, the DAG, and the orthodox player_type composition; no stage
 execution and no machine-specific data roots.
 
 The core config fixtures build a **synthetic** run-spec in-process
@@ -41,7 +41,7 @@ def _make_dev_spec() -> dict:
     The mutation tests in ``test_config.py`` index into this by position and id, so
     the shape is load-bearing: 3 estimators (``score``, ``attention``, ``xgboost``)
     in order, one ``strength`` adjust stage, and 17 analyses in the dev order
-    (``bt_main`` … ``explore_token_costs``). ``runs_dir`` is a neutral placeholder —
+    (``bt_main`` … ``explore_token_costs``). ``runs_dir`` is a neutral placeholder:
     ``load_config`` never touches the filesystem there.
     """
     return {

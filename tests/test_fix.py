@@ -1,4 +1,4 @@
-"""``civ-bench fix`` — best-effort recovery of malformed game SQLite DBs.
+"""``civ-bench fix``: best-effort recovery of malformed game SQLite DBs.
 
 Covers the recovery core (:func:`repair_database`) across its layered strategies, the
 orchestrator (:func:`run_fix`) including the atomic original→``.bak`` swap and its
@@ -43,7 +43,7 @@ def _make_db(path: Path, n_rows: int = 50, with_index: bool = True, wide: bool =
 def _make_corrupt_db(path: Path, n_rows: int = 40) -> None:
     """Create a DB whose index points at a bogus rootpage → fails quick_check.
 
-    The table data is intact, so recovery rebuilds the index clean — a faithful stand-in
+    The table data is intact, so recovery rebuilds the index clean: a faithful stand-in
     for the real "malformed disk image" games (whose corruption is index-tree damage).
     """
     _make_db(path, n_rows=n_rows, with_index=True)
@@ -140,7 +140,7 @@ def test_repair_tolerant_rebuild_recovers_everything(monkeypatch, tmp_path):
 
 def test_repair_rowid_range_scan_path(monkeypatch, tmp_path):
     # Force iterdump off and make the bulk fast-path raise, so _copy_table falls into
-    # the rowid range walk — which must still recover every row on a healthy DB.
+    # the rowid range walk, which must still recover every row on a healthy DB.
     import bench.fix.repair as repair_mod
 
     src = tmp_path / "g.db"
@@ -234,8 +234,8 @@ def test_run_fix_repairs_and_swaps(tmp_path):
 
 
 def test_run_fix_healthy_db_is_left_untouched(tmp_path):
-    # A flagged game whose DB is actually fine: examined, found healthy, left as-is —
-    # no rewrite, no backup ("if nothing changed, delete the bak").
+    # A flagged game whose DB is actually fine: examined, found healthy, left as-is.
+    # No rewrite, no backup ("if nothing changed, delete the bak").
     runs = tmp_path / "runs"
     db = runs / "exp" / "abc_111.db"
     _make_db(db, n_rows=20)
@@ -441,7 +441,7 @@ def test_run_fix_swap_failure_restores_original(monkeypatch, tmp_path):
 def test_repair_recovers_tail_when_bounds_unreadable(monkeypatch, tmp_path):
     # Regression: a corrupt page that blocks the bulk copy AND hides MIN/MAX(rowid) used
     # to fall back to a plain scan that truncated the table's tail (losing everything past
-    # the bad page). The rowid walk must now recover the whole table regardless — a rowid
+    # the bad page). The rowid walk must now recover the whole table regardless: a rowid
     # table can always be range-walked; unreadable bounds are no reason to drop the tail.
     import bench.fix.repair as repair_mod
 
@@ -467,9 +467,9 @@ def test_repair_recovers_tail_when_bounds_unreadable(monkeypatch, tmp_path):
 
 def test_copy_by_rowid_gives_up_after_skip_limit(monkeypatch):
     # Safety guard: if the rowid b-tree is unreadable (every window errors), the walk must
-    # not grind toward the open upper bound — it stops after _SKIP_LIMIT consecutive
+    # not grind toward the open upper bound; it stops after _SKIP_LIMIT consecutive
     # unreadable rowids. Because no real rows ever followed those skips, they are *not*
-    # reported as lost rows (they were end-probing, not data) — only `truncated` is set.
+    # reported as lost rows (they were end-probing, not data); only `truncated` is set.
     import bench.fix.repair as repair_mod
 
     monkeypatch.setattr(repair_mod, "_SKIP_LIMIT", 5)

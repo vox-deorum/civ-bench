@@ -1,4 +1,4 @@
-"""Stage 3 — adjust (strength panel) tests.
+"""Stage 3: adjust (strength panel) tests.
 
 Exercise the strength derivation on tiny **synthetic** fixtures (no machine data
 roots, per AGENTS.md): the legacy parity math (weighted → relative → enforce →
@@ -299,7 +299,7 @@ def test_implicit_recovers_baseline_and_uplift(tmp_path, catalog):
     assert np.allclose(inv_logit(diff), p["adjusted_strength"].to_numpy(), atol=1e-9)
 
     # cell_logit_advantage persists the EXACT pre-normalization delta (logit_strength
-    # - cell_baseline) — not a re-logit of the clipped adjusted_strength.
+    # - cell_baseline), not a re-logit of the clipped adjusted_strength.
     assert np.allclose(p["cell_logit_advantage"].to_numpy(), diff, atol=1e-12)
     assert np.allclose(llm["cell_logit_advantage"], DELTA, atol=1e-3)        # LLM uplift
     assert np.allclose(vanilla["cell_logit_advantage"], 0.0, atol=1e-3)      # baseline ≈ 0
@@ -307,7 +307,7 @@ def test_implicit_recovers_baseline_and_uplift(tmp_path, catalog):
 
 def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, catalog):
     # seed 1 has complete rotations (every cell gets a Vanilla observation); seed 2
-    # has only rotation 0, so cell (2, 0) — the LLM's own seat — has NO Vanilla
+    # has only rotation 0, so cell (2, 0), the LLM's own seat, has NO Vanilla
     # baseline. Implicit must NOT abort: it adjusts every complete cell via the
     # start-cell baseline and falls the incomplete cell back to the civ path (WARN).
     games = (
@@ -324,7 +324,7 @@ def test_implicit_partial_coverage_computes_complete_falls_back_rest(tmp_path, c
     assert np.allclose(llm_s1["adjusted_strength"], inv_logit(DELTA), atol=1e-3)
     assert llm_s1["cell_logit_advantage"].notna().all()  # cell rows carry an advantage
 
-    # the incomplete cell (2, 0) falls back (no own Vanilla baseline) — not 'cell'
+    # the incomplete cell (2, 0) falls back (no own Vanilla baseline), not 'cell'
     fallback = p[(p.player_type != "Vanilla") & (p.seed == 2) & (p.player_id == 0)]
     assert len(fallback) == 1 and (fallback["adjust_method"] == "civ").all()
     assert fallback["cell_logit_advantage"].isna().all()  # non-cell rows have no advantage

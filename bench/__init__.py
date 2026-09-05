@@ -1,4 +1,4 @@
-"""civ-bench — a modular, JSON-configurable benchmark harness for LLM strategists
+"""civ-bench: a modular, JSON-configurable benchmark harness for LLM strategists
 in Civilization V: Vox Populi (via the Vox Deorum platform).
 
 Keep this module import light: it must not pull in heavy analysis dependencies

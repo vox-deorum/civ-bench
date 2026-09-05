@@ -24,7 +24,7 @@ def get_player_color(catalog: Catalog, player_type: str) -> str:
     types. When a ``player_type_labels`` suffix leaves extra trailing text the
     parse doesn't recognize (e.g. ``GPT-OSS-120B-Simple-Per-5`` from a
     ``"*-per-5": "-Per-5"`` label), fall back generically to the longest known
-    model id that prefixes the player_type — so any rotation/tweak variant shares
+    model id that prefixes the player_type, so any rotation/tweak variant shares
     its base model's color instead of falling through to black.
     """
     colors = catalog.strategist_model_colors()

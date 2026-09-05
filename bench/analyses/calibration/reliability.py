@@ -1,9 +1,9 @@
-"""``calibration.reliability`` — reliability diagram + ECE per estimator.
+"""``calibration.reliability``: reliability diagram + ECE per estimator.
 
 Ported from ``predict/visualize_calibration.ipynb``: bin predictions into
 ``n_bins`` equal-width probability bins, and per bin report mean predicted
 probability vs observed win frequency (and the bin count). Adds the expected
-calibration error (ECE) as a scalar summary — the count-weighted mean
+calibration error (ECE) as a scalar summary: the count-weighted mean
 |mean_pred − mean_true| over occupied bins.
 """
 

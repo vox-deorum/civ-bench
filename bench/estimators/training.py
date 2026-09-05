@@ -8,16 +8,16 @@ and is driven by the estimator config block.
 
 Two entry points mirror the estimator ``predict`` axis (benchmark.md §4.2):
 
-- :func:`run_full_train` (``predict: in_sample``) — fit one model on the
+- :func:`run_full_train` (``predict: in_sample``): fit one model on the
   ``train_subset`` rows, predict on the ``predict_subset`` rows, optionally save
   the fitted model dir (a later run's ``pretrained.model_dir`` points here).
-- :func:`run_cross_val` (``predict: cross_val``) — K held-out folds over the
+- :func:`run_cross_val` (``predict: cross_val``): K held-out folds over the
   data, emitting **honest out-of-fold** predictions (each row scored by a model
   that never trained on its game) plus an aggregated feature-importance table.
 
 Determinism: the single ``random_state`` (threaded from the top-level ``seed``)
 seeds the GroupKFold split order, the resamplers (SMOTE/SMOTENC/RandomUnderSampler),
-xgboost, and — as of the fit-time ``_seed_torch`` — each torch model's global RNG
+xgboost, and (as of the fit-time ``_seed_torch``) each torch model's global RNG
 (weight init, dropout, the ``randperm`` shuffle). Selected feature order is
 deterministic (first-occurrence dedupe, no set iteration). Together these make an
 identical config re-run **byte-stable on the same machine and device**; results are
@@ -49,7 +49,7 @@ def apply_resampling(
 ) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
     """Resample training rows to address class imbalance (imbalanced-learn).
 
-    Only ever applied to *training* data — and only after ID columns have been
+    Only ever applied to *training* data, and only after ID columns have been
     stripped, so ``X`` is a purely numeric feature matrix (SMOTE would crash on a
     string ``game_id``/``experiment`` column). ``None`` returns the inputs untouched.
 
@@ -115,7 +115,7 @@ def apply_resampling(
 def get_kfold_splits(
     df: pd.DataFrame, n_splits: int = 5, random_state: int = 42
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """Game-grouped k-fold splits — whole games stay together in train or val.
+    """Game-grouped k-fold splits: whole games stay together in train or val.
 
     ``GroupKFold`` is deterministic given the row order, so threading the same
     frame yields identical folds run-to-run (``random_state`` is accepted for a
@@ -273,8 +273,8 @@ def run_cross_val(
 
     Each row is predicted exactly once, by the fold's held-out model. When
     ``train_experiments`` is given, each fold's *training* indices are narrowed
-    to those experiments (the validation/OOF coverage stays the whole frame) —
-    the source's ``train_non_llm_only`` generalization setup. Feature importance
+    to those experiments (the validation/OOF coverage stays the whole frame);
+    this is the source's ``train_non_llm_only`` generalization setup. Feature importance
     is aggregated across folds when the model supports it.
     """
     X, y = prepare_features(df, use_variant_columns=use_variants)

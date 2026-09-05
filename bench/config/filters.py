@@ -30,7 +30,7 @@ def validate_filter_object(obj: dict, where: str) -> None:
 
     # The membership fields must be lists of strings. A scalar (e.g. ``5`` or
     # ``"solo"``) would be silently wrapped by ``_as_list`` at apply time and
-    # match nothing / the wrong thing, dropping every row without an error —
+    # match nothing / the wrong thing, dropping every row without an error,
     # exactly the kind of silent no-op the fail-loud invariant forbids (§3.1).
     for key in ("experiments", "exclude_experiments", "players"):
         if key in obj and obj[key] is not None:

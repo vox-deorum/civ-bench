@@ -1,7 +1,7 @@
 {
   "name": "staff-standard-2026-full",
   "friendly_name": "Staff benchmark 2026, standard 8-seat map",
-  "description": "TEMPLATE (tracked example — copy to a local, gitignored configs/benchmark*.json to run). Kitchen-sink run: the lean CORE (see benchmark.template.json) plus every OPTIONAL module wired but `\"enabled\": false`, so opting in is a one-flag edit. Also demonstrates the folded params (bootstrap CIs on bt_main; strategy grouping on bt_strategy) and a pre-trained estimator. behavior.* is deferred and intentionally absent.",
+  "description": "TEMPLATE (tracked example: copy to a local, gitignored configs/benchmark*.json to run). Kitchen-sink run: the lean CORE (see benchmark.template.json) plus every OPTIONAL module wired but `\"enabled\": false`, so opting in is a one-flag edit. Also demonstrates the folded params (bootstrap CIs on bt_main; strategy grouping on bt_strategy) and a pre-trained estimator. behavior.* is deferred and intentionally absent.",
   "seed": 42,
 
   "filters": {

@@ -2,7 +2,7 @@
 
 The old repo's ``_find_rscript()`` hardcoded a Windows ``C:``/``D:\\Program Files\\R``
 scan that silently fails on Linux/macOS (plans/stage0.md, D5). Here we locate
-``Rscript`` via the ``PATH`` and an explicit ``CIV_BENCH_RSCRIPT`` override only —
+``Rscript`` via the ``PATH`` and an explicit ``CIV_BENCH_RSCRIPT`` override only,
 no platform-specific guesses. Used by the R-backed ratings analyses.
 """
 
@@ -24,7 +24,7 @@ def find_rscript(required: bool = False) -> Optional[str]:
       2. ``Rscript`` on the ``PATH``.
 
     With ``required=True``, a missing ``Rscript`` raises ``RuntimeError`` with an
-    install hint (no graceful degradation — see AGENTS.md §Dependencies).
+    install hint (no graceful degradation; see AGENTS.md §Dependencies).
     """
     override = os.environ.get(RSCRIPT_ENV)
     if override:

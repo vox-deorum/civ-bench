@@ -49,7 +49,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_analysis_ref(stage, analysis_id, analysis_ids, enabled_ids)
 
     # Strength tables are named by the *id* of any enabled strength-module
-    # adjust stage (the id doubles as the table name — benchmark.md §5), not
+    # adjust stage (the id doubles as the table name, benchmark.md §5), not
     # the literal string "strength". A ratings analysis must reference one of
     # these ids via uses.tables.
     strength_table_ids = {

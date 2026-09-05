@@ -3,8 +3,8 @@
 A :class:`ReportDocument` is the intermediate representation a *template* builds
 from the produced :class:`~bench.analyses.base.AnalysisResult` manifests, and the
 md/html renderers consume. Keeping a structured model (rather than templating
-strings directly) lets every output format render the *same* document faithfully
-— a markdown table and an HTML ``<table>`` come from one :class:`Table`, not two
+strings directly) lets every output format render the *same* document faithfully:
+a markdown table and an HTML ``<table>`` come from one :class:`Table`, not two
 hand-written variants.
 
 Nothing here imports matplotlib or reads data; figures are referenced by the
@@ -24,7 +24,7 @@ class Figure:
     """A rendered figure, referenced by its report-relative path."""
 
     caption: str
-    rel_path: str  # e.g. "assets/bt_main/ratings.png" — relative to the report dir
+    rel_path: str  # e.g. "assets/bt_main/ratings.png", relative to the report dir
 
 
 @dataclass
@@ -47,7 +47,7 @@ class Download:
     """A non-tabular, non-figure file artifact offered as a download link."""
 
     label: str
-    rel_path: str  # e.g. "assets/<id>/seating/<exp>.seating.json" — relative to the report dir
+    rel_path: str  # e.g. "assets/<id>/seating/<exp>.seating.json", report-relative
 
 
 @dataclass

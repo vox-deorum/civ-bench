@@ -4,9 +4,9 @@ Both renderers walk the same document model so the two formats stay faithful to
 each other: a :class:`Table` becomes a GitHub-flavoured pipe table in markdown and
 a ``<table>`` in HTML from the *same* DataFrame, never two hand-written variants.
 Every cell is formatted to a display string once (:func:`_display_frame`) before
-either renderer touches it, so the two formats show byte-identical content —
+either renderer touches it, so the two formats show byte-identical content;
 tabulate and pandas otherwise diverge on float precision and missing-value text.
-Output is deterministic — no timestamps — so a re-render of unchanged artifacts is
+Output is deterministic (no timestamps), so a re-render of unchanged artifacts is
 byte-stable (AGENTS.md determinism invariant).
 """
 
@@ -200,12 +200,12 @@ def _format_cell(value) -> str:
     """One display string per cell, shared by both renderers.
 
     Missing values render as ``""`` (never the literal ``nan`` tabulate prints for a
-    float NaN in an object column), and floats use ``g`` — matching tabulate's own
+    float NaN in an object column), and floats use ``g``, matching tabulate's own
     default so the markdown output is unchanged while the HTML side stops diverging
     (pandas' ``to_html`` otherwise uses full-precision/scientific formatting).
     """
     if isinstance(value, float):
-        if value != value:  # NaN — the only value not equal to itself
+        if value != value:  # NaN: the only value not equal to itself
             return ""
         return f"{value:g}"
     if value is None:
@@ -235,7 +235,7 @@ def _render_table_md(table: Table, lines: list[str]) -> None:
         )
     if table.rel_csv:
         link = f"[full CSV]({table.rel_csv})"
-        note.append(link if not note else f"— {link}")
+        note.append(link if not note else f"; {link}")
     if note:
         lines.append(f"_{' '.join(note)}._")
         lines.append("")
@@ -514,7 +514,7 @@ def _render_table_html(table: Table, parts: list[str]) -> None:
         note.append(f"Showing {table.n_shown_rows} of {table.n_total_rows} rows")
     if table.rel_csv:
         link = f'<a href="{_html.escape(table.rel_csv)}">full CSV</a>'
-        note.append(link if not note else f"— {link}")
+        note.append(link if not note else f"; {link}")
     if note:
         parts.append(f'<p class="caption">{" ".join(note)}</p>')
 
@@ -534,7 +534,7 @@ def _md_inline_to_html(text: str) -> str:
     while i < n:
         if escaped[i] == "`":
             close = escaped.find("`", i + 1)
-            if close == -1:  # unbalanced tick — leave it (and the rest) literal
+            if close == -1:  # unbalanced tick: leave it (and the rest) literal
                 out.append(_md_bold(escaped[i:]))
                 break
             out.append(f"<code>{escaped[i + 1 : close]}</code>")

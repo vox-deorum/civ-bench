@@ -6,12 +6,12 @@ existing CSV → prune rows whose DB is gone → dedupe → skip already-exporte
 extract the rest → write or append). Consolidating them here removes that
 duplication and fixes two latent bugs that lived in every copy:
 
-* **A** — a failed ``write_csv_file`` / ``append_csv_file`` (both return ``False`` on
+* **A**: a failed ``write_csv_file`` / ``append_csv_file`` (both return ``False`` on
   error) was ignored, so a full disk / permission error silently dropped rows while
   the run still reported success. It now raises :class:`ExtractError`.
-* **B** — a structure-mismatch printed "Discarding existing … data" but then only
+* **B**: a structure-mismatch printed "Discarding existing … data" but then only
   rewrote when there were new rows or prunes, so a mismatch with zero new rows left
-  the old (wrong-schema) file untouched — the message lied. A normal run now always
+  the old (wrong-schema) file untouched; the message lied. A normal run now always
   full-rewrites on mismatch (so the file matches the current schema); a prune-only
   run (which inspects no DBs and would never rewrite) skips the "Discarding" message
   and instead warns that the file was left untouched and how to rebuild it.
@@ -62,7 +62,7 @@ def run_table_export(
     if not structure_matches:
         if prune_only:
             # Prune-only inspects no DBs and never rewrites; the honest thing is to
-            # leave the mismatched file untouched and say so (Bug B) — not print
+            # leave the mismatched file untouched and say so (Bug B), not print
             # "Discarding" and then silently keep the old file.
             print(
                 f"Existing {noun} file has an out-of-date structure; prune-only left "

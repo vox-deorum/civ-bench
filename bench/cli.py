@@ -98,7 +98,7 @@ def _report_extract_issues(result) -> None:
     """Print the one-line malformed-DB issue count to stderr (no-op when clean)."""
     if not result.skipped and result.issues:
         print(
-            f"civ-bench: extract — {len(result.issues)} problem database(s) "
+            f"civ-bench: extract: {len(result.issues)} problem database(s) "
             f"recorded in {result.issues_path}",
             file=sys.stderr,
         )
@@ -110,13 +110,13 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
     state. Returns the final :class:`ExtractResult` (the re-import's, when one ran)."""
     result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
     if result.skipped:
-        print(f"civ-bench: extract skipped — {result.reason}")
+        print(f"civ-bench: extract skipped: {result.reason}")
     _report_extract_issues(result)
 
     # Only fix when this run FRESHLY recorded issues. A skipped (fresh-outputs) run and
     # a prune-only run evaluate nothing, so they never have fresh issues; carried-forward
     # (already-unrecoverable) games from a prior run must not be re-attempted every
-    # invocation — pass --force-rebuild to re-examine (and re-fix) a stale ledger.
+    # invocation, so pass --force-rebuild to re-examine (and re-fix) a stale ledger.
     if not auto_fix or result.skipped or not result.issues.has_fresh_issues:
         return result
 
@@ -126,7 +126,7 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
         # Repair only the games that failed this run, not the whole carried-forward ledger.
         fix_result = run_fix(cfg, only_game_ids=result.issues.fresh_game_ids)  # prints its own summary
     except FixError as exc:  # a fix failure must never abort the pipeline
-        print(f"civ-bench: auto-fix skipped — {exc}", file=sys.stderr)
+        print(f"civ-bench: auto-fix skipped: {exc}", file=sys.stderr)
         return result
     if not fix_result.repaired:  # nothing repairable → the re-import would be a no-op
         return result
@@ -217,7 +217,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fi
                 f"{result.table_path} ({result.n_rows} rows)"
             )
             for warning in result.warnings:
-                print(f"civ-bench: adjust '{result.id}' WARN — {warning}", file=sys.stderr)
+                print(f"civ-bench: adjust '{result.id}' WARN: {warning}", file=sys.stderr)
         elif node.kind == "analyses":
             from .analyses import run_analysis  # lazy: pulls matplotlib/statsmodels/Rscript
 
@@ -241,7 +241,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fi
             for path in result.written:
                 print(f"           wrote {path}")
             for warning in result.warnings:
-                print(f"civ-bench: report WARN — {warning}", file=sys.stderr)
+                print(f"civ-bench: report WARN: {warning}", file=sys.stderr)
 
     if skipped:
         kinds = ", ".join(sorted({k for _, k in skipped}))
@@ -322,7 +322,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for path in result.written:
             print(f"           wrote {path}")
         for warning in result.warnings:
-            print(f"civ-bench: report WARN — {warning}", file=sys.stderr)
+            print(f"civ-bench: report WARN: {warning}", file=sys.stderr)
         return 0
 
     # `run`: execute the implemented prefix of the resolved DAG.
@@ -340,7 +340,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     except NotImplementedError as exc:
         print(f"civ-bench: {exc}", file=sys.stderr)
         return 3
-    except Exception as exc:  # estimator / adjust / analysis / report / load failures — fail loud
+    except Exception as exc:  # estimator / adjust / analysis / report / load failures: fail loud
         from .adjust import AdjustError
         from .analyses import AnalysisError
         from .estimators import EstimatorError

@@ -1,4 +1,4 @@
-"""``calibration.loss_by_progress`` — prediction loss binned by game progress.
+"""``calibration.loss_by_progress``: prediction loss binned by game progress.
 
 Ported from ``predict/visualize_loss_by_progress.ipynb`` +
 ``models/model_evaluator.py``: bin predictions by ``turn_progress`` into

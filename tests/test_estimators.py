@@ -1,9 +1,9 @@
-"""Stage 2 — estimators (load-only) tests.
+"""Stage 2: estimators (load-only) tests.
 
 Exercise the registry's ``load_model`` dispatch, the feature pipeline, and the
 ``run_estimator`` load→infer→write path end-to-end on a tiny **synthetic** turns
 fixture (no machine-specific data roots, per AGENTS.md). The pre-trained model
-used throughout is :class:`ScorePredictor` — a training-free heuristic we can
+used throughout is :class:`ScorePredictor`, a training-free heuristic we can
 construct, save, and reload deterministically, so a saved-model re-inference must
 reproduce a direct in-memory inference exactly (the stage-2 verification, in
 miniature).
@@ -506,11 +506,11 @@ def test_explicit_params_override_load_params(turns_csv, tmp_path, write_spec):
     assert load_model(save_model).exponent == 5.0
 
 
-# ── determinism helpers (WS1/WS6, pure-unit — no model fits) ─────────────────
+# ── determinism helpers (WS1/WS6, pure-unit: no model fits) ─────────────────
 def test_expand_wildcards_is_order_preserving_and_deduped():
     m = _DummyPredictor()
     # literals keep declared order; a wildcard expands in data-column order; the
-    # repeated literal is de-duplicated (first occurrence wins) — a list, not a set.
+    # repeated literal is de-duplicated (first occurrence wins): a list, not a set.
     out = m._expand_wildcards(
         ["z_lit", "*_share", "z_lit"], ["b_share", "a_share", "c_other"]
     )

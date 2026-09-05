@@ -1,17 +1,17 @@
 """Optuna hyperparameter tuning for victory-prediction estimators (stage 6).
 
-Ported from ``../vox-deorum-analysis/models/tune_model.py`` — the search spaces,
-the feature-variant reconstruction, and the CV objective — folded behind the
+Ported from ``../vox-deorum-analysis/models/tune_model.py`` (the search spaces,
+the feature-variant reconstruction, and the CV objective), folded behind the
 estimator ``tune`` config block (benchmark.md §4.3). No separate CLI / Colab
 notebook (``tune_colab.ipynb`` is obsolete): a run sets ``tune`` and the runner
 calls :func:`run_tune`, or skips the search entirely via ``load_params``.
 
 ``tune.search`` selects what the study optimizes:
 
-- ``"hyperparameters"`` — model hyperparameters only (the model's coded
+- ``"hyperparameters"``: model hyperparameters only (the model's coded
   ``DEFAULT_FEATURES`` are used). This is the template default.
-- ``"features"`` — feature-variant selection only (model default hyperparams).
-- ``"both"`` — both simultaneously.
+- ``"features"``: feature-variant selection only (model default hyperparams).
+- ``"both"``: both simultaneously.
 
 The study optimizes a **single scalar** ``objective`` (``brier_score`` /
 ``log_loss`` minimized; ``roc_auc`` / ``balanced_accuracy`` maximized) with a
@@ -322,7 +322,7 @@ def load_best_params(path: str, model_name: str) -> Dict:
     """Load a saved ``best_params.json`` and convert it to model kwargs.
 
     Accepts the file :func:`run_tune` writes (``{"best_params": {...}}``) or a
-    bare raw-params object. This is the *pre-trained hyperparameter set* path —
+    bare raw-params object. This is the *pre-trained hyperparameter set* path:
     no search runs.
     """
     with open(path, "r", encoding="utf-8") as f:

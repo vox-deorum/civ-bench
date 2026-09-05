@@ -58,8 +58,8 @@ class BasePredictor(ABC):
 
         Literal patterns keep their declared order; wildcard patterns expand in
         ``available_features`` (data-column) order. First occurrence wins. Returning
-        a list rather than a set is what makes the selected feature order — and hence
-        the fitted column order and predictions — byte-stable across runs; a set's
+        a list rather than a set is what makes the selected feature order (and hence
+        the fitted column order and predictions) byte-stable across runs; a set's
         iteration order over strings is hash-randomized (PYTHONHASHSEED).
         """
         matched: List[str] = []

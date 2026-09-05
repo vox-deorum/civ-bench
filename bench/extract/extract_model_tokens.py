@@ -2,8 +2,8 @@
 
 Departure from the source (``plans/stage1.md``): ``player_type`` is no longer
 re-derived from experiment-config JSON. It is the **orthodox identity** composed
-from the game DB's ``GameMetadata`` (``model-{id}`` / ``strategist-{id}``, §3.3) —
-the same single source of truth that feeds ``panel_data`` — and looked up by
+from the game DB's ``GameMetadata`` (``model-{id}`` / ``strategist-{id}``, §3.3),
+the same single source of truth that feeds ``panel_data``, and looked up by
 ``player_id`` for each player-trace DB. Model-name normalization routes through the
 supplied :class:`Catalog` instead of the old ``shared.model_catalog`` globals.
 """
@@ -385,7 +385,7 @@ def _game_player_types(game_db_path: str, catalog: Optional[Catalog], issues=Non
     """Compose ``({player_id: player_type}, metadata)`` from the game DB (§3.3).
 
     Token counts come from the separate ``*-player-*.db`` trace files, so a corrupt
-    game DB only costs us the ``player_type`` labels — record the issue and degrade
+    game DB only costs us the ``player_type`` labels: record the issue and degrade
     to ``({}, {})`` (labels become ``N/A``) rather than crashing or dropping tokens.
     The ``metadata`` is returned so a *trace* failure on an otherwise-readable game
     can still report the game's real seed/rotation instead of "unknown".
@@ -404,7 +404,7 @@ def _game_player_types(game_db_path: str, catalog: Optional[Catalog], issues=Non
         seeding = extract_seeding_fields(metadata, where=f"game {game_id}")
         identities = compose_identities(metadata, major_players, experiment, catalog, seeding)
     except sqlite3.DatabaseError as exc:
-        # Malformed/locked image — record and degrade labels to N/A. A
+        # Malformed/locked image: record and degrade labels to N/A. A
         # controlled-seed mismatch (ExtractError) stays a hard abort.
         record_db_failure(issues, stage="tokens", db_path=game_db_path, exc=exc)
         return {}, {}

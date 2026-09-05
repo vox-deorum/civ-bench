@@ -1,4 +1,4 @@
-"""Stage 1 — extract: raw game SQLite DBs in ``runs/`` → canonical CSVs.
+"""Stage 1 (extract): raw game SQLite DBs in ``runs/`` → canonical CSVs.
 
 Public surface: the :func:`run_extract` orchestrator (config-driven), the
 controlled-design helpers (:func:`extract_seeding_fields`, :class:`SeedingInfo`),

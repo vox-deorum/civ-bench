@@ -2,7 +2,7 @@
 
 Every validation failure raises ``ConfigError`` with a precise, human-readable
 message (path into the run-spec + what is wrong). Per invariant 1 (config over
-code), unknown keys and missing required fields are hard errors — never silently
+code), unknown keys and missing required fields are hard errors, never silently
 ignored.
 """
 

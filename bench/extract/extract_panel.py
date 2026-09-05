@@ -1,7 +1,7 @@
 """Per-player-per-game ``panel_data`` extraction (ported from the analysis repo).
 
 Departure from the source (``plans/stage1.md``): each row now carries the
-**orthodox identity** composed at extract — ``player_type`` (benchmark.md §3.3),
+**orthodox identity** composed at extract, ``player_type`` (benchmark.md §3.3),
 plus the raw ``model`` / ``strategist`` it was composed from and the controlled
 ``config_slot``. The rest of the per-player outcome/strategy/policy extraction is
 ported verbatim.
@@ -314,7 +314,7 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
         """, (player_id,))
         all_strategy_changes = cursor.fetchall()
 
-        # strategy_changes: turns with an *actual* flavor-number change — i.e. a
+        # strategy_changes: turns with an *actual* flavor-number change, i.e. a
         # decision that touched a field other than the rationale (excludes both
         # the status-quo '["Rationale"]' and the truly empty '[]'/null rows).
         cursor.execute("""
@@ -416,7 +416,7 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
             except Exception as exc:
                 print(f"  ERROR: Error processing policy branch for player {player_id}: {exc}")
     except sqlite3.DatabaseError:
-        # A corrupt/locked image is a game-level fact, not a per-player one — let
+        # A corrupt/locked image is a game-level fact, not a per-player one: let
         # it bubble to the game handler so the whole game is recorded once and
         # skipped (rather than emitting an all-N/A row per player).
         raise
@@ -433,7 +433,7 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=N
     """Extract panel rows (one per major player) for a single game DB.
 
     A malformed/locked DB is recorded as a single :class:`ImportIssue` and the
-    game is skipped (returns ``[]``) — no all-N/A rows.
+    game is skipped (returns ``[]``); no all-N/A rows.
     """
     panel_rows = []
     conn, cursor = open_database_readonly(db_path)
@@ -503,7 +503,7 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=N
             row["player_type"] = identity.get("player_type")
             row["model"] = identity.get("model", "N/A")
             row["strategist"] = identity.get("strategist", "N/A")
-            # Non-treatment seats get the -1 sentinel, never the player_id — the
+            # Non-treatment seats get the -1 sentinel, never the player_id: the
             # identity always carries config_slot, so this default only guards a
             # truly identity-less row (and must still not resurrect seat=player_id).
             row["config_slot"] = identity.get("config_slot", -1)
@@ -523,12 +523,12 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=N
 
         return panel_rows
     except ExtractError:
-        # A controlled-seed mismatch (rule 14) is a hard policy abort — it must
+        # A controlled-seed mismatch (rule 14) is a hard policy abort: it must
         # propagate even on a panel-only run, never be swallowed into [].
         conn.close()
         raise
     except sqlite3.DatabaseError as exc:
-        # Malformed/locked image — record once and skip the game (no N/A rows).
+        # Malformed/locked image: record once and skip the game (no N/A rows).
         record_db_failure(issues, stage="panel", db_path=db_path, exc=exc, metadata=metadata)
         conn.close()
         return []

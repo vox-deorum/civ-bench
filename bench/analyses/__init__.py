@@ -1,4 +1,4 @@
-"""Analyses layer — the pluggable analysis modules (stage 4).
+"""Analyses layer: the pluggable analysis modules (stage 4).
 
 Each analysis is a self-contained unit behind the :class:`Analysis` interface; the
 JSON ``analyses[].module`` string selects it from :data:`ANALYSIS_REGISTRY`. A
@@ -7,7 +7,7 @@ module consumes its declared inputs via an :class:`AnalysisContext` and returns 
 runner persists the result under ``<root>/analyses/<id>/``.
 
 Pulls matplotlib/statsmodels (and, for ``ratings.*``, ``Rscript``) on import of
-:mod:`registry`/:mod:`runner`, so import those lazily from the CLI run path — never
+:mod:`registry`/:mod:`runner`, so import those lazily from the CLI run path, never
 from the import-light config/pipeline layers.
 """
 

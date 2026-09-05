@@ -1,4 +1,4 @@
-"""Adjust-module registry — name → adjust builder (currently only ``strength``).
+"""Adjust-module registry: name → adjust builder (currently only ``strength``).
 
 Mirrors ``bench/estimators/registry.py``: a JSON ``adjust[].module`` string selects
 a derived-table producer. The strength builder returns a :class:`StrengthArtifacts`

@@ -84,8 +84,8 @@ def is_decision_changes(changes_json) -> bool:
     """True when a ``Changes`` value records a strategist **decision**.
 
     The strategist writes a ``FlavorChanges``/``StrategyChanges`` row every turn it
-    acts, listing the fields it touched. A status-quo turn — the agent chose to
-    keep everything the same but still gave a rationale — is ``'["Rationale"]'``:
+    acts, listing the fields it touched. A status-quo turn (the agent chose to
+    keep everything the same but still gave a rationale) is ``'["Rationale"]'``:
     no flavor numbers changed, yet it *is* a decision. Only a truly empty row
     (``'[]'``/null) is not a decision (no agent output, e.g. carry-forward).
     """
@@ -138,7 +138,7 @@ def extract_seeding_fields(metadata: dict, where: str = "game") -> SeedingInfo:
     Policy (benchmark.md rule 14): Vox Deorum can record distinct sync/map seeds,
     but the controlled-design benchmark requires matched starts, so when both
     ``configuredSyncRandSeed`` and ``configuredMapRandSeed`` are present they must
-    be equal — a mismatch **aborts extraction**. The agreed value becomes ``seed``
+    be equal. A mismatch **aborts extraction**. The agreed value becomes ``seed``
     (``-1`` when uncontrolled or ``0`` = Civ "pick random"). ``seatingRotation`` is
     read straight through (``-1`` when absent); ``seatingMap`` inverts to per-player
     ``config_slot``.
@@ -327,7 +327,7 @@ def is_schema_mismatch(exc: Exception) -> bool:
     Used to keep table-tolerant helpers narrow: a missing ``FlavorChanges`` table
     or column on an older DB is fine to fall back on, but a corrupt/locked image
     (``database disk image is malformed``, ``file is not a database``, ``database
-    is locked``) must surface — never be silently turned into empty/default data.
+    is locked``) must surface, never be silently turned into empty/default data.
     """
     return isinstance(exc, sqlite3.OperationalError) and (
         "no such table" in str(exc) or "no such column" in str(exc)

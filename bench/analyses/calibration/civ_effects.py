@@ -1,4 +1,4 @@
-"""``calibration.civ_effects`` — per-civilization adjustment effects.
+"""``calibration.civ_effects``: per-civilization adjustment effects.
 
 Visualizes the adjust stage's ``civ_effects.csv`` (``civilization, civ_effect,
 n_rows``): a sorted horizontal lollipop of ``civ_effect`` on the **logit scale**,

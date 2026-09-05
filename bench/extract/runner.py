@@ -55,7 +55,7 @@ def run_extract(
 
     ``force_rebuild`` (e.g. the CLI ``--force-rebuild`` flag) overrides the
     config's ``data.extract.force_rebuild`` when either is set. ``prune_missing``
-    (``None`` = use the config value) lets a caller force a full re-import — the
+    (``None`` = use the config value) lets a caller force a full re-import: the
     auto-fix re-import passes ``prune_missing=False`` so it actually re-inspects the
     repaired DBs instead of only pruning.
     """
@@ -98,7 +98,7 @@ def run_extract(
     # Skip-if-newer: every output exists and is newer than every source DB.
     # The mtime check can only attest "outputs written after the DBs", not
     # "outputs cover every DB", so it is unsafe whenever max_dbs caps the run
-    # below the available DB count — those outputs are a subset and skipping
+    # below the available DB count: those outputs are a subset, and skipping
     # would strand the remaining games permanently. Only trust the skip when
     # the run would process every discovered DB. The issues report is one of the
     # outputs: a missing/stale report forces a (re)build so it is never stranded
@@ -118,7 +118,7 @@ def run_extract(
 
     # One issue log threaded through every exporter; malformed-DB failures are
     # recorded here (deduped by game_id). It is seeded from the existing report so
-    # the run reconciles rather than clobbers — an issue on a game skipped this run
+    # the run reconciles rather than clobbers: an issue on a game skipped this run
     # (e.g. it still produced some rows) is carried forward, not lost.
     issues = ImportIssueLog()
     issues.load(issues_path)
@@ -141,7 +141,7 @@ def run_extract(
     # Reconcile this run's findings with the prior report (carry forward issues for
     # games no stage re-examined; drop those whose DB is gone) and persist. This
     # also gives prune-only correct behavior: it inspects no DBs, so it simply drops
-    # issues for removed games and keeps the rest — never clobbering with a clean
+    # issues for removed games and keeps the rest, never clobbering with a clean
     # header. Fail loud if persistence fails (else the CLI would claim issues were
     # "recorded" when nothing was written).
     issues.reconcile(available_game_ids)

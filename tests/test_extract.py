@@ -1,4 +1,4 @@
-"""Stage 1 — extract: controlled-seed policy, orthodox identity, skip-if-newer.
+"""Stage 1 (extract): controlled-seed policy, orthodox identity, skip-if-newer.
 
 The heavy per-turn/panel SQL is ported verbatim from the analysis repo; these
 tests target the **new** behavior (benchmark.md §3, §3.3, rule 14): the seeding
@@ -334,7 +334,7 @@ def test_all_failed_trace_uses_non_null_model_label(tmp_path, catalog):
     assert rows[0]["failed_turn_count"] == 1
 
 
-# ── WS7: export driver — swallowed-failure + structure-mismatch bugs ──────────
+# ── WS7: export driver (swallowed-failure + structure-mismatch bugs) ──────────
 def test_export_append_failure_raises(tmp_path, monkeypatch):
     from bench.extract import export_common
 
@@ -453,7 +453,7 @@ def test_run_extract_carries_forward_prior_issue_for_unreexamined_stage(tmp_path
 
 def test_run_extract_prune_only_reconciles_report_without_clobber(tmp_path, catalog):
     # Prune-only inspects no DBs: it must keep issues for present games and drop
-    # those whose DB is gone — never overwrite the report with a clean header.
+    # those whose DB is gone, never overwriting the report with a clean header.
     runs = tmp_path / "runs"
     _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})
     issues = tmp_path / "import_issues.csv"

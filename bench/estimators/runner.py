@@ -1,11 +1,11 @@
-"""Estimator-stage orchestrator — load (stage 2) **and** train/tune (stage 6).
+"""Estimator-stage orchestrator: load (stage 2) **and** train/tune (stage 6).
 
 Resolves one estimator entry and emits its ``predictions.csv``:
 
-- ``fit:"pretrained"`` (stage 2) — load a saved ``model_dir`` and re-infer on the
+- ``fit:"pretrained"`` (stage 2): load a saved ``model_dir`` and re-infer on the
   canonical turns table. ``model_dir`` is an INPUT read as-authored (never
   re-rooted by ``output.suffix``).
-- ``fit:"train"`` (stage 6) — fit a fresh model on this run's data, optionally
+- ``fit:"train"`` (stage 6): fit a fresh model on this run's data, optionally
   preceded by an Optuna ``tune`` search. ``predict:"in_sample"`` deploys one
   model (saved to ``train.save_model``) and predicts ``predict_subset``;
   ``predict:"cross_val"`` emits honest out-of-fold predictions + an aggregated
@@ -157,7 +157,7 @@ def _run_pretrained(
         raise EstimatorError(
             f"estimator '{stage_id}': fit='pretrained' requires pretrained.model_dir."
         )
-    # model_dir is an INPUT read as-authored — NOT re-rooted by output.suffix.
+    # model_dir is an INPUT read as-authored, NOT re-rooted by output.suffix.
     model = load_model(model_dir)
     model_class = type(model)
 
@@ -205,7 +205,7 @@ def _resolve_hyperparams(
     if tune_block and tune_block.get("enabled", True):
         load_params = tune_block.get("load_params")
         if load_params:
-            # load_params is an INPUT (a pre-trained hyperparameter set) — as-authored.
+            # load_params is an INPUT (a pre-trained hyperparameter set), as-authored.
             model_kwargs.update(load_best_params(load_params, model_name))
         else:
             model_kwargs.update(run_tune(
@@ -270,7 +270,7 @@ def _run_train(cfg: RunConfig, stage_raw: dict, catalog: Catalog) -> EstimatorRe
             n_rows=_n_pred_rows(result.predictions), importance_path=importance_path,
         )
 
-    # predict: in_sample — fit one model on train_subset, predict predict_subset.
+    # predict: in_sample. Fit one model on train_subset, predict predict_subset.
     df_train = _narrow_to_subset(df, train_subset, catalog)
     if df_train.empty:
         raise EstimatorError(

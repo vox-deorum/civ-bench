@@ -2,7 +2,7 @@
 """Naive baseline: always predict the training-set win rate.
 
 Ported verbatim from ``../vox-deorum-analysis/models/models/naive_model.py``.
-The simplest possible baseline — a constant ``P(win) = positives / total``.
+The simplest possible baseline: a constant ``P(win) = positives / total``.
 """
 
 import json

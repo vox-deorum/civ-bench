@@ -1,4 +1,4 @@
-"""``civ-bench fix`` — best-effort recovery of malformed game SQLite DBs.
+"""``civ-bench fix``: best-effort recovery of malformed game SQLite DBs.
 
 Public surface: the :func:`run_fix` orchestrator (config-driven, reads the
 ``import_issues.csv`` ledger) and the testable :func:`repair_database` core.

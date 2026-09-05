@@ -3,7 +3,7 @@
 A ``group_by`` dimension beyond the base identity (e.g. ``strategy``) names a
 top-level ``groupings`` entry. Today only the ``argmax`` kind is implemented
 (benchmark.md §3.2): the label is the positional ``labels[argmax(columns)]`` per
-row — exactly the legacy ``strategy_ratings`` "dominant strategy" computation,
+row, exactly the legacy ``strategy_ratings`` "dominant strategy" computation,
 but config-driven (the columns/labels come from the run-spec, not hardcoded).
 """
 

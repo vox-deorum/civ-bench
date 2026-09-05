@@ -2,7 +2,7 @@
 """Score-based heuristic predictor: softmax of ``score_ratio`` within each group.
 
 Ported verbatim from ``../vox-deorum-analysis/models/models/score_model.py``.
-No training required — applies ``score_ratio**exponent`` normalized within each
+No training required: applies ``score_ratio**exponent`` normalized within each
 ``(game_id, turn)`` group.
 """
 

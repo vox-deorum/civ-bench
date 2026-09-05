@@ -8,7 +8,7 @@ Ported from ``../vox-deorum-analysis/models/models/base_torch_predictor.py``.
 - :class:`GroupedTorchPredictor`: the grouped ``(game_id, turn)`` softmax training
   loop + group-winrate inference shared by GroupedMLP / InteractionMLP / AttentionMLP.
 
-The torch/XLA imports are direct (no soft-fail) per AGENTS.md — torch is a
+The torch/XLA imports are direct (no soft-fail) per AGENTS.md: torch is a
 mandatory dependency. The ``torch_xla`` probe inside ``__init__`` is genuine TPU
 device detection, not a dependency gate.
 """
@@ -144,7 +144,7 @@ class BaseTorchPredictor(BasePredictor):
 
         ``_make_generator`` covers the explicit ``torch.randperm`` shuffle, but
         weight init (``nn.Linear`` etc.) and dropout draw from the process-global
-        RNG — unseeded, they make every fit's predictions drift run-to-run despite
+        RNG; unseeded, they make every fit's predictions drift run-to-run despite
         the documented byte-stability guarantee. Seeding per fit (not once at
         import) keeps each CV fold reproducible independent of fold order. We do
         **not** enable ``torch.use_deterministic_algorithms`` (it can hard-error and

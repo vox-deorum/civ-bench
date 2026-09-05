@@ -2,7 +2,7 @@
 
 Consolidates ``bradley_terry.py`` + ``plackett_luce.py``: assign per-game slot
 ids, write the input CSV, call the bundled ``.R`` script via the cross-platform
-:func:`bench.rscript.find_rscript` (PATH / ``CIV_BENCH_RSCRIPT`` only — the old
+:func:`bench.rscript.find_rscript` (PATH / ``CIV_BENCH_RSCRIPT`` only; the old
 hardcoded ``C:``/``D:\\Program Files\\R`` scan is dropped), read the result, and
 add the Elo conversion (``1500 + 400*log10(worth)``).
 """

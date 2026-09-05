@@ -1,4 +1,4 @@
-"""``ratings.bradley_terry`` — Bradley-Terry MLE Elo (R ``BradleyTerry2``).
+"""``ratings.bradley_terry``: Bradley-Terry MLE Elo (R ``BradleyTerry2``).
 
 The ``weighted`` param toggles the score-margin weighting: ``true`` (default) uses
 the auto-detected median pairwise margin; ``false`` flattens the per-pair weights

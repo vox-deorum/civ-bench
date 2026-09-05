@@ -66,7 +66,7 @@ def _check_domain(value: Any, domain: set, where: str) -> None:
 
 
 def _require_stage_id(sid: Any, where: str) -> None:
-    """A stage id must be a non-empty string — it keys the DAG and (for adjust
+    """A stage id must be a non-empty string: it keys the DAG and (for adjust
     stages) doubles as a table name, and ``_topo_sort`` sorts ids alongside the
     reserved 'extract'/'report' sentinels, which a non-string would break."""
     if not isinstance(sid, str) or not sid.strip():
@@ -271,7 +271,7 @@ def _validate_estimator(entry: dict, idx: int, model_ids: set[str]) -> Stage:
     if features is not None:
         _require_mapping(features, f"{where}.features")
         _check_keys(features, S.FEATURES_KEYS, f"{where}.features")
-        # `include: null` (and `exclude: null`) mean "unset" — fall back to the
+        # `include: null` (and `exclude: null`) mean "unset"; fall back to the
         # model's coded DEFAULT_FEATURES (benchmark.md §4.5). Only a present,
         # non-null value must be a string list.
         for key in ("include", "exclude"):
@@ -346,7 +346,7 @@ def _validate_adjust(entry: dict, idx: int) -> Stage:
     # An adjust stage id doubles as the name of the strength table it emits
     # (benchmark.md §5). If it collided with a canonical table name, a ratings
     # analysis referencing that name would read the raw extract table while
-    # ``_check_ratings_strength_ref`` still counts it as satisfied — silently
+    # ``_check_ratings_strength_ref`` still counts it as satisfied, silently
     # rating the wrong data. Reject the collision outright.
     if sid in S.TABLE_NAMES:
         raise ConfigError(
