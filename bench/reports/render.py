@@ -14,8 +14,23 @@ from __future__ import annotations
 
 import html as _html
 
-from .controlled_seed import render_controlled_seed_site
+from .controlled_seed import (
+    CONTROLLED_SEED_DIR,
+    CONTROLLED_SEED_OVERVIEW,
+    chapter_seeds,
+    render_controlled_seed_site,
+)
 from .model import ReportDocument, Section, Table
+
+
+def _annex_group(doc: ReportDocument):
+    """The controlled-seed chapter group, or ``None`` when the report has none."""
+    if doc.controlled_seed is None:
+        return None
+    for group in doc.groups:
+        if group.key == CONTROLLED_SEED_DIR:
+            return group
+    return None
 
 
 def _slug(text: str) -> str:
@@ -307,6 +322,11 @@ def _family_filenames(doc: ReportDocument) -> dict[int, str]:
     used = {"report"}
     filenames: dict[int, str] = {}
     for group in doc.groups:
+        if doc.controlled_seed is not None and group.key == CONTROLLED_SEED_DIR:
+            # The chapter's page is the heatmap overview inside its own folder.
+            filenames[id(group)] = CONTROLLED_SEED_OVERVIEW
+            used.add(CONTROLLED_SEED_DIR)
+            continue
         base = _slug(group.key) or "family"
         candidate, index = base, 2
         while candidate in used:
@@ -322,23 +342,39 @@ def _render_navigation(
     anchors: dict,
     filenames: dict[int, str],
     active: str,
+    prefix: str = "",
 ) -> list[str]:
+    """The site sidebar. ``prefix`` rebases the links for pages rendered inside
+    a subfolder (the controlled-seed chapter)."""
+    annex = _annex_group(doc)
     parts = ['<aside class="sidebar">']
-    parts.append(f'<a class="site-title" href="report.html">{_html.escape(doc.title)}</a>')
+    parts.append(
+        f'<a class="site-title" href="{_html.escape(prefix)}report.html">'
+        f"{_html.escape(doc.title)}</a>"
+    )
     parts.append('<nav aria-label="Report navigation"><ul>')
     current = ' aria-current="page"' if active == "report" else ""
-    parts.append(f'<li><a href="report.html"{current}>Overview</a></li>')
+    parts.append(f'<li><a href="{_html.escape(prefix)}report.html"{current}>Overview</a></li>')
     for group in doc.groups:
         filename = filenames[id(group)]
         current = ' aria-current="page"' if active == group.key else ""
         parts.append(
-            f'<li><a href="{filename}"{current}>{_html.escape(group.title)}</a><ul>'
+            f'<li><a href="{_html.escape(prefix + filename)}"{current}>'
+            f"{_html.escape(group.title)}</a><ul>"
         )
-        for section in group.sections:
-            parts.append(
-                f'<li><a href="{filename}#{anchors[id(section)]}">'
-                f'{_html.escape(section.title)}</a></li>'
-            )
+        if group is annex:
+            # The chapter page is the section, so its sub-entries are the seeds.
+            for seed in chapter_seeds(doc.controlled_seed):
+                parts.append(
+                    f'<li><a href="{_html.escape(prefix + filename)}#seed-{seed}">'
+                    f"Seed {seed}</a></li>"
+                )
+        else:
+            for section in group.sections:
+                parts.append(
+                    f'<li><a href="{_html.escape(prefix + filename)}#{anchors[id(section)]}">'
+                    f"{_html.escape(section.title)}</a></li>"
+                )
         parts.append("</ul></li>")
     parts.append("</ul></nav></aside>")
     return parts
@@ -358,9 +394,11 @@ def _page_start(doc: ReportDocument, page_title: str) -> list[str]:
 
 def render_html_site(doc: ReportDocument) -> dict[str, str]:
     """Render the overview, one HTML page per represented analysis family, and
-    (when the document carries it) the controlled-seed heatmap annex."""
+    (when the document carries it) the controlled-seed chapter: its heatmap
+    overview plus one detail page per seed-player pair under ``controlled-seed/``."""
     anchors = _build_anchors(doc)
     filenames = _family_filenames(doc)
+    annex = _annex_group(doc)
     family_for = {
         id(section): group
         for group in doc.groups
@@ -380,17 +418,23 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     parts.append('<div class="overview-grid">')
     for section in doc.overview_sections:
         group = family_for[id(section)]
-        target = f"{filenames[id(group)]}#{anchors[id(section)]}"
+        if group is annex:
+            # The chapter page is the section's own page; no deep anchor exists.
+            target = filenames[id(group)]
+        else:
+            target = f"{filenames[id(group)]}#{anchors[id(section)]}"
         parts.append('<article class="overview-card">')
         parts.append(f'<p class="eyebrow">{_html.escape(group.title)}</p>')
         parts.append(f"<h2>{_html.escape(section.title)}</h2>")
         parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
-        parts.append(f'<p><a href="{target}">View details</a></p>')
+        parts.append(f'<p><a href="{_html.escape(target)}">View details</a></p>')
         parts.append("</article>")
     parts.append("</div></section></main></body></html>")
     pages["report.html"] = "\n".join(parts) + "\n"
 
     for group in doc.groups:
+        if group is annex:
+            continue  # the chapter's page is the heatmap overview, rendered below
         page_title = f"{group.title} | {doc.title}"
         parts = _page_start(doc, page_title)
         parts.extend(_render_navigation(doc, anchors, filenames, group.key))
@@ -404,7 +448,10 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append("</main></body></html>")
         pages[filenames[id(group)]] = "\n".join(parts) + "\n"
     if doc.controlled_seed is not None:
-        pages.update(render_controlled_seed_site(doc.controlled_seed))
+        navigation = _render_navigation(
+            doc, anchors, filenames, CONTROLLED_SEED_DIR, prefix="../"
+        )
+        pages.update(render_controlled_seed_site(doc.controlled_seed, navigation))
     return pages
 
 

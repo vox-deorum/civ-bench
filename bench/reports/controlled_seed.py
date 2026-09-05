@@ -1,9 +1,12 @@
-"""Build and render the report's controlled-seed HTML pages (stage 5).
+"""Build and render the report's controlled-seed chapter (stage 5).
 
 :func:`controlled_seed_document` turns the resolved ``performance.controlled_seed_report``
 section into a :class:`~bench.reports.model.ControlledSeedDocument` (the default
-document carries it as its ``controlled_seed`` field); :func:`render_controlled_seed_site`
-renders that document into the annex pages of the report site.
+document carries it as its ``controlled_seed`` field and gives the section its
+own chapter, parallel to the analysis families); :func:`render_controlled_seed_site`
+renders that chapter: ``controlled-seed/index.html`` (one heatmap overview per
+controlled seed) plus one detail page per ``(seed, player_id)`` pair in the same
+folder, both framed by the report site's sidebar navigation.
 
 The pages are self-contained and deterministic: one overview page with two heatmap
 tables per controlled seed (mean adjusted strength on a fixed 0-1 scale, and the
@@ -39,9 +42,12 @@ CONTROLLED_SEED_TABLES = (
     "seed_player_index",
 )
 
-# The overview page of the controlled-seed annex. It lives beside the family
-# report's own report.html, which links here through the analysis section.
-CONTROLLED_SEED_OVERVIEW = "controlled-seed.html"
+# The chapter's place in the report site: its own top-level directory beside the
+# family pages, one sidebar heading parallel to the families, and one detail
+# page per (seed, player_id) pair inside the directory.
+CONTROLLED_SEED_DIR = "controlled-seed"
+CONTROLLED_SEED_OVERVIEW = f"{CONTROLLED_SEED_DIR}/index.html"
+CONTROLLED_SEED_TITLE = "Controlled seed"
 
 
 # ── document building ─────────────────────────────────────────────────────────
@@ -85,6 +91,11 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         index_table=tables["seed_player_index"],
         downloads=list(section.downloads),
     )
+
+
+def chapter_seeds(doc: ControlledSeedDocument) -> list[int]:
+    """The sorted controlled seeds the chapter covers (the sidebar sub-entries)."""
+    return sorted({int(row["seed"]) for row in doc.index_table.to_dict("records")})
 
 # Stable categorical colors for the four victory-focus strategies.
 FOCUS_COLORS = {
@@ -328,28 +339,42 @@ def _focus_legend() -> str:
 
 
 # ── overview page ─────────────────────────────────────────────────────────────
-def _render_overview(doc: ControlledSeedDocument) -> str:
-    summary = _summary_lookup(doc)
-    _, combos, seeds, players = _grid(doc)
+def _page_start(
+    doc: ControlledSeedDocument,
+    page_title: str,
+    navigation: Optional[list[str]],
+) -> list[str]:
+    """The shared chapter-page scaffold: head, skip link, optional sidebar.
+
+    The page lives one level below the report root, so every asset and report
+    link carries a ``../`` prefix. Without navigation the page renders
+    standalone (centered layout), which keeps the renderer usable in isolation.
+    """
     parts: list[str] = []
     parts.append('<!DOCTYPE html>')
     parts.append('<html lang="en"><head><meta charset="utf-8">')
     parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
-    parts.append(f"<title>{_esc(doc.title)}</title>")
-    parts.append('<link rel="stylesheet" href="assets/report.css">')
+    parts.append(f"<title>{_esc(page_title)}</title>")
+    parts.append('<link rel="stylesheet" href="../assets/report.css">')
     parts.append("</head><body>")
     parts.append('<a class="skip-link" href="#main-content">Skip to content</a>')
-    parts.append('<main class="content controlled-content" id="main-content">')
-    parts.append('<nav class="page-nav" aria-label="Report navigation">')
-    parts.append('<a href="report.html">← Full report</a>')
-    parts.append("</nav>")
-    parts.append(f"<h1>{_esc(doc.title)}</h1>")
+    if navigation:
+        parts.extend(navigation)
+    main_class = "content" if navigation else "controlled-content"
+    parts.append(f'<main class="{main_class}" id="main-content">')
+    return parts
+
+
+def _render_overview(
+    doc: ControlledSeedDocument, navigation: Optional[list[str]]
+) -> str:
+    summary = _summary_lookup(doc)
+    _, combos, seeds, players = _grid(doc)
+    parts = _page_start(doc, f"{CONTROLLED_SEED_TITLE} | {doc.title}", navigation)
+    parts.append(f'<p class="eyebrow">{_esc(doc.title)}</p>')
+    parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}</h1>")
     if doc.description:
         parts.append(f'<p class="caption">{_esc(doc.description)}</p>')
-    parts.append(
-        f'<p class="meta">Run {_esc(doc.run_name)} · seed {doc.seed} · '
-        f"config <code>{_esc(doc.config_path)}</code></p>"
-    )
     parts.append(f"<p>{_esc(doc.summary)}</p>")
     meta_bits = []
     if doc.metadata.get("baseline_experiment"):
@@ -389,12 +414,12 @@ def _render_overview(doc: ControlledSeedDocument) -> str:
         parts.append("<ul>")
         for download in doc.downloads:
             parts.append(
-                f'<li><a href="{_esc(download.rel_path)}">{_esc(download.label)}</a></li>'
+                f'<li><a href="../{_esc(download.rel_path)}">{_esc(download.label)}</a></li>'
             )
         parts.append("</ul></section>")
 
     parts.append("</main>")
-    parts.append('<script src="assets/controlled-seed-report.js" defer></script>')
+    parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
     return "\n".join(parts) + "\n"
 
@@ -552,24 +577,19 @@ def _render_detail(
     index_row: dict,
     prev_row: dict | None,
     next_row: dict | None,
+    navigation: Optional[list[str]],
 ) -> str:
     seed = int(index_row["seed"])
     player_id = int(index_row["player_id"])
     vanilla = doc.vanilla_label
-    parts: list[str] = []
-    parts.append('<!DOCTYPE html>')
-    parts.append('<html lang="en"><head><meta charset="utf-8">')
-    parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
-    parts.append(f"<title>Seed {seed} · Player {player_id} | {_esc(doc.title)}</title>")
-    parts.append('<link rel="stylesheet" href="assets/report.css">')
-    parts.append("</head><body>")
-    parts.append('<a class="skip-link" href="#main-content">Skip to content</a>')
-    parts.append('<main class="content controlled-content" id="main-content">')
+    parts = _page_start(
+        doc, f"Seed {seed} · Player {player_id} | {doc.title}", navigation
+    )
     parts.append('<nav class="page-nav" aria-label="Seed player pages">')
     if prev_row is not None:
         prev_seed, prev_player = int(prev_row["seed"]), int(prev_row["player_id"])
         parts.append(f'<a href="{_page_filename(prev_seed, prev_player)}">← Player {prev_player}</a>')
-    parts.append(f'<a href="{CONTROLLED_SEED_OVERVIEW}#seed-{seed}" class="return-link">Seed {seed} overview</a>')
+    parts.append(f'<a href="index.html#seed-{seed}" class="return-link">Seed {seed} overview</a>')
     if next_row is not None:
         next_seed, next_player = int(next_row["seed"]), int(next_row["player_id"])
         parts.append(f'<a href="{_page_filename(next_seed, next_player)}">Player {next_player} →</a>')
@@ -625,15 +645,24 @@ def _render_detail(
     parts.append(
         f'<script type="application/json" id="curve-data">{_chart_data(doc, seed, player_id)}</script>'
     )
-    parts.append('<script src="assets/controlled-seed-report.js" defer></script>')
+    parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
     return "\n".join(parts) + "\n"
 
 
 # ── site assembly ─────────────────────────────────────────────────────────────
-def render_controlled_seed_site(doc: ControlledSeedDocument) -> dict[str, str]:
-    """Render the controlled overview and every seed-player page (+ the JS asset)."""
-    pages: dict[str, str] = {CONTROLLED_SEED_OVERVIEW: _render_overview(doc)}
+def render_controlled_seed_site(
+    doc: ControlledSeedDocument, navigation: Optional[list[str]] = None
+) -> dict[str, str]:
+    """Render the chapter overview and every seed-player page (+ the JS asset).
+
+    ``navigation`` is the report-site sidebar for pages inside the chapter
+    directory (links relative to the report root must be ``../``-prefixed; the
+    caller renders it accordingly). Without it the pages render standalone.
+    """
+    pages: dict[str, str] = {
+        CONTROLLED_SEED_OVERVIEW: _render_overview(doc, navigation)
+    }
     rows = doc.index_table.to_dict("records")
     by_seed: dict[int, list[dict]] = {}
     for row in rows:
@@ -644,7 +673,9 @@ def render_controlled_seed_site(doc: ControlledSeedDocument) -> dict[str, str]:
             prev_row = page_rows[position - 1] if len(page_rows) > 1 else None
             next_row = page_rows[(position + 1) % len(page_rows)] if len(page_rows) > 1 else None
             filename = _page_filename(int(row["seed"]), int(row["player_id"]))
-            pages[filename] = _render_detail(doc, row, prev_row, next_row)
+            pages[f"{CONTROLLED_SEED_DIR}/{filename}"] = _render_detail(
+                doc, row, prev_row, next_row, navigation
+            )
     pages["assets/controlled-seed-report.js"] = CONTROLLED_SEED_JS
     return pages
 

@@ -485,7 +485,7 @@ def test_config_rejects_two_enabled_controlled_seed_analyses(
         load_config(write_spec(spec))
 
 
-# ── report: rendering the controlled-seed pages ───────────────────────────────
+# ── report: rendering the controlled-seed chapter ─────────────────────────────
 @pytest.fixture
 def rendered(env):
     env()
@@ -498,13 +498,13 @@ def _read(out, name):
     return (out / name).read_text(encoding="utf-8")
 
 
-def test_controlled_pages_ride_along_with_the_family_report(rendered):
+def test_controlled_chapter_rides_along_with_the_family_report(rendered):
     env, result, out = rendered
     expected = {
-        "report.md", "report.html", "performance.html",
-        "controlled-seed.html",
-        "seed-1-player-0.html", "seed-1-player-1.html",
-        "seed-2-player-0.html", "seed-2-player-1.html",
+        "report.md", "report.html",
+        "controlled-seed/index.html",
+        "controlled-seed/seed-1-player-0.html", "controlled-seed/seed-1-player-1.html",
+        "controlled-seed/seed-2-player-0.html", "controlled-seed/seed-2-player-1.html",
         "assets/report.css", "assets/controlled-seed-report.js",
     }
     written = {
@@ -518,53 +518,72 @@ def test_controlled_pages_ride_along_with_the_family_report(rendered):
         assert (out / "assets" / "controlled_seed" / f"{table}.csv").exists()
     assert result.formats == ["md", "html"]
     assert result.n_sections == 1
-    # The family report links to the heatmap pages from the section's downloads.
+    # The only analysis is the chapter, so no family page exists and the
+    # sidebar lists the chapter parallel to where families would sit.
+    assert not (out / "performance.html").exists()
     markdown = _read(out, "report.md")
-    assert "[Controlled-seed heatmap pages (HTML)](controlled-seed.html)" in markdown
-    performance = _read(out, "performance.html")
-    assert 'href="controlled-seed.html"' in performance
+    assert "## Controlled seed" in markdown
+    assert "[Controlled-seed heatmap pages (HTML)](controlled-seed/index.html)" in markdown
+    overview_page = _read(out, "report.html")
+    assert '<a href="controlled-seed/index.html">Controlled seed</a>' in overview_page
+
+
+def test_chapter_pages_carry_the_site_sidebar(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    # Sidebar links are rebased for pages inside the chapter folder.
+    assert '<a href="../report.html">Overview</a>' in index
+    assert 'href="../controlled-seed/index.html#seed-1"' in index
+    assert 'aria-current="page">Controlled seed</a>' in index
+    assert "<h1>Controlled seed</h1>" in index
+    detail = _read(out, "controlled-seed/seed-1-player-0.html")
+    assert '<a href="../report.html">Overview</a>' in detail
+    assert '<link rel="stylesheet" href="../assets/report.css">' in detail
+    assert '<script src="../assets/controlled-seed-report.js" defer></script>' in detail
+    # The family report's sidebar points into the chapter folder.
+    overview_page = _read(out, "report.html")
+    assert 'href="controlled-seed/index.html#seed-1"' in overview_page
+    assert 'href="controlled-seed/index.html#seed-2"' in overview_page
 
 
 def test_two_heatmaps_per_seed_and_blank_cells(rendered):
     env, result, out = rendered
-    overview = _read(out, "controlled-seed.html")
-    assert overview.count('<figure class="heat-figure">') == 4  # 2 seeds x 2 heatmaps
-    assert overview.count("<h2") == 3  # seed 1, seed 2, source tables
-    assert overview.count('id="seed-1"') == 1 and overview.count('id="seed-2"') == 1
+    index = _read(out, "controlled-seed/index.html")
+    assert index.count('<figure class="heat-figure">') == 4  # 2 seeds x 2 heatmaps
+    assert index.count("<h2") == 3  # seed 1, seed 2, source tables
+    assert index.count('id="seed-1"') == 1 and index.count('id="seed-2"') == 1
     # The completed global grid leaves unobserved combinations blank (12 empty
     # cells per heatmap: 4 in seed 1, 8 in seed 2).
-    assert overview.count("heat-cell-empty") == 24
+    assert index.count("heat-cell-empty") == 24
     # One isolated vanilla tbody per heatmap.
-    assert overview.count('<tbody class="vanilla-body">') == 4
-    # The annex links back to the family report overview.
-    assert '<a href="report.html">← Full report</a>' in overview
+    assert index.count('<tbody class="vanilla-body">') == 4
 
 
 def test_vanilla_is_separate_condition_row(rendered):
     env, result, out = rendered
-    overview = _read(out, "controlled-seed.html")
-    assert '<tr class="vanilla-row"><th scope="row" class="row-label">Vanilla</th>' in overview
-    detail = _read(out, "seed-1-player-0.html")
+    index = _read(out, "controlled-seed/index.html")
+    assert '<tr class="vanilla-row"><th scope="row" class="row-label">Vanilla</th>' in index
+    detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<tr class="vanilla-row">' in detail
     assert '<td class="vanilla-value">0.4000</td>' in detail
 
 
 def test_cells_link_with_preselection_query(rendered):
     env, result, out = rendered
-    overview = _read(out, "controlled-seed.html")
+    index = _read(out, "controlled-seed/index.html")
     assert (
         'href="seed-1-player-0.html?strategist=GPT-OSS-120B-Simple&amp;'
-        'condition=Every-turn"' in overview
+        'condition=Every-turn"' in index
     )
-    assert 'href="seed-1-player-1.html?strategist=Vanilla&amp;condition=Vanilla"' in overview
+    assert 'href="seed-1-player-1.html?strategist=Vanilla&amp;condition=Vanilla"' in index
     # Tooltip carries exact value, civilization, and run count.
-    assert "data-tip=" in overview
-    assert "Runs: 3" in overview and "Civilization: Rome" in overview
+    assert "data-tip=" in index
+    assert "Runs: 3" in index and "Civilization: Rome" in index
 
 
 def test_detail_page_columns_and_run_counts(rendered):
     env, result, out = rendered
-    detail = _read(out, "seed-1-player-0.html")
+    detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert "6 source run(s)" in detail
     assert "Run count" in detail
     assert "Rotations" not in detail and "rotations" not in detail
@@ -575,16 +594,17 @@ def test_detail_page_columns_and_run_counts(rendered):
     # The Vanilla row's difference cell is blank.
     vanilla_row = detail.split('<tr class="vanilla-row">')[1].split("</tr>")[0]
     assert "<td></td>" in vanilla_row
-    # The return link targets the annex overview, not the family report page.
-    assert 'href="controlled-seed.html#seed-1"' in detail
+    # Prev/next/return links stay inside the chapter folder.
+    assert 'href="index.html#seed-1"' in detail
+    assert 'href="seed-1-player-1.html"' in detail
 
 
 def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
     env, result, out = rendered
-    seed1 = _read(out, "seed-1-player-0.html")
+    seed1 = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '"vanilla":true' in seed1
     assert '"width":3.5' in seed1
-    seed2 = _read(out, "seed-2-player-0.html")
+    seed2 = _read(out, "controlled-seed/seed-2-player-0.html")
     assert '"vanilla":true' not in seed2
     assert "The dedicated Vanilla baseline is unavailable" in seed2
     assert '<tr class="vanilla-row">' not in seed2
@@ -592,10 +612,10 @@ def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
 
 def test_comparability_warning_for_multiple_civilizations(rendered):
     env, result, out = rendered
-    seed1 = _read(out, "seed-1-player-0.html")
+    seed1 = _read(out, "controlled-seed/seed-1-player-0.html")
     assert "Multiple civilizations occupy this seed-player pair" in seed1
     assert "Egypt, Rome" in seed1
-    other = _read(out, "seed-1-player-1.html")
+    other = _read(out, "controlled-seed/seed-1-player-1.html")
     assert "Multiple civilizations" not in other
 
 
@@ -620,12 +640,11 @@ def test_controlled_pages_skipped_without_html_format(env):
     out = report_dir(env.cfg)
     assert result.formats == ["md"]
     assert (out / "report.md").exists()
-    assert not (out / "controlled-seed.html").exists()
-    assert not any(out.glob("seed-*-player-*.html"))
-    # The pages are html-only, so the run warns and the section drops the link
-    # instead of pointing at a page that was never written.
+    assert not (out / "controlled-seed").exists()
+    # The pages are html-only, so the run warns and the chapter drops the link
+    # instead of pointing at pages that were never written.
     assert any("HTML-only" in warning for warning in result.warnings)
-    assert "controlled-seed.html" not in _read(out, "report.md")
+    assert "controlled-seed/index.html" not in _read(out, "report.md")
 
 
 def test_omitted_formats_default_to_md_and_html(env):
@@ -636,10 +655,12 @@ def test_omitted_formats_default_to_md_and_html(env):
     assert result.formats == ["md", "html"]
     assert (out / "report.md").exists()
     assert (out / "report.html").exists()
-    assert (out / "controlled-seed.html").exists()
+    assert (out / "controlled-seed" / "index.html").exists()
 
 
-def test_controlled_pages_render_alongside_other_sections(tmp_path, write_spec, dev_spec):
+def test_controlled_chapter_replaces_the_performance_section(
+    tmp_path, write_spec, dev_spec
+):
     paths = _build_csvs(tmp_path)
     spec = _make_spec(dev_spec, paths, tmp_path)
     spec["analyses"].append({
@@ -653,9 +674,13 @@ def test_controlled_pages_render_alongside_other_sections(tmp_path, write_spec, 
     result = run_report(cfg)
     out = report_dir(cfg)
     assert result.n_sections == 2
-    assert (out / "controlled-seed.html").exists()
+    assert (out / "controlled-seed" / "index.html").exists()
     assert (out / "prediction.html").exists()
-    assert (out / "performance.html").exists()
+    # The chapter claims the analysis; the performance family has no sections
+    # left, so it gets no page at all.
+    assert not (out / "performance.html").exists()
+    prediction = _read(out, "prediction.html")
+    assert "controlled_seed" not in prediction
 
 
 def _emit_empty_manifest(cfg, sid):
@@ -719,14 +744,17 @@ def _tiny_doc() -> ControlledSeedDocument:
 
 def test_renderer_escapes_labels_and_query_parameters():
     pages = render_controlled_seed_site(_tiny_doc())
-    overview = pages["controlled-seed.html"]
+    overview = pages["controlled-seed/index.html"]
+    # Without navigation the chapter page renders standalone (centered layout).
+    assert "controlled-content" in overview
+    assert "<title>Controlled seed | Report &amp; &lt;Summary&gt;</title>" in overview
+    assert "<h1>Controlled seed</h1>" in overview
     assert "Weird &amp; &lt;Model&gt; | Per 5" in overview
-    assert "Report &amp; &lt;Summary&gt;" in overview
     assert "href=\"seed-1-player-0.html?strategist=Weird+%26+%3CModel%3E&amp;condition=Per+5\"" in overview
     # Attribute values escape embedded quotes.
     assert 'data-tip="Dominant focus: Science (72.00%)\nCivilization: Civ &quot;X&quot;\nRuns: 2"' in overview
-    detail = pages["seed-1-player-0.html"]
+    detail = pages["controlled-seed/seed-1-player-0.html"]
     assert "Weird &amp; &lt;Model&gt;" in detail
-    assert "<script" in detail and "assets/controlled-seed-report.js" in detail
-    assert 'href="controlled-seed.html#seed-1"' in detail
+    assert "<script" in detail and "../assets/controlled-seed-report.js" in detail
+    assert 'href="index.html#seed-1"' in detail
     assert pages["assets/controlled-seed-report.js"].startswith("/* civ-bench")

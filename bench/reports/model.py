@@ -86,9 +86,11 @@ class FamilyGroup:
 class ReportDocument:
     """The full report: a title, run provenance, and grouped sections.
 
-    When the resolved sections carry the controlled-seed analysis,
-    ``controlled_seed`` holds the annex document behind the heatmap pages; the
-    html site renders it, a markdown-only render skips it.
+    When the resolved sections carry the controlled-seed analysis, its section
+    becomes a chapter of its own (the last group) and ``controlled_seed`` holds
+    the annex document behind the chapter's heatmap pages; the html site
+    renders the chapter under ``controlled-seed/``, a markdown-only render
+    keeps the chapter's section and skips the pages.
     """
 
     title: str

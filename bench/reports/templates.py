@@ -10,15 +10,22 @@ the dependency order the runner resolved, so no analysis hardcodes its place in 
 document (invariant 3).
 
 When the resolved sections contain the ``performance.controlled_seed_report``
-analysis, the document additionally carries the controlled-seed annex
-(:func:`bench.reports.controlled_seed.controlled_seed_document` builds it from that
-section's three persisted tables) and the section links to its heatmap pages.
+analysis, the document additionally carries the controlled-seed chapter
+(:func:`bench.reports.controlled_seed.controlled_seed_document` builds it from
+that section's three persisted tables): the section leaves its module family
+and becomes a chapter of its own, parallel to the families, rendered as the
+heatmap pages under ``controlled-seed/``.
 """
 
 from __future__ import annotations
 
 from .context import ReportBuildContext
-from .controlled_seed import CONTROLLED_SEED_OVERVIEW, controlled_seed_document
+from .controlled_seed import (
+    CONTROLLED_SEED_DIR,
+    CONTROLLED_SEED_OVERVIEW,
+    CONTROLLED_SEED_TITLE,
+    controlled_seed_document,
+)
 from .model import Download, FamilyGroup, ReportDocument, Section
 
 # Friendly titles for the known module families; an unknown family falls back to
@@ -89,18 +96,60 @@ def _summarize_family(group: FamilyGroup) -> str:
 
 def default_template(ctx: ReportBuildContext) -> ReportDocument:
     """The default report layout: family chapters in dependency order, plus the
-    controlled-seed annex when the report carries its analysis."""
+    controlled-seed chapter when the report carries its analysis."""
     meta = ctx.meta
     sections = ctx.sections
-    groups = _group_by_family(sections)
+
+    # The controlled-seed annex document and its section. The section leaves
+    # the module families and becomes a chapter of its own. The heatmap link
+    # is added after the annex snapshot is taken, so the chapter page's own
+    # "Source tables" list never links back to itself, and only when the run
+    # renders html (the pages are html-only; a markdown-only report would
+    # otherwise carry a dead link).
+    controlled = controlled_seed_document(ctx)
+    if controlled is not None:
+        annex_section = ctx.section(controlled.section_id)
+        family_sections = [s for s in sections if s is not annex_section]
+    else:
+        family_sections = sections
+
+    groups = _group_by_family(family_sections)
     for group in groups:
         group.summary = _summarize_family(group)
+    if controlled is not None:
+        groups.append(
+            FamilyGroup(
+                key=CONTROLLED_SEED_DIR,
+                title=CONTROLLED_SEED_TITLE,
+                sections=[annex_section],
+                summary=(
+                    "Per-seed heatmaps compare every strategist and condition "
+                    "across final player positions, with one detail page per "
+                    "seed-player pair."
+                ),
+            )
+        )
+        if "html" in (meta.get("formats") or []):
+            annex_section.downloads.append(
+                Download(
+                    label="Controlled-seed heatmap pages (HTML)",
+                    rel_path=CONTROLLED_SEED_OVERVIEW,
+                )
+            )
+
     n = len(sections)
     section_noun = "analysis section" if n == 1 else "analysis sections"
-    family_noun = "family" if len(groups) == 1 else "families"
+    n_families = len(groups) - (1 if controlled is not None else 0)
+    family_noun = "family" if n_families == 1 else "families"
+    if controlled is not None and n_families:
+        scope = f"{n_families} {family_noun} plus the controlled-seed chapter"
+    elif controlled is not None:
+        scope = "the controlled-seed chapter"
+    else:
+        scope = f"{len(groups)} {family_noun}"
     intro = (
         f"Run **{meta['run_name']}** (seed {meta['seed']}) produced {n} "
-        f"{section_noun} across {len(groups)} {family_noun} from "
+        f"{section_noun} across {scope} from "
         f"`{meta['config_path']}`; `civ-bench` regenerated every result from "
         f"pipeline artifacts."
     )
@@ -110,19 +159,6 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         for section_id in meta.get("overview_section_ids", [])
         if section_id in section_by_id
     ]
-    # The controlled-seed annex rides along when its analysis is resolved. The
-    # heatmap link is added after the annex snapshot is taken, so the annex's
-    # own "Source tables" list never links back to itself, and only when the
-    # run renders html (the pages are html-only; a markdown-only report would
-    # otherwise carry a dead link).
-    controlled = controlled_seed_document(ctx)
-    if controlled is not None and "html" in (meta.get("formats") or []):
-        ctx.section(controlled.section_id).downloads.append(
-            Download(
-                label="Controlled-seed heatmap pages (HTML)",
-                rel_path=CONTROLLED_SEED_OVERVIEW,
-            )
-        )
     return ReportDocument(
         title=meta["title"],
         run_name=meta["run_name"],
