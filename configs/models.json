@@ -214,7 +214,7 @@
         "openai-compatible/qwen-3.8-27b"
       ],
       "color": "#CB181D",
-      "pricing": { "input_per_million": 0.4, "output_per_million": 2.55 }
+      "pricing": { "input_per_million": 0.25, "output_per_million": 2.2 }
     },
     {
       "id": "Mistral-Small-4",
@@ -275,6 +275,14 @@
       ],
       "color": "#FF6347",
       "pricing": { "input_per_million": 4, "output_per_million": 20 }
+    },
+    {
+      "id": "GPT-6-Astra",
+      "aliases": [
+        "gpt-6-astra"
+      ],
+      "color": "#FF6347",
+      "pricing": { "input_per_million": 10, "output_per_million": 50 }
     },
     {
       "id": "Nemotron-3-Super",
