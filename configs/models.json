@@ -32,6 +32,8 @@
     {
       "id": "Opus-5",
       "aliases": [
+        "opus",
+        "opus-5",
         "claude-opus-5"
       ],
       "color": "#377EB8",
