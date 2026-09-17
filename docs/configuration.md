@@ -1,10 +1,17 @@
 # Configuration guide
 
-One JSON file, the **benchmark run-spec**, controls a `civ-bench` run. This guide covers each block and the most common edits. [configs/benchmark.md](../configs/benchmark.md) is the authoritative field-by-field schema. For a first run, start with the [Getting Started guide](getting-started.md).
+One JSON file, the **benchmark run-spec**, controls a `civ-bench` run.
 
-**Config over code:** dataset, experiment, model, and report choices belong in the run-spec. Validation rejects unknown keys and missing required fields.
+| Task | Reference |
+| --- | --- |
+| Set up a first run | [Getting Started](getting-started.md) |
+| Find a report section's ID or display name | [Report section reference](#report-section-reference) |
+| Move sections or choose overview cards | [Report settings](#report-rendering) |
+| Look up every field and validation rule | [Complete schema](../configs/benchmark.md) |
 
-> The repo tracks example run-specs as `configs/*.template.json`. Copy one to a local, gitignored `configs/benchmark*.json` and edit that. Never edit a template in place.
+- Put dataset, experiment, model, and report choices in JSON.
+- Copy `configs/*.template.json` to a local, gitignored `configs/benchmark*.json` before editing machine-specific settings.
+- Validation rejects unknown keys and missing required fields.
 
 ---
 
@@ -30,9 +37,16 @@ One JSON file, the **benchmark run-spec**, controls a `civ-bench` run. This guid
 }
 ```
 
-`name`, `seed`, `data`, `analyses`, and `report` are required; the rest are optional. Omit `estimators` and `adjust` for a run with no prediction-derived strength ratings. Conversely, the strength-based ratings (`ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`) need an `adjust` stage to supply the `strength` table they rate. `friendly_name` and `description` are presentation only: when set, the report page titles itself with `friendly_name` and shows `description` under the title (see `report`).
+| Setting | Rule |
+| --- | --- |
+| Required fields | `name`, `seed`, `data`, `analyses`, `report` |
+| `estimators`, `adjust` | Optional when analyses do not need predicted strength |
+| Strength-based ratings | `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need a strength-producing adjust stage |
+| `friendly_name` | Default report title; `report.title` overrides it |
+| `description` | Description on the report overview |
+| `seed` | Shared seed for cross-validation, model initialization, and bootstrap resampling |
 
-**Determinism.** The top-level `seed` is threaded into every stage that uses randomness (cross-validation splits, torch init, bootstrap resampling). The same run-spec over the same `runs/` data produces byte-stable outputs.
+The same run-spec and input data produce byte-stable outputs.
 
 ---
 
@@ -44,13 +58,14 @@ A run is a **directed acyclic graph of stages** in five kinds, executed in depen
 extract  ->  estimators  ->  adjust  ->  analyses  ->  report
 ```
 
-You do not write the edges by hand. They come from three places, all resolved into one topological sort before anything runs:
+| Dependency source | Meaning |
+| --- | --- |
+| Stage kind | The five kinds run in the order above |
+| `needs` | Explicit stage IDs that must run first |
+| `uses` | Estimator, table, or analysis references create dependencies automatically; no duplicate `needs` entry is required |
 
-1. **Kind ordering (implicit).** The five kinds always run in the order above.
-2. **`needs` (explicit).** A stage may list other stage `id`s it must run after. Use this for ordering the harness cannot infer (for example, one analysis that reads another's CSV).
-3. **`uses` (referential).** When a stage references an estimator `id` or a named table in its `uses` block, the harness creates the edge automatically. You do not also write `needs`.
-
-A cycle, an unknown `id`, or a reference to a disabled stage is a validation error. Run `civ-bench run --config <file> --dry-run` to print the resolved DAG without executing anything.
+- Cycles, unknown IDs, and references to disabled stages fail validation.
+- Preview the resolved graph with `civ-bench run --config <file> --dry-run`.
 
 ---
 
@@ -106,11 +121,17 @@ The full filter shape:
 }
 ```
 
-Anywhere a filter is accepted, the value may be an **inline object**, a **string** naming a preset, or a **list** mixing the two (merged left to right, later entries win per field). For example: `"filter": ["llm_only", { "turn_range": [200, null] }]`.
+| Filter form | Example |
+| --- | --- |
+| Inline object | `"filter": {"only_llm": true}` |
+| Named preset | `"filter": "llm_only"` |
+| Combined list | `"filter": ["llm_only", {"turn_range": [200, null]}]` |
+
+Lists merge left to right; later entries win per field. Stage filters still cannot widen the global filter.
 
 ### Groupings: how ratings slice the field
 
-A grouping derives one categorical dimension from the strength panel that `ratings.*` analyses can fold into the rated identity. Like filters, you define them once by name. This is why per-strategy Elo is a config edit, not a new module.
+A named grouping derives a category from the strength panel for use in a rating's `group_by`.
 
 ```jsonc
 "groupings": {
@@ -124,15 +145,23 @@ A grouping derives one categorical dimension from the strength panel that `ratin
 
 `kind: "argmax"` (the only kind implemented) labels each player-game by whichever column is largest, the dominant-strategy rule. Reference it from a rating's `group_by` (below).
 
-### Player identity: the orthodox `player_type`
+### Player identity: `player_type`
 
-The identity every rating is fit over, `player_type` (for example `Sonnet-4.5-Briefed`), is **composed at extract time from the per-player game metadata**, not from a hand-maintained seat map. Each seat records its model and its strategist scaffold, and the catalog supplies a template, alias normalization, and a unified label map. Because the identity travels with the player, it stays correct even when controlled seating rotates a model through different seats. You never spell out seat-to-model mappings in the run-spec. See [configs/benchmark.md](../configs/benchmark.md) section 3.3 for the composition rules.
+| Property | Behavior |
+| --- | --- |
+| Example | `Sonnet-4.5-Briefed` |
+| Source | Per-player model and strategist metadata, composed during extraction |
+| Catalog role | Supplies the naming template, alias normalization, and label map |
+| Seat rotations | Identity follows the player across seats |
+| Run-spec setup | No seat-to-model mapping needed |
+
+See [configs/benchmark.md](../configs/benchmark.md), section 3.3, for the composition rules.
 
 ---
 
 ## `estimators`: the victory-probability predictors
 
-An estimator emits one artifact, a `predictions.csv` with a `predicted_win_probability` column, and it answers two **independent** questions. That separation is the heart of the design.
+An estimator emits `predictions.csv` with a `predicted_win_probability` column. Configure weight fitting and prediction generation separately.
 
 ```jsonc
 {
@@ -164,11 +193,12 @@ An estimator emits one artifact, a `predictions.csv` with a `predicted_win_proba
 | `in_sample`  | one model predicting `predict_subset`           | You want a single deployed model and its predictions. |
 | `cross_val`  | k-fold out-of-fold predictions (honest)         | You want honest held-out predictions to evaluate and calibrate on. |
 
-The paper uses 5-fold cross-validation grouped by game for its honest predictions. A `pretrained` estimator always predicts in-sample (you cannot cross-validate weights you did not train here).
-
-The available models, increasing in complexity, are `naive`, `score`, `baseline`, `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, and `attention_mlp` (the paper's primary estimator).
-
-> **Scoring is not the estimator's job.** Computing ROC-AUC, Brier, and so on from a `predictions.csv` is a separate analysis step, `prediction.evaluate` / `prediction.compare`. That keeps scoring shared, multi-metric, and identical across every estimator.
+| Choice | Options or behavior |
+| --- | --- |
+| Available models | `naive`, `score`, `baseline`, `xgboost`, `mlp`, `grouped_mlp`, `interaction_mlp`, `attention_mlp` |
+| Paper setup | `attention_mlp`, five-fold cross-validation grouped by game |
+| Pretrained weights | Always use in-sample prediction |
+| Prediction scoring | Separate analyses: `prediction.evaluate` and `prediction.compare` |
 
 ---
 
@@ -193,11 +223,22 @@ The available models, increasing in complexity, are `naive`, `score`, `baseline`
 }
 ```
 
-The derivation follows the paper: progress-weighted average to relative standing against the strongest player, a winner-preserving correction, then an OLS fit on the logit scale to remove civilization effects (the paper's *revised standing*; the code's `adjusted_strength`). In **controlled** games with fixed seeds and seating, `block` swaps the civilization adjustment for a matched start-cell correction that subtracts the VPAI baseline of the same `(seed, seat)` cell, removing the start-position confound. The full controlled-design behavior, the baseline pathways, and the diagnostic files it always writes are documented in [configs/benchmark.md](../configs/benchmark.md) section 5.
+| Step | Behavior |
+| --- | --- |
+| Aggregate predictions | Average win probabilities with progress weights |
+| Normalize | Compare each player with the game's strongest player |
+| Preserve the winner | Keep the actual winner at the top |
+| Uncontrolled games | Remove civilization effects with an OLS fit on the logit scale |
+| Controlled games | Use `block` to correct against VPAI in the same `(seed, seat)` cell |
+| Shared result | Ratings consume the same `adjusted_strength` estimate |
 
-Incomplete controlled conditions are handled by the **global** filter, not by this stage: set `data.filter.min_condition_completeness` (documented in [configs/benchmark.md](../configs/benchmark.md) section 3.1) to drop, as a whole, conditions whose `seed × seating_rotation` grid is missing slots (`1.0` skips every condition missing any slot). Because it is a global filter it drops the same conditions from every table before the strength fit, so incomplete conditions never reach the panel or the ratings.
+To exclude incomplete controlled conditions:
 
-Every rating uses the same strength estimate. Its derivation belongs in the `strength` adjust stage.
+- Set `data.filter.min_condition_completeness` in the global filter.
+- Use `1.0` to exclude any condition missing a `seed × seating_rotation` slot.
+- The filter removes those conditions from every table before strength fitting and ratings.
+
+See [configs/benchmark.md](../configs/benchmark.md), sections 3.1 and 5, for completeness filtering, baseline choices, and diagnostics.
 
 ---
 
@@ -218,16 +259,19 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 }
 ```
 
-The implemented modules, grouped into four families:
+| Family | Purpose | Implemented modules |
+| --- | --- | --- |
+| `ratings` | Compare skill and outcomes | `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups` |
+| `prediction` | Evaluate predictors | `evaluate`, `compare` |
+| `calibration` | Check prediction reliability and adjustment effects | `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline` |
+| `performance` | Compare strength, coverage, progress, and cost | `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, `usage_efficiency` |
 
-- **ratings** rate skill: `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups`. Per-strategy Elo is `group_by: ["player_type", "strategy"]`, and confidence intervals are a `bootstrap` param, both on the ordinary fit rather than separate modules.
-- **prediction** scores the predictor: `evaluate`, `compare`. These opt in to scoring every enabled estimator by default; add `uses.estimators` only to narrow.
-- **calibration** checks honesty: `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline`.
-- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, and `usage_efficiency`. The controlled-seed module emits the tables behind the report's Matched Maps chapter. Usage efficiency combines token telemetry, pricing, and ratings.
-
-Each module instance resolves a coded friendly name and one-line description from its parameters; `name` and `description` here override them for this one section on the report. The fitted rating modules use a distinct strategy identity when `group_by` includes `strategy`, so no config name override is needed for that variant. The resolved identity is persisted in the analysis manifest. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
-
-Optional modules are listed in `benchmark.full.template.json` with `"enabled": false`. Some are registry-reserved placeholders until their implementation lands; if you enable one too early, the run fails with a clear "reserved but not implemented" error. The full per-module parameter catalog is in [configs/benchmark.md](../configs/benchmark.md) section 6.2.
+- `prediction` analyses use all enabled estimators by default; `uses.estimators` narrows the selection.
+- `name` and `description` override a module's display text for that stage.
+- Strategy-grouped ratings select their own display names automatically.
+- The [report section reference](#report-section-reference) maps stage IDs to display names.
+- The [full template](../configs/benchmark.full.template.json) includes disabled optional stages. Reserved modules fail with a "reserved but not implemented" error if enabled.
+- See [schema sections 6.2 and 6.3](../configs/benchmark.md) for parameters and display descriptions.
 
 ### Two cross-cutting rating params
 
@@ -245,48 +289,153 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 
 ## `report`: rendering
 
+Use analysis **stage IDs** in `sections`, `overview_sections`, and `section_overrides`.
+
+| Name type | Example | Where to use it |
+| --- | --- | --- |
+| Stage ID | `bt_main` | Report lists and cross-stage references |
+| Module | `ratings.bradley_terry` | An analysis's `module` field |
+| Display name | Pairwise skill ratings | Report heading; override with the analysis's `name` |
+| Chapter name | Ratings | Generated navigation label, determined by the module family |
+
+### Report section reference
+
+These IDs come from the [full template](../configs/benchmark.full.template.json). Use the IDs in your own `analyses` list if you have renamed stages. A stage must exist in your config before you can reference it.
+
+| Chapter | Stage ID | Default display name |
+| --- | --- | --- |
+| Matched Maps | `controlled_seed` | Matched Maps |
+| Ratings | `bt_main` | Pairwise skill ratings |
+| Ratings | `bt_strategy` | Pairwise strategy ratings |
+| Ratings | `pl_main` | Rank-based skill ratings |
+| Ratings | `pl_strategy` | Rank-based strategy ratings |
+| Ratings | `matchup_strength` | Adjusted-strength matchups |
+| Ratings | `matchup_winrates` | Victory matchups |
+| Prediction | `pred_metrics` | Prediction quality |
+| Prediction | `pred_compare` | Estimator agreement |
+| Calibration | `cal_reliability` | Prediction reliability |
+| Calibration | `cal_loss_progress` | Prediction error over time |
+| Calibration | `cal_civ_effects` | Civilization strength effects |
+| Calibration | `cal_cell_baseline` | Starting-position baselines |
+| Performance | `perf_score_ratio` | Final-score effects |
+| Performance | `perf_strength` | Gameplay strength |
+| Performance | `perf_experiment_completeness` | Experiment coverage |
+| Performance | `perf_turn_predicted` | Win-probability trends |
+| Performance | `perf_usage_efficiency` | Usage, cost, and skill |
+
+- `controlled_seed`, `pl_main`, and `pl_strategy` are disabled in the full template; enable them before including them in a report.
+- Strategy rating names depend on `group_by: ["player_type", "strategy"]`.
+- Exploratory modules in the full template are reserved placeholders, so they have no implemented report sections.
+- Friendly names and chapter names are display text. For example, use `"bt_main"`, not `"Ratings"`, in `report.sections`.
+
+### Report settings
+
+Example: put Matched Maps first and show two selected overview cards. This assumes `controlled_seed` is enabled.
+
 ```jsonc
 "report": {
-  "out_dir": "reports/",          // under the resolved output root
-  "formats": ["md", "html"],      // md and html implemented; pdf is schema-reserved;
-                                  //   an omitted formats list defaults to ["md", "html"]
-  "sections": null,               // null = every enabled analysis in canonical family order;
-                                  //   or priority stage ids, followed by all remaining enabled analyses
-  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
-                                  // null = cards for every resolved section; a list keeps the HTML overview compact
-  "section_overrides": {},        // stage id -> optional {"tables": ["..."], "figures": ["..."]}
-  "title": null,                  // null = derive from friendly_name, else name
+  "out_dir": "reports/",
+  "formats": ["md", "html"],
+  "sections": ["controlled_seed"],
+  "overview_sections": ["bt_main", "perf_usage_efficiency"],
+  "section_overrides": {},
+  "title": null,
   "include_disabled": false
 }
 ```
 
-The report walks each analysis result and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to put those sections first; every remaining enabled analysis is appended in the default order. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes the rest automatically. Chapters follow their first section's position in the resolved list. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above. The report adds one summary sentence for the run and each represented family page. Every analysis contributes one result summary sentence, which is reused in its overview card and detailed section.
+| Field | Behavior |
+| --- | --- |
+| `out_dir` | Report directory under the resolved output root; the run's `name` supplies its subdirectory |
+| `formats` | Defaults to `["md", "html"]`; `pdf` is reserved and cannot render yet |
+| `sections` | Priority stage IDs, followed by every remaining enabled analysis; `null` or `[]` uses the default order |
+| `overview_sections` | Exact ordered selection of overview cards; `null` includes every resolved section, `[]` shows none |
+| `section_overrides` | Inline table and figure selections by stage ID |
+| `title` | Report title; `null` falls back to `friendly_name`, then `name` |
+| `include_disabled` | Defaults to `false`; `true` allows explicitly listed disabled stages with saved results. Automatic fill still includes only enabled analyses |
+| `footer` | Markdown footer; `null` uses the default CivBench citation, `""` hides it |
+| `benchmark_citation` | Optional benchmark citation with `title` and `url`; see [schema section 7](../configs/benchmark.md#7-report-rendering) |
 
-Each section is headed by the module instance's resolved friendly name (the per-stage `name` override wins when present) with its resolved description underneath. For fitted ratings, `group_by: ["player_type", "strategy"]` selects the strategy-specific name and description in the code. The raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
+### Ordering and overview cards
 
-`section_overrides` narrows an analysis's inline artifacts. For each stage id, `tables` and `figures` are optional lists of manifest names. A supplied list replaces that dimension's normal inline list. An omitted dimension keeps the default list, and hidden artifacts remain downloadable. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped.
+| Goal | Setting inside `report` |
+| --- | --- |
+| Put Matched Maps first, then include the rest | `"sections": ["controlled_seed"]` |
+| Put Ratings before Matched Maps | `"sections": ["bt_main", "controlled_seed"]` |
+| Put cost and usage before the other Performance sections | `"sections": ["perf_usage_efficiency"]` |
+| Use the default chapter and section order | `"sections": null` |
+| Show only skill and cost cards on the overview | `"overview_sections": ["bt_main", "perf_usage_efficiency"]` |
+| Show a card for every resolved section | `"overview_sections": null` |
 
-HTML also writes one page for every family represented in `sections`: `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html`. The output directory contains `report.html`, `report.md`, `assets/report.css`, and the self-contained `assets/` tree. Each analysis persists a `result.json` beside its artifacts, so `civ-bench report` re-renders the documents from disk, deterministically and byte-identically, without re-running any analysis.
+- Default family order: Ratings, Prediction, Calibration, Performance, Exploratory. Within a family, config order applies.
+- Chapters follow their first section's position in the resolved list. Sections in the same family stay together.
+- Matched Maps forms its own chapter when its analysis is non-empty. Its default position follows its `performance` module's place in the resolved list.
+- Partial `sections` lists append the rest automatically. Disable an analysis to exclude it from the default report.
+- Partial `overview_sections` lists select only those cards. The tracked templates select seven cards.
+- Unknown stage IDs are errors; duplicate IDs appear only once.
 
-The report also renders the **controlled-seed chapter** when the resolved sections include an enabled, non-empty `performance.controlled_seed_report` analysis. The section leaves the performance family and becomes a chapter of its own, parallel to the families: the site sidebar lists it next to them with one sub-entry per seed, and its pages live in a `controlled-seed/` directory beside the family pages. The chapter page, `controlled-seed/index.html`, shows two heatmaps per controlled seed (mean adjusted strength and dominant victory focus, with the dedicated `Vanilla | Vanilla` condition as a separate isolated row); each detail page (`controlled-seed/seed-<seed>-player-<position>.html`) shows victory-probability curves and a per-condition comparison table for one `(seed, player position)` pair. The pages are HTML-only: a `report.formats` list without `html` skips them with a warning and omits the section's link to them. See [configs/benchmark.md](../configs/benchmark.md) section 7.1 for details.
+### Inline tables, figures, and display text
+
+| Setting | Effect |
+| --- | --- |
+| `"section_overrides": {"bt_main": {"tables": ["ratings"]}}` | Show the named ratings table; keep the default figures |
+| `"section_overrides": {"bt_main": {"figures": []}}` | Hide inline figures; keep their downloads |
+| Omitted `tables` or `figures` | Use the analysis's default list for that dimension |
+| Artifact name not emitted by the analysis | Warn and skip that artifact |
+| Analysis `name` | Override the section's display heading |
+| Analysis `description` | Override the description in its heading tooltip |
+| Top-level `description` | Display under the title in `report.html` and `report.md` |
+
+Artifact names come from the analysis's saved `result.json`. Hidden inline artifacts remain downloadable.
+
+### Generated pages
+
+| Output | Contents |
+| --- | --- |
+| `report.html` | Overview cards and navigation |
+| `report.md` | Combined Markdown report |
+| `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html` | One page per represented family |
+| `controlled-seed/index.html` | Matched Maps heatmaps by seed |
+| `controlled-seed/seed-<seed>-player-<position>.html` | Probability curves and condition comparisons for one seed and player position |
+| `assets/` | Styles, scripts, figures, and downloadable tables |
+
+- Only requested formats and represented chapters are written.
+- Matched Maps requires an enabled, non-empty `performance.controlled_seed_report` analysis. Its HTML pages require `html` in `formats`.
+- Matched Maps shows adjusted strength and dominant victory focus, with a separate VPAI baseline row.
+- `civ-bench report --config <file>` rebuilds reports from saved analysis results without rerunning analyses. Rendering is deterministic and byte-stable.
+- See [schema section 7.1](../configs/benchmark.md#71-the-matched-maps-chapter) for Matched Maps details.
 
 ---
 
 ## `output`: variants that coexist on disk
 
-Every stage that writes does so under a single run output root, `reports/` by default. `output` lets a run redirect everything to a sibling root by appending a suffix. This is the mechanism behind the `-cross` variant (train on non-LLM seats, write to `reports-cross/`).
+Use `output.suffix` to keep run variants under separate output roots.
 
 ```jsonc
 "output": { "root": "reports", "suffix": "-cross" }   // writes under reports-cross/
 ```
 
-Only **save** paths are re-rooted. **Inputs** are read as authored, so the tracked `pretrained/<model_id>/` snapshots feed every variant without being moved. A `-dev` run can load `pretrained/score/` yet write its predictions under `reports-dev/`.
+| Path type | Effect of the suffix |
+| --- | --- |
+| Save paths under `output.root` | Re-rooted, for example from `reports/` to `reports-cross/` |
+| Input paths | Read as authored |
+| Pretrained snapshots | Stay at paths such as `pretrained/score/` and can serve multiple variants |
 
 ---
 
-## Validation, in one breath
+## Validation
 
-The loader enforces, on load: required keys present; no unknown keys anywhere; unique ids across estimators, adjust, and analyses; `needs` and `uses` reference existing enabled ids; the graph is acyclic; `fit` matches exactly the one sub-block present; every `module` resolves in its registry; every preset name and grouping name resolves; bootstrap `n` is a positive integer; and strength-stage params are in range. There is no graceful degradation for missing packages: a stage that needs torch, xgboost, optuna, or R aborts the run with an install hint. The complete, numbered rule list is [configs/benchmark.md](../configs/benchmark.md) section 8.
+| Check | Requirement |
+| --- | --- |
+| Keys and types | Required fields present; no unknown keys; correct value types |
+| Stage IDs | Unique across estimators, adjust stages, and analyses |
+| Dependencies | `needs` and `uses` resolve to existing enabled stages; no cycles |
+| Estimator fitting | `fit` matches exactly one `train` or `pretrained` block |
+| Modules and presets | Registry modules, filter presets, and groupings must resolve |
+| Numeric parameters | Positive bootstrap `n`; strength parameters within allowed ranges |
+| Installed packages | Missing required Python or R dependencies stop execution with an install hint |
+
+See [configs/benchmark.md](../configs/benchmark.md), section 8, for the complete rules.
 
 ---
 
