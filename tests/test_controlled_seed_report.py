@@ -799,8 +799,13 @@ def test_omitted_formats_default_to_md_and_html(env):
     assert (out / "controlled-seed" / "index.html").exists()
 
 
+@pytest.mark.parametrize("sections, matched_first", [
+    (None, False),
+    (["controlled_seed", "pred_compare"], True),
+    (["pred_compare", "controlled_seed"], False),
+])
 def test_controlled_chapter_replaces_the_performance_section(
-    tmp_path, write_spec, dev_spec
+    tmp_path, write_spec, dev_spec, sections, matched_first
 ):
     paths = _build_csvs(tmp_path)
     spec = _make_spec(dev_spec, paths, tmp_path)
@@ -808,6 +813,7 @@ def test_controlled_chapter_replaces_the_performance_section(
         "id": "pred_compare", "module": "prediction.compare", "enabled": True,
         "uses": {"estimators": ["est"]}, "params": {},
     })
+    spec["report"]["sections"] = sections
     cfg = load_config(write_spec(spec))
     catalog = Catalog.from_run_config(cfg)
     run_analysis(cfg, _stage_raw(), catalog=catalog)
@@ -822,6 +828,11 @@ def test_controlled_chapter_replaces_the_performance_section(
     assert not (out / "performance.html").exists()
     prediction = _read(out, "prediction.html")
     assert "controlled_seed" not in prediction
+    for page in ("report.html", "prediction.html", "controlled-seed/index.html"):
+        html = _read(out, page)
+        assert (html.index(">Matched Maps</a>") < html.index(">Prediction</a>")) == matched_first
+    markdown = _read(out, "report.md")
+    assert (markdown.index("## Matched Maps") < markdown.index("## Prediction")) == matched_first
 
 
 def _emit_empty_manifest(cfg, sid):

@@ -153,6 +153,8 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
                 summary=CONTROLLED_SEED_PURPOSE,
             )
         )
+        section_positions = {section.id: i for i, section in enumerate(sections)}
+        groups.sort(key=lambda group: section_positions[group.sections[0].id])
         if "html" in (meta.get("formats") or []):
             annex_section.downloads.append(
                 Download(
