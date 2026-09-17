@@ -14,7 +14,7 @@ def test_report_defaults_are_discovered_without_importing_registry():
     }
     assert analysis_report_defaults("performance.usage_efficiency") == {
         "tables": [],
-        "figures": ["cost", "input_tokens", "output_tokens", "usage_vs_rating"],
+        "figures": ["usage_vs_rating"],
     }
 
 

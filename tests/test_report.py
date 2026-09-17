@@ -343,6 +343,32 @@ def test_plotly_figures_embed_in_html_and_link_in_markdown(report_env):
     assert "interactive-figure" not in overview
 
 
+def test_usage_efficiency_default_keeps_only_interactive_figure_inline(report_env):
+    _emit(
+        report_env,
+        "perf_usage_efficiency",
+        "performance.usage_efficiency",
+        summary="Usage and skill figures.",
+        figures=[
+            "cost",
+            "input_tokens",
+            "output_tokens",
+            {"name": "usage_vs_rating", "format": "plotly"},
+        ],
+    )
+    run_report(report_env)
+    out = report_dir(report_env)
+    html = (out / "performance.html").read_text(encoding="utf-8")
+
+    assert html.count('class="interactive-figure"') == 1
+    assert 'src="assets/perf_usage_efficiency/usage_vs_rating.html"' in html
+    for name in ("cost", "input_tokens", "output_tokens"):
+        asset = out / "assets" / "perf_usage_efficiency" / f"{name}.png"
+        assert asset.exists()
+        assert f'href="assets/perf_usage_efficiency/{name}.png"' in html
+        assert f'<img src="assets/perf_usage_efficiency/{name}.png"' not in html
+
+
 def test_report_tables_present_vpai_label_but_keep_csv_identity(report_env):
     _emit(
         report_env,

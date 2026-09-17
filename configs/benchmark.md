@@ -409,7 +409,7 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
   - **Explicit** (`baseline_experiment` set, e.g. a pure VP self-play condition): for each `(seed, player_id)` cell, average the designated experiment's Vanilla/VPAI `logit_strength` rows. In seated mode, rotations for a seed are repeated observations of the same generated map/start cells, so each final-seat cell's explicit baseline is the logit-scale mean of those repeated Vanilla observations.
   - **Implicit** (`baseline_experiment: null`, default): for each controlled experiment and `(seed, player_id)` cell, average that experiment's own Vanilla/VPAI `logit_strength` rows. Incomplete self-coverage is expected (rotation sparsity) and is **not fatal**: a controlled seat whose own `(seed, player_id)` cell has no VPAI counterpart **falls back to the uncontrolled adjustment** (`civ_adjust` when `ols_logit`, else `relative_strength`) and is named in a WARN; every cell that does have a Vanilla observation still uses its start-cell baseline. A per-row `adjust_method` column (`cell|civ|relative`) records which path each row took. Cell-adjusted rows additionally persist `cell_logit_advantage` = `logit_strength − cell_baseline`: the exact start-cell advantage on the logit scale, captured **before** any `post_cell_normalize` so it always means "your strength − matched Vanilla VPAI baseline in this cell"; it is `NaN` for non-cell (`civ`/`relative`) rows.
 
-  The pathway selected by `baseline_experiment` feeds `adjusted_strength`: `null` selects implicit; a string selects explicit. If explicit is selected, implicit is still computed per controlled experiment wherever Vanilla rows exist, so the report can show implicit-vs-explicit deltas. **A missing selected *explicit* baseline cell is fatal** (the designated `baseline_experiment` is meant to span the whole grid); a missing selected *implicit* cell warns and falls back. Per-model coverage gaps, cells with no Vanilla baseline in a comparison pathway, and player types disconnected from `Vanilla` are **warned, never fatal** (keep all games, proceed).
+  The pathway selected by `baseline_experiment` feeds `adjusted_strength`: `null` selects implicit; a string selects explicit. If explicit is selected, implicit is still computed per controlled experiment wherever Vanilla rows exist, so the report can show implicit-vs-explicit deltas. **A missing selected *explicit* baseline cell is fatal** (the designated `baseline_experiment` is meant to span the whole grid); a missing selected *implicit* cell warns and falls back. Per-model coverage gaps, cells with no VPAI baseline in a comparison pathway, and player types disconnected from `Vanilla` are **warned, never fatal** (keep all games, proceed).
 - **Estimator/filter precondition.** The strength stage consumes the referenced estimator's saved predictions; it does not re-infer missing rows. Controlled `block != "none"` therefore expects the estimator artifact to include the Vanilla rows needed by the selected baseline pathway. A global `data.filter` or estimator `predict_subset` that drops Vanilla references (for example `only_llm`) removes the baseline evidence: under **explicit** that is fatal at the missing cell, and under **implicit** the affected cells fall back to `civ_adjust` (which itself needs the vanilla reference level present, or its OLS fit fails). Keep estimator prediction broad and narrow later in each analysis.
 - **Intermediate adjustment diagnostics: always written (no config).** Like every other audit trail, the stage *always* emits the per-group values it subtracts, next to the strength panel (in the directory of `save`, default `reports/adjust/`), so the correction can be inspected without opting in:
   - `civ_effects.csv`: per-`civilization` OLS-logit effect table (`civilization, civ_effect, n_rows`), the **civilization-level effect** from the uncontrolled (`civ_adjust`) path.
@@ -635,7 +635,7 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
   `(seed, player_id, strategist, condition)` key; seating rotations and
   genuine repeated games contribute equally, and no confidence interval is
   computed.
-- **The dedicated Vanilla baseline.** The configured strength stage's
+- **The dedicated VPAI baseline.** The configured strength stage's
   `baseline_experiment` (§5.1) is the sole Vanilla source, and it must be set.
   Baseline rows bypass condition splitting and canonicalize to
   `strategist = "Vanilla"`, `condition = "Vanilla"` (the catalog label); the
@@ -658,7 +658,7 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
   with no controlled rows is a clear analysis error. The module reads its
   inputs as a census of the controlled design: it does not apply the global
   `data.filter` (an `only_llm` or `min_games` filter would punch holes in the
-  seed grid and remove the dedicated Vanilla baseline). Narrow the inputs by
+  seed grid and remove the dedicated VPAI baseline). Narrow the inputs by
   controlling what is extracted.
 - **Focus.** The four final victory-focus ratios average per cell before the
   dominant focus is chosen; exact ties resolve in the order Domination,
@@ -692,8 +692,9 @@ catalogs or canonical tables.
 ```
 
 The module writes `usage` and `usage_vs_rating` tables. It emits three static
-figures, `cost`, `input_tokens`, and `output_tokens`, each showing the average
-metric per player per game. Models used by the same player in a game are summed
+figures, `cost`, `input_tokens`, and `output_tokens`, as downloadable attachments,
+each showing the average metric per player per game. Models used by the same
+player in a game are summed
 before averaging across complete player-game records. Output tokens include
 reasoning. Token averages remain available when pricing is unknown; cost averages
 require complete telemetry and known prices. Costs exclude cache discounts.
@@ -710,10 +711,14 @@ positive usage and two distinct usage values are required for a fit. Zero values
 have no efficiency score and are excluded from logarithmic views. `log_x:false`
 uses a linear display axis while keeping the logarithmic regression.
 
-The resource selector switches cost, input tokens, and output tokens together
-with their fitted dotted curve, equation, and residual scores. A neutral table
+Only `usage_vs_rating` appears inline by default. The resource selector switches
+cost, input tokens, and output tokens together with their fitted dotted curve,
+equation, R², and residual scores. R² is `1 - sum(residual²) / sum((Elo - mean(Elo))²)`
+over the observations used in each fit, and is saved as `r_squared` in that fit's
+metadata. Constant Elo has no defined R² and displays `N/A`. A neutral table
 tooltip highlights Elo, baseline Elo, and Elo above the selected fit. The baseline
-line uses Vanilla's rating when available, otherwise 1500. `annotate:true` labels
+line uses Vanilla's rating, labeled VPAI, when available, otherwise the 1500 Elo
+reference. `annotate:true` labels
 the identities with the highest and lowest residuals for the selected metric.
 The summary names the cost-efficiency extremes. Fits are descriptive comparisons
 within the displayed cohort, not predictions of gains from spending more.

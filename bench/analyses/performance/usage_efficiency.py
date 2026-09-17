@@ -40,10 +40,15 @@ def fit_usage_skill(table: pd.DataFrame, metric: str) -> dict | None:
     intercept = float(y.mean() - slope * x.mean())
     expected = intercept + slope * x
     residual = y - expected
+    total_variation = float(np.dot(y - y.mean(), y - y.mean()))
+    r_squared = (
+        float(1 - np.dot(residual, residual) / total_variation)
+        if total_variation > 0 else None
+    )
     residual[np.isclose(residual, 0, atol=1e-9)] = 0
     table.loc[valid, expected_col] = expected
     table.loc[valid, residual_col] = residual
-    return {"intercept": intercept, "slope": slope, "n": len(values)}
+    return {"intercept": intercept, "slope": slope, "n": len(values), "r_squared": r_squared}
 
 
 class PerformanceUsageEfficiency(Analysis):
@@ -54,7 +59,7 @@ class PerformanceUsageEfficiency(Analysis):
         "and measures Elo above or below the fitted usage-skill curve."
     )
     report_defaults = {
-        "tables": [], "figures": ["cost", "input_tokens", "output_tokens", "usage_vs_rating"],
+        "tables": [], "figures": ["usage_vs_rating"],
     }
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
@@ -146,6 +151,7 @@ class PerformanceUsageEfficiency(Analysis):
 
         if table.empty:
             return None
+        baseline_label = "VPAI" if baseline_name == ctx.catalog.vanilla_label else baseline_name
         fig = go.Figure()
         symbols = ["circle", "diamond-open", "square-open", "triangle-up-open", "cross"]
         condition_symbols = {
@@ -168,7 +174,7 @@ class PerformanceUsageEfficiency(Analysis):
                 "showarrow": False, "align": "left", "font": {"size": 11},
             }, {
                 "x": 1, "y": baseline_elo, "xref": "paper", "yref": "y", "xanchor": "right",
-                "yanchor": "top", "text": f"<b>{escape(baseline_name)} baseline: {baseline_elo:,.0f} Elo</b>",
+                "yanchor": "top", "text": f"<b>{escape(baseline_label)} baseline: {baseline_elo:,.0f} Elo</b>",
                 "showarrow": False, "bgcolor": "white", "font": {"color": "#334155"},
             }]
             fit = fits[metric]
@@ -177,9 +183,10 @@ class PerformanceUsageEfficiency(Analysis):
                 values = plot.loc[plot[column] > 0, column]
                 curve_x = np.geomspace(values.min(), values.max(), 100)
                 equation_variable = f"cost in {escape(currency.upper())}" if metric == "cost" else label.lower()
+                r_squared_label = f"{fit['r_squared']:.3f}" if fit["r_squared"] is not None else "N/A"
                 equation = (
                     f"Fitted Elo = {fit['intercept']:.1f} {fit['slope']:+.1f} "
-                    f"log₁₀({equation_variable})"
+                    f"log₁₀({equation_variable}); R² = {r_squared_label}"
                 )
                 fig.add_trace(go.Scatter(
                     x=curve_x.tolist(), y=(fit["intercept"] + fit["slope"] * np.log10(curve_x)).tolist(),
@@ -205,7 +212,7 @@ class PerformanceUsageEfficiency(Analysis):
                     details.append([
                         str(row["player_type"]),
                         spec.base_label if row["condition"] == "base" else str(row["condition"]).lstrip("-"),
-                        number(row["elo"]), f"{baseline_elo:,.0f} ({baseline_name})",
+                        number(row["elo"]), f"{baseline_elo:,.0f} ({baseline_label})",
                         number(row[f"efficiency_elo_{metric}"], "+,.0f"),
                         number(row[f"expected_elo_{metric}"]),
                         f"{number(row['avg_cost_per_player_game'], ',.4g')} {currency.upper()}",
@@ -261,15 +268,11 @@ class PerformanceUsageEfficiency(Analysis):
                 "note": "Averages per player per game. Counts are player-games for the selected resource. Output includes reasoning.",
                 "rows": [
                     {"label": "Elo", "index": 2, "emphasis": True},
-                    {"label": "Baseline Elo", "index": 3, "emphasis": True},
                     {"label": "Elo above fit", "index": 4, "emphasis": True},
-                    {"label": "Fitted Elo", "index": 5},
-                    {"label": "Fit resource", "index": 11},
                     {"label": "Avg. cost", "index": 6},
-                    {"label": "Input tokens", "index": 7},
-                    {"label": "Output tokens", "index": 8},
-                    {"label": "Complete", "index": 9},
-                    {"label": "Incomplete", "index": 10},
+                    {"label": "Avg. input tokens", "index": 7},
+                    {"label": "Avg. output tokens", "index": 8},
+                    {"label": "Missing data", "index": 10},
                 ],
             }},
         )

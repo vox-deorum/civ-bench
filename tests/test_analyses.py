@@ -786,8 +786,8 @@ def test_performance_usage_efficiency_outputs(env):
     assert all(Path(r.figure_paths[name]).suffix == ".png"
                for name in ("cost", "input_tokens", "output_tokens"))
     assert by_player["player_type"].is_unique
-    assert "per player per game" in r.summary
-    assert "cached tokens" in r.summary
+    assert r.metadata["cost_basis"] == "per player per complete game"
+    assert r.metadata["cached_tokens_accounted_for"] is False
 
 
 def test_token_costs_average_players_and_keep_complete_records(env):
@@ -996,14 +996,13 @@ def test_usage_vs_rating_outputs_and_excludes_baseline(env):
             "efficiency_elo_cost", "complete_player_games"} <= set(table.columns)
     assert table["efficiency_elo_cost"].isna().all()
     assert "at least three rated identities" in r.summary
-    assert "cached tokens" in r.summary
+    assert r.metadata["cached_tokens_accounted_for"] is False
     path = Path(r.figure_paths["usage_vs_rating"])
     assert path.suffix == ".html"
     html = path.read_text(encoding="utf-8")
     assert "Plotly.newPlot" in html
     assert "Input tokens" in html
     assert "Output tokens" in html
-    assert "Baseline Elo" in html
     assert "table_tooltip" in html
 
 
@@ -1023,7 +1022,7 @@ def test_usage_vs_rating_zero_cost_has_no_efficiency_score(env, log_x):
     table = pd.read_csv(result.table_paths["usage_vs_rating"]).set_index("player_type")
     assert pd.isna(table.loc["GPT-OSS-120B", "efficiency_elo_cost"])
     assert "at least three rated identities" in result.summary
-    assert "Zero values are excluded" in result.summary
+    assert pd.isna(table.loc["GPT-OSS-120B", "expected_elo_cost"])
 
 
 def test_usage_vs_rating_requires_analysis_dependency(env):
@@ -1052,6 +1051,7 @@ def test_usage_efficiency_summary_ranks_residuals_and_uses_actual_baseline(env):
     assert "Most cost-efficient: **Good** (**+160 Elo**" in result.summary
     assert "Least cost-efficient: **Cheap** (**-120 Elo**" in result.summary
     assert result.metadata["baseline_elo"] == 1450
+    assert result.metadata["baseline_name"] == "Vanilla"
     assert result.metadata["usage_skill_fits"]["cost"]["n"] == 4
     table = pd.read_csv(result.table_paths["usage_vs_rating"]).set_index("player_type")
     assert table.loc["Good", "efficiency_elo_cost"] == pytest.approx(160)
@@ -1067,11 +1067,24 @@ def test_usage_efficiency_measures_elo_above_fitted_log_usage(metric, column):
     table = pd.DataFrame({column: [0.01, 0.1, 1, 10, 0, np.nan, np.inf, 20],
                           "elo": [1000, 1500, 1600, 1700, 2000, 1800, 1900, np.nan]})
     fit = fit_usage_skill(table, metric)
-    assert fit == pytest.approx({"intercept": 1560, "slope": 220, "n": 4})
+    assert fit == pytest.approx({"intercept": 1560, "slope": 220, "n": 4, "r_squared": 121 / 145})
     np.testing.assert_allclose(table.loc[:3, f"expected_elo_{metric}"], [1120, 1340, 1560, 1780])
     np.testing.assert_allclose(table.loc[:3, f"efficiency_elo_{metric}"], [-120, 160, 40, -80])
     assert table[f"efficiency_elo_{metric}"].idxmax() == 1
     assert table.loc[4:, f"efficiency_elo_{metric}"].isna().all()
+
+
+@pytest.mark.parametrize("ratings,expected_r_squared", [
+    ([1000, 1100, 1200], 1.0),
+    ([1600, 1300, 1600], 0.0),
+    ([1500, 1500, 1500], None),
+])
+def test_usage_fit_r_squared_handles_perfect_flat_and_constant_ratings(ratings, expected_r_squared):
+    from bench.analyses.performance.usage_efficiency import fit_usage_skill
+
+    table = pd.DataFrame({"avg_cost_per_player_game": [1, 10, 100], "elo": ratings})
+    fit = fit_usage_skill(table, "cost")
+    assert fit["r_squared"] == expected_r_squared
 
 
 @pytest.mark.parametrize("costs", [[], [1], [1, 2], [2, 2, 2]])
@@ -1114,13 +1127,18 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x):
         visible = [trace for trace, shown in zip(figure.data, button.args[0]["visible"]) if shown]
         curve = next(trace for trace in visible if trace.mode == "lines")
         assert curve.line.dash == "dot"
+        assert any(
+            f"R² = {fits[metric]['r_squared']:.3f}" in annotation["text"]
+            for annotation in button.args[1]["annotations"]
+        )
         np.testing.assert_allclose(curve.y, fits[metric]["intercept"] + fits[metric]["slope"] * np.log10(curve.x))
         markers = [trace for trace in visible if trace.mode == "markers"]
         good = next(trace for trace in markers if trace.name == "Good")
         expected = table.loc[1, f"efficiency_elo_{metric}"]
         assert good.customdata[0][4] == f"{expected:+,.0f}"
+        assert good.customdata[0][3] == "1,450 (VPAI)"
         assert all(trace.hoverinfo == "none" and trace.error_y.array is None for trace in markers)
-        assert any("1450" in annotation["text"].replace(",", "") for annotation in button.args[1]["annotations"])
+        assert any("VPAI baseline: 1,450 Elo" in annotation["text"] for annotation in button.args[1]["annotations"])
         assert any(trace.name == "Free" for trace in markers) == (not log_x or metric == "input")
     assert fits["cost"]["slope"] != fits["input"]["slope"]
 

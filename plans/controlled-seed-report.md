@@ -8,7 +8,7 @@
 **Status: built & validated.** As-built notes on top of the original design:
 
 - The analysis module is `bench/analyses/performance/controlled_seed_report.py`; `bench/reports/controlled_seed.py` owns the chapter end-to-end (the `controlled_seed_document` builder and the `render_controlled_seed_site` renderer); the build context is `bench/reports/context.py`; the document model addition is `ControlledSeedDocument` in `bench/reports/model.py`, carried on `ReportDocument.controlled_seed` with `render_html_site` emitting its pages.
-- The module reads its inputs as a census of the controlled design: it does not apply the global `data.filter`, because an `only_llm` or `min_games` filter would punch holes in the seed grid and remove the dedicated Vanilla baseline.
+- The module reads its inputs as a census of the controlled design: it does not apply the global `data.filter`, because an `only_llm` or `min_games` filter would punch holes in the seed grid and remove the dedicated VPAI baseline.
 - A missing `baseline_experiment` on the strength stage is a configuration error (the report has no dedicated Vanilla source at all). A configured baseline that lacks rows for a specific `(seed, player_id)` pair is not fatal: the pair keeps a visible page note.
 - The exactly-one-estimator / one-strength-table references and the at-most-one-enabled-instance rule are validated at config load; the HTML-only formats rule is enforced at render time (`report.formats` without `html` skips the pages with a warning and omits the section's link).
 - Previous and next player links on a detail page wrap cyclically within the seed's available player list, so both links always exist.

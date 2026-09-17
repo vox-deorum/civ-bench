@@ -602,7 +602,7 @@ def _coverage_warnings(
         if not disc.empty:
             out.append(
                 f"connectedness: {len(disc)} cell(s) have model(s) not connected to "
-                f"'{selected}' Vanilla baseline (extrapolated; report-only)."
+                f"'{selected}' VPAI baseline (extrapolated; report-only)."
             )
     # Comparison-pathway gaps: when explicit is selected, the implicit comparison
     # may have experiment cells with rows but no own Vanilla evidence. Such cells
