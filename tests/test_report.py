@@ -2,7 +2,7 @@
 
 Exercise the report stage on fabricated analysis manifests (no machine data roots,
 per AGENTS.md): section resolution (null = enabled analyses in canonical family
-order; explicit list = authored order), the manifest → document → md/html render,
+order; explicit list = priority order, then remaining enabled analyses), the manifest → document → md/html render,
 asset copying into a self-contained tree, empty-section handling, determinism
 (byte-stable re-render), and the loud error when a manifest is missing.
 
@@ -31,7 +31,7 @@ from bench.reports import (
     run_report,
 )
 from bench.reports.model import FamilyGroup
-from bench.reports.runner import _analyses_dir, report_dir
+from bench.reports.runner import _analyses_dir, _resolve_section_ids, report_dir
 from bench.reports.templates import _summarize_family
 
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
@@ -486,8 +486,8 @@ def test_locked_obsolete_file_is_a_warning_not_a_failure(report_env, monkeypatch
     assert (out / "report.md").exists()
 
 
-# ── section curation ────────────────────────────────────────────────────────────
-def test_explicit_sections_curate_and_reorder(report_env):
+# ── section ordering ────────────────────────────────────────────────────────────
+def test_partial_sections_prioritize_and_include_the_rest(report_env):
     run_report(report_env)
     out = report_dir(report_env)
     assert (out / "calibration.html").exists()
@@ -496,11 +496,39 @@ def test_explicit_sections_curate_and_reorder(report_env):
     report_env.report["overview_sections"] = ["perf_usage_efficiency", "pred_metrics"]
     result = run_report(report_env)
     md = (out / "report.md").read_text(encoding="utf-8")
-    assert result.n_sections == 2
-    assert "cal_reliability" not in md  # curated out
+    assert result.n_sections == 4
+    assert "cal_reliability" in md
     # Authored order respected across families: performance before prediction.
     assert md.index("## Performance") < md.index("## Prediction")
-    assert not (out / "calibration.html").exists()
+    assert (out / "calibration.html").exists()
+    assert md.index("## Prediction") < md.index("## Calibration")
+
+
+@pytest.mark.parametrize("sections", [None, [], ["perf_usage_efficiency", "pred_compare"]])
+def test_section_remainder_uses_default_order(report_env, sections):
+    report_env.report["sections"] = sections
+    expected = ["pred_metrics", "pred_compare", "cal_reliability", "perf_usage_efficiency"]
+    if sections:
+        expected = sections + [sid for sid in expected if sid not in sections]
+    assert _resolve_section_ids(report_env, []) == expected
+
+
+@pytest.mark.parametrize("include_disabled", [False, True])
+def test_section_autofill_skips_disabled_and_deduplicates(report_env, include_disabled):
+    report_env.analyses[2].enabled = False
+    report_env._resolved_graph = None
+    report_env.report["include_disabled"] = include_disabled
+    report_env.report["sections"] = ["pred_compare", "pred_compare"]
+    warnings = []
+    assert _resolve_section_ids(report_env, warnings) == [
+        "pred_compare", "pred_metrics", "perf_usage_efficiency",
+    ]
+    assert any("listed more than once" in warning for warning in warnings)
+    report_env.report["sections"] = ["cal_reliability"]
+    expected = ["pred_metrics", "pred_compare", "perf_usage_efficiency"]
+    if include_disabled:
+        expected.insert(0, "cal_reliability")
+    assert _resolve_section_ids(report_env, []) == expected
 
 
 def test_html_uses_one_shared_responsive_stylesheet(report_env):
@@ -526,6 +554,8 @@ def test_unknown_section_id_is_loud(report_env):
 
 
 def test_overview_section_must_be_in_resolved_sections(report_env):
+    report_env.analyses[2].enabled = False
+    report_env._resolved_graph = None
     report_env.report["sections"] = ["pred_metrics"]
     report_env.report["overview_sections"] = ["cal_reliability"]
     with pytest.raises(ReportError, match="overview_sections"):

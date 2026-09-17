@@ -92,13 +92,14 @@ def _ordered_analysis_ids(cfg: RunConfig) -> list[str]:
 
 
 def _resolve_section_ids(cfg: RunConfig, warnings: list[str]) -> list[str]:
+    """Prioritize listed sections, then append the remaining enabled analyses."""
     enabled = {s.id for s in cfg.analyses if s.enabled}
     all_ids = {s.id for s in cfg.analyses}
     include_disabled = bool(cfg.report.get("include_disabled", False))
 
     sections = cfg.report.get("sections")
     if sections is None:
-        # null ⇒ every enabled analysis, in dependency order.
+        # null uses the default family and config order.
         return _ordered_analysis_ids(cfg)
 
     out: list[str] = []
@@ -120,6 +121,8 @@ def _resolve_section_ids(cfg: RunConfig, warnings: list[str]) -> list[str]:
                 )
             continue
         out.append(sid)
+    selected = set(out)
+    out.extend(sid for sid in _ordered_analysis_ids(cfg) if sid not in selected)
     return out
 
 

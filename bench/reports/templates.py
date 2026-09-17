@@ -81,7 +81,7 @@ def family_title(key: str) -> str:
 def family_sort_index(key: str) -> int:
     """Canonical position of a family (unknown families sort last). The runner uses
     this to order the *default* (``sections:null``) document; explicit
-    ``report.sections`` keep their authored order instead."""
+    ``report.sections`` take priority, followed by the remaining enabled analyses."""
     return _FAMILY_ORDER.index(key) if key in _FAMILY_ORDER else len(_FAMILY_ORDER)
 
 
@@ -91,7 +91,8 @@ def _group_by_family(sections: list[Section]) -> list[FamilyGroup]:
 
     Ordering is therefore the runner's responsibility: the default path hands us
     sections already sorted into canonical family order, while an explicit
-    ``report.sections`` list hands us the author's exact order. Either way we keep
+    ``report.sections`` list hands us the author's priorities followed by the
+    remaining enabled analyses. Either way we keep
     it (invariant 3: the template never reorders behind the config's back)."""
     groups: dict[str, FamilyGroup] = {}
     order: list[str] = []

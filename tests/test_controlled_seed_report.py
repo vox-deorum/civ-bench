@@ -801,6 +801,7 @@ def test_omitted_formats_default_to_md_and_html(env):
 
 @pytest.mark.parametrize("sections, matched_first", [
     (None, False),
+    (["controlled_seed"], True),
     (["controlled_seed", "pred_compare"], True),
     (["pred_compare", "controlled_seed"], False),
 ])

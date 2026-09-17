@@ -251,7 +251,7 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
   "formats": ["md", "html"],      // md and html implemented; pdf is schema-reserved;
                                   //   an omitted formats list defaults to ["md", "html"]
   "sections": null,               // null = every enabled analysis in canonical family order;
-                                  //   or an explicit ordered list of stage ids to curate
+                                  //   or priority stage ids, followed by all remaining enabled analyses
   "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
                                   // null = cards for every resolved section; a list keeps the HTML overview compact
   "section_overrides": {},        // stage id -> optional {"tables": ["..."], "figures": ["..."]}
@@ -260,7 +260,7 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
 }
 ```
 
-The report walks each analysis result and renders one section per analysis. With `sections: null`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to curate and reorder. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above. The report adds one summary sentence for the run and each represented family page. Every analysis contributes one result summary sentence, which is reused in its overview card and detailed section.
+The report walks each analysis result and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears, bucketed into the five families in canonical order. Pass an ordered list of ids to put those sections first; every remaining enabled analysis is appended in the default order. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes the rest automatically. Chapters follow their first section's position in the resolved list. `report.html` is a compact overview: `overview_sections: null` gives every resolved section a summary card, while a list of stage ids selects the cards. The tracked templates use the eight-section compact default above. The report adds one summary sentence for the run and each represented family page. Every analysis contributes one result summary sentence, which is reused in its overview card and detailed section.
 
 Each section is headed by the module instance's resolved friendly name (the per-stage `name` override wins when present) with its resolved description underneath. For fitted ratings, `group_by: ["player_type", "strategy"]` selects the strategy-specific name and description in the code. The raw `module` string stays visible and the stage `id` keeps its anchor, so links and curation never break. The report page title is `report.title`, else the config's `friendly_name`, else its `name`, and the config `description` renders under the title on `report.html` and `report.md`.
 
