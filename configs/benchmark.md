@@ -497,6 +497,21 @@ Diplomatic, Science), and annotations include Elo, SE, and game support.
   "params": { "include_score_ratio": true, "display": "matrix" } }
 ```
 
+`ratings.outcome_matchups` reports wins per player appearance. A player type
+occupying two seats in one game contributes two appearances. Each matrix cell
+uses games shared by the row and column player types; repeated opponents of the
+same type do not multiply the row player's appearances. Summaries and victory
+charts show raw wins / player appearances (for example, `10/48`) alongside rates;
+the `vs_reference` table includes the raw `wins` and appearance count `n`.
+The expected victory rate assumes equal chances: `1 / player count`, or
+**12.5% in eight-player games**.
+Player counts come from the full panel before analysis filters. For mixed game
+sizes, expected rates are averaged over the same player appearances as observed
+rates. The `expected_win_rate` table stores these baselines, and `vs_reference`
+includes an `expected_win_rate` column. Its `p_value_win_rate` tests against this
+baseline when game sizes are fixed and the player type appears once per game;
+otherwise the p-value is blank.
+
 **Optional `ratings.*` (off by default, registry-reserved, shipped only in `benchmark.full.template.json`):**
 
 ```jsonc

@@ -1120,6 +1120,149 @@ def test_outcome_matchups_dedupes_repeated_opponent_type():
     assert counts.loc["B", "A"] == 2
 
 
+def _outcome_panel(game_sizes, identity_seats=None, winners=None):
+    """Build a small completed-game panel for observed-outcome tests."""
+    identity_seats = identity_seats or {}
+    winners = set(winners or ())
+    rows = []
+    for game_no, game_size in enumerate(game_sizes):
+        game_id = f"outcome-{game_no}"
+        seats = ["Vanilla"] + ["A"] * max(1, identity_seats.get(game_no, 0))
+        seats += [f"P{n}" for n in range(len(seats), game_size)]
+        for player_id, player_type in enumerate(seats[:game_size]):
+            rows.append({
+                "game_id": game_id,
+                "player_id": player_id,
+                "player_type": player_type,
+                "is_winner": int((game_no, player_id) in winners),
+                "score_ratio": 1.0,
+            })
+    return pd.DataFrame(rows)
+
+
+class _OutcomeContext:
+    def __init__(self, panel, catalog, display="matrix", included_types=None):
+        self.catalog = catalog
+        self._panel = panel
+        self._display = display
+        self._included_types = included_types
+
+    def uses_tables(self):
+        return ["panel"]
+
+    def load_table(self, _table_id):
+        return self._panel.copy()
+
+    def apply_filter(self, panel):
+        if self._included_types is None:
+            return panel
+        return panel[panel["player_type"].isin(self._included_types)].copy()
+
+    def matchup_display(self):
+        return self._display
+
+    def condition_pairing(self):
+        return None
+
+
+def _figure_text(figure):
+    return " ".join(text.get_text() for axis in figure.axes for text in axis.texts)
+
+
+def test_outcome_matchups_reports_per_appearance_expected_rate_for_eight_players(env):
+    from bench.analyses.ratings.outcome_matchups import RatingsOutcomeMatchups
+
+    panel = _outcome_panel([8], identity_seats={0: 2}, winners={(0, 1)})
+    result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": True}).run(
+        _OutcomeContext(panel, env.catalog)
+    )
+    expected = result.tables["expected_win_rate"].set_index("player_type")
+    win = result.tables["win_rate"].set_index("player_type")
+    counts = result.tables["counts"].set_index("player_type")
+    assert win.loc["A", "Vanilla"] == pytest.approx(0.5)
+    assert win.loc["Vanilla", "A"] == pytest.approx(0.0)
+    assert expected.loc["A", "Vanilla"] == pytest.approx(0.125)
+    assert counts.loc["A", "Vanilla"] == 2
+    assert counts.loc["Vanilla", "A"] == 1
+    assert "per-player" in result.summary
+    assert "**50.0%** (**1/2** wins per player appearance)" in result.summary
+    assert "12.5%" in result.summary
+    assert "8-player games" in result.summary
+    assert "featuring" not in result.summary
+    figure = result.figures["win_rate"]
+    assert "expected 12.5%" in _figure_text(figure)
+    assert "1/2" in _figure_text(figure)
+    assert "0/1" in _figure_text(figure)
+    assert "Counts = wins / player appearances" in figure.axes[0].get_xlabel()
+
+
+def test_outcome_matchups_expected_rate_uses_full_game_size_after_filter(env):
+    from bench.analyses.ratings.outcome_matchups import RatingsOutcomeMatchups
+
+    panel = _outcome_panel([8])
+    result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(
+        _OutcomeContext(panel, env.catalog, included_types={"A", "Vanilla"})
+    )
+    expected = result.tables["expected_win_rate"].set_index("player_type")
+    assert expected.loc["A", "Vanilla"] == pytest.approx(0.125)
+
+
+def test_outcome_matchups_expected_rate_weights_mixed_game_sizes(env):
+    from bench.analyses.ratings.outcome_matchups import RatingsOutcomeMatchups
+
+    panel = _outcome_panel([8, 4], identity_seats={0: 2})
+    result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(
+        _OutcomeContext(panel, env.catalog, display="vs_reference")
+    )
+    expected = result.tables["expected_win_rate"].set_index("player_type")
+    assert expected.loc["A", "Vanilla"] == pytest.approx((2 / 8 + 1 / 4) / 3)
+    assert "averaged over these player appearances" in result.summary
+
+
+def test_outcome_matchups_vs_reference_uses_expected_rate_and_binomial_validity(env):
+    from scipy.stats import binomtest
+    from bench.analyses.ratings.outcome_matchups import RatingsOutcomeMatchups
+
+    fixed = _outcome_panel([8, 8], winners={(0, 1)})
+    result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(
+        _OutcomeContext(fixed, env.catalog, display="vs_reference")
+    )
+    vs = result.tables["vs_reference"].set_index("player_type")
+    assert "wins" in vs.columns
+    assert vs.loc["A", "wins"] == 1
+    assert vs.loc["A", "n"] == 2
+    assert vs.loc["P2", "wins"] == 0
+    assert vs.loc["P2", "win_rate_vs_ref"] == pytest.approx(0.0)
+    assert vs.loc["A", "expected_win_rate"] == pytest.approx(0.125)
+    assert vs.loc["A", "p_value_win_rate"] == pytest.approx(
+        binomtest(1, 2, p=0.125).pvalue
+    )
+    axis = result.figures["win_rate"].axes[0]
+    assert "Expected (12.5%)" in [text.get_text() for text in axis.get_legend().get_texts()]
+    reference = next(line for line in axis.lines if line.get_linestyle() == "--")
+    assert list(reference.get_xdata()) == [0.125, 0.125]
+    assert "per player appearance" in axis.get_xlabel()
+    assert "1/2" in _figure_text(result.figures["win_rate"])
+    assert "0/2" in _figure_text(result.figures["win_rate"])
+    assert "Counts show wins / player appearances" in " ".join(
+        text.get_text() for text in result.figures["win_rate"].texts
+    )
+    assert "featuring" not in result.summary
+
+    mixed = _outcome_panel([8, 4], winners={(0, 1)})
+    mixed_result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(
+        _OutcomeContext(mixed, env.catalog, display="vs_reference")
+    )
+    assert pd.isna(mixed_result.tables["vs_reference"].set_index("player_type").loc["A", "p_value_win_rate"])
+    assert "expected 18.8%" in _figure_text(mixed_result.figures["win_rate"])
+
+    repeated = _outcome_panel([8], identity_seats={0: 2}, winners={(0, 1)})
+    repeated_result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(
+        _OutcomeContext(repeated, env.catalog, display="vs_reference")
+    )
+    assert pd.isna(repeated_result.tables["vs_reference"].set_index("player_type").loc["A", "p_value_win_rate"])
+
+
 # ── bootstrap internals (no R) ────────────────────────────────────────────────────
 def test_bootstrap_resample_and_readjust(env):
     from bench.analyses.ratings import bootstrap as boot

@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..base import Analysis, AnalysisContext, AnalysisResult
-from ..errors import AnalysisError
+from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
+from bench.analyses.errors import AnalysisError
 
 
 def create_outcome_matchup_matrices(panel: pd.DataFrame, include_score_ratio: bool = True):
@@ -70,8 +70,9 @@ class RatingsOutcomeMatchups(Analysis):
     module = "ratings.outcome_matchups"
     friendly_name = "Victory matchups"
     description = (
-        "Compares every pair of player types using actual wins and final-score "
-        "margins from completed games."
+        "Shows wins per player appearance in shared games and final-score margins. "
+        "The equal-chance victory rate is 1 divided by the number of players "
+        "in each game (12.5% for eight players)."
     )
     report_defaults = {
         "tables": [],
@@ -80,7 +81,8 @@ class RatingsOutcomeMatchups(Analysis):
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         table_id = next((t for t in ctx.uses_tables() if t == "panel"), "panel")
-        panel = ctx.apply_filter(ctx.load_table(table_id))
+        full_panel = ctx.load_table(table_id)
+        panel = ctx.apply_filter(full_panel)
         include_score_ratio = bool(self.params.get("include_score_ratio", True))
 
         required = {"game_id", "player_type", "is_winner"}
@@ -97,7 +99,23 @@ class RatingsOutcomeMatchups(Analysis):
         win_rate, score_margin, counts = create_outcome_matchup_matrices(
             panel, include_score_ratio=include_score_ratio
         )
-        metadata = {"table": table_id, "include_score_ratio": include_score_ratio}
+        game_sizes = full_panel.groupby("game_id").size()
+        expected_panel = panel.assign(is_winner=1.0 / panel["game_id"].map(game_sizes))
+        expected_win_rate, _, _ = create_outcome_matchup_matrices(
+            expected_panel, include_score_ratio=False
+        )
+        metadata = {
+            "table": table_id,
+            "include_score_ratio": include_score_ratio,
+            "victory_rate_unit": "wins per player appearance",
+            "expected_win_rate": (
+                "Equal chance: 1 / full game player count, averaged over player appearances."
+            ),
+            "p_value_win_rate": (
+                "Binomial test against equal chance, available for fixed game sizes "
+                "with one appearance of the player type per game."
+            ),
+        }
         display = ctx.matchup_display()
         reference = ctx.catalog.vanilla_label
         reference_available = reference in win_rate.columns
@@ -105,10 +123,11 @@ class RatingsOutcomeMatchups(Analysis):
         tables = {
             "win_rate": win_rate.reset_index(),
             "counts": counts.reset_index(),
+            "expected_win_rate": expected_win_rate.reset_index(),
         }
         figures = {}
         if not use_vs_reference:
-            figures["win_rate"] = self._plot_win_rate(win_rate, counts)
+            figures["win_rate"] = self._plot_win_rate(win_rate, counts, expected_win_rate)
         if include_score_ratio:
             tables["score_ratio_margin"] = score_margin.reset_index()
             if not use_vs_reference:
@@ -117,14 +136,20 @@ class RatingsOutcomeMatchups(Analysis):
         if use_vs_reference:
             vs = self._vs_reference_table(
                 ctx, panel, reference, win_rate, score_margin, counts,
-                include_score_ratio,
+                include_score_ratio, expected_win_rate, game_sizes,
             )
             tables["vs_reference"] = vs
             plot_vs = vs.copy()
-            plot_vs["n_label"] = plot_vs["n"].map(
-                lambda n: f"n={int(n)}" if pd.notna(n) else ""
+            expected_rates = vs["expected_win_rate"].dropna().unique()
+            common_expected = float(expected_rates[0]) if len(expected_rates) == 1 else None
+            plot_vs["n_label"] = plot_vs.apply(
+                lambda row: (
+                    f"{int(row['wins'])}/{int(row['n'])}"
+                    + (f"; expected {row['expected_win_rate']:.1%}" if common_expected is None else "")
+                ) if row["n"] > 0 else "",
+                axis=1,
             )
-            from ...plotting.pairing import PairingSpec, plot_paired_rows
+            from bench.plotting.pairing import PairingSpec, plot_paired_rows
 
             pairing = ctx.condition_pairing()
             plot_spec = pairing or PairingSpec((), "base", "Identity")
@@ -134,13 +159,22 @@ class RatingsOutcomeMatchups(Analysis):
                 spec=plot_spec,
                 value_col="win_rate_vs_ref",
                 identity_col="player_type",
-                ref_line=0.5,
+                ref_line=common_expected,
+                ref_label=f"Expected ({common_expected:.1%})" if common_expected is not None else None,
                 annotate_col="n_label",
                 ascending=False,
-                xlabel=f"Observed win rate vs {reference}",
-                title=f"Observed matchup win rates vs {reference}",
+                xlabel="Observed victory rate per player appearance",
+                title="Observed per-player victory rates",
+                provenance_note=(
+                    "Counts show wins / player appearances. Expected rate assumes each player "
+                    "has an equal chance to win."
+                ),
             )
+            from matplotlib.ticker import PercentFormatter
+
+            figures["win_rate"].axes[0].xaxis.set_major_formatter(PercentFormatter(1))
             if include_score_ratio:
+                plot_vs["n_label"] = plot_vs["n"].map(lambda n: f"n={int(n)}")
                 figures["score_ratio_margin"] = plot_paired_rows(
                     plot_vs,
                     catalog=ctx.catalog,
@@ -166,9 +200,22 @@ class RatingsOutcomeMatchups(Analysis):
         else:
             identity, opponent = pairs.index[0]
             n = int(counts.loc[identity, opponent])
+            wins = int(round(float(pairs.iloc[0]) * n))
+            expected = expected_win_rate.loc[identity, opponent]
+            shared_games = panel.loc[panel["player_type"].astype(str) == opponent, "game_id"]
+            identity_games = panel.loc[panel["player_type"].astype(str) == identity, "game_id"]
+            sizes = game_sizes.loc[
+                game_sizes.index.isin(shared_games) & game_sizes.index.isin(identity_games)
+            ].unique()
+            baseline_context = (
+                f"in {int(sizes[0])}-player games" if len(sizes) == 1
+                else "averaged over these player appearances"
+            )
             summary = (
-                f"{identity} has the highest observed matchup victory rate: **{pairs.iloc[0]:.1%}** "
-                f"in games featuring {opponent}, across **{n}** player appearances."
+                f"{identity} has the highest observed per-player matchup victory rate: "
+                f"**{pairs.iloc[0]:.1%}** (**{wins}/{n}** wins per player appearance). "
+                f"The expected per-player victory rate with equal chances is "
+                f"**{expected:.1%}** {baseline_context}."
             )
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
@@ -181,10 +228,12 @@ class RatingsOutcomeMatchups(Analysis):
         score_margin,
         counts,
         include_score_ratio,
+        expected_win_rate,
+        game_sizes,
     ):
         from scipy.stats import binomtest, ttest_1samp
 
-        from ...plotting.pairing import PairingSpec, attach_pair_columns
+        from bench.plotting.pairing import PairingSpec, attach_pair_columns
 
         score_samples: dict[str, list[float]] = {}
         if include_score_ratio:
@@ -201,16 +250,28 @@ class RatingsOutcomeMatchups(Analysis):
                         )
 
         rows = []
+        reference_games = panel.loc[panel["player_type"].astype(str) == reference, "game_id"]
         for identity in sorted(set(win_rate.index.astype(str)) - {reference}):
             value = win_rate.loc[identity, reference]
             n = counts.loc[identity, reference]
             wins = int(round(float(value) * float(n))) if pd.notna(value) and n else 0
+            expected = expected_win_rate.loc[identity, reference]
+            appearances = panel.loc[
+                (panel["player_type"].astype(str) == identity)
+                & panel["game_id"].isin(reference_games), "game_id"
+            ]
+            binomial_valid = (
+                n > 0 and not appearances.duplicated().any()
+                and appearances.map(game_sizes).nunique() == 1
+            )
             row = {
                 "player_type": identity,
                 "win_rate_vs_ref": value,
+                "wins": wins,
                 "n": n,
+                "expected_win_rate": expected,
                 "p_value_win_rate": (
-                    binomtest(wins, int(n), p=0.5).pvalue if pd.notna(n) and n > 0 else np.nan
+                    binomtest(wins, int(n), p=expected).pvalue if binomial_valid else np.nan
                 ),
             }
             if include_score_ratio:
@@ -227,7 +288,9 @@ class RatingsOutcomeMatchups(Analysis):
             columns="is_baseline"
         )
 
-    def _plot_win_rate(self, matrix: pd.DataFrame, counts: pd.DataFrame):
+    def _plot_win_rate(
+        self, matrix: pd.DataFrame, counts: pd.DataFrame, expected: pd.DataFrame
+    ):
         import matplotlib.pyplot as plt
         import seaborn as sns
 
@@ -238,26 +301,31 @@ class RatingsOutcomeMatchups(Analysis):
                 if pd.isna(value):
                     annot.loc[row, col] = ""
                 else:
-                    annot.loc[row, col] = f"{100 * value:.0f}%\nn={int(counts.loc[row, col])}"
+                    n_appearances = int(counts.loc[row, col])
+                    wins = int(round(float(value) * n_appearances))
+                    annot.loc[row, col] = (
+                        f"{100 * value:.1f}%\nexpected {expected.loc[row, col]:.1%}"
+                        f"\n{wins}/{n_appearances}"
+                    )
 
         n = len(matrix)
-        fig, ax = plt.subplots(figsize=(max(6, 0.7 * n + 3), max(5, 0.6 * n + 2)))
+        fig, ax = plt.subplots(figsize=(max(6, 1.1 * n + 3), max(5, 0.8 * n + 2)))
         sns.heatmap(
             matrix,
             annot=annot,
             fmt="",
-            cmap="RdBu_r",
-            center=0.5,
+            cmap="Blues",
             vmin=0.0,
             vmax=1.0,
             square=True,
             linewidths=0.3,
             linecolor="lightgray",
-            cbar_kws={"label": "Observed P(row wins game)"},
+            cbar_kws={"label": "Observed victory rate per player appearance"},
             annot_kws={"fontsize": 7},
             ax=ax,
         )
-        ax.set_title("Observed matchup win rates", fontsize=12, fontweight="bold")
+        ax.set_title("Observed per-player matchup victory rates", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Opponent player type\nCounts = wins / player appearances; expected = equal chance")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
         fig.tight_layout()
         return fig

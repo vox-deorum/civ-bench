@@ -166,6 +166,7 @@ def plot_paired_rows(
     hi_col: Optional[str] = None,
     err_col: Optional[str] = None,
     ref_line: Optional[float] = None,
+    ref_label: Optional[str] = None,
     annotate_col: Optional[str] = None,
     preliminary_col: Optional[str] = None,
     row_order: Optional[list[str]] = None,
@@ -275,7 +276,10 @@ def plot_paired_rows(
             markeredgecolor="#555555", label=_condition_label(spec, condition),
         ))
     if ref_line is not None:
-        handles.append(Line2D([0], [0], color="gray", linestyle="--", label=f"Reference ({ref_line:g})"))
+        handles.append(Line2D(
+            [0], [0], color="gray", linestyle="--",
+            label=ref_label or f"Reference ({ref_line:g})",
+        ))
     if handles:
         ax.legend(handles=handles, fontsize=9, loc="best")
     if xlabel:
