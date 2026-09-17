@@ -196,7 +196,7 @@ A stage's `filter` is then **intersected** with the resolved global `data.filter
 
 The same resolved filter object is what the shared data loaders accept, so analysis modules should pass config-shaped filters through the loader helpers instead of translating `experiments`, `players`, `only_llm`, `min_games`, `turn_range`, and `min_condition_completeness` by hand.
 
-- **`min_condition_completeness` is a global condition filter.** A controlled *condition* is an experiment's `seed × seating_rotation` grid. The filter evaluates every controlled experiment against the union of controlled slots it can see (the whole controlled design) and drops, as a whole, every experiment whose occupied-slot fraction is below the threshold; `1.0` means "skip every condition missing any slot". Because it is a global filter it applies consistently to every stage that loads a table: the estimator predictions, the strength panel, the ratings, and the descriptive analyses such as `exploratory.model_token_costs`. The grid is resolved once from the canonical `games` table, so tables that carry no `seed`/`seating_rotation` columns (tokens, turns, panel, predictions) still drop the same incomplete conditions by `experiment`. The `games` table therefore must be present (and extracted) when the filter is set.
+- **`min_condition_completeness` is a global condition filter.** A controlled *condition* is an experiment's `seed × seating_rotation` grid. The filter evaluates every controlled experiment against the union of controlled slots it can see (the whole controlled design) and drops, as a whole, every experiment whose occupied-slot fraction is below the threshold; `1.0` means "skip every condition missing any slot". Because it is a global filter it applies consistently to every stage that loads a table: the estimator predictions, the strength panel, the ratings, and the descriptive analyses such as `performance.usage_efficiency`. The grid is resolved once from the canonical `games` table, so tables that carry no `seed`/`seating_rotation` columns (tokens, turns, panel, predictions) still drop the same incomplete conditions by `experiment`. The `games` table therefore must be present (and extracted) when the filter is set.
 
 ### 3.2 `groupings`: named rating-identity dimensions
 
@@ -450,7 +450,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 - `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
 - `name` and `description` are optional per-stage identity overrides. Every analysis module ships a coded friendly name and one-line description (§6.3). Rating module instances resolve a distinct coded identity from `params.group_by`, so `bt_main` and `bt_strategy` receive different headings without config name fields. A supplied stage `name` or `description` still replaces the resolved identity for that section. When omitted, the resolved module identity is used.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
-- `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `exploratory.cost_vs_rating`, for example, reads `ratings.csv` from the first declared ratings stage.
+- `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `performance.usage_efficiency`, for example, reads `ratings.csv` from the first declared ratings stage.
 - `filter` accepts the same preset-name / inline / list forms as `data.filter` (§3.1). It is intersected with the resolved global filter; a stage can only narrow, never widen.
 
 ### 6.2 Module params catalog
@@ -682,46 +682,50 @@ catalogs or canonical tables.
   "params": { "n_repeats": 20, "groups": "feature_families" } }
 ```
 
-#### `exploratory.*`: dataset descriptives
+#### `performance.usage_efficiency`: model usage and efficiency
 
 ```jsonc
-// model_token_costs uses tokens table + pricing from models.json. Its tables retain total cost
-// and report average cost per player per game. uses.analyses supplies the BT row order
-// when condition pairing is enabled.
-{ "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
-  "params": { "currency": "usd", "by_player_type": true } }
-
-// cost_vs_rating joins average cost per player per game to a fitted ratings table.
-{ "module": "exploratory.cost_vs_rating",
+// Usage and cost summaries plus rating efficiency, grouped by player identity.
+{ "module": "performance.usage_efficiency",
   "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
   "params": { "currency": "usd", "log_x": true, "annotate": false } }
 ```
 
-Set `by_player_type:false` to render only the legacy model-level aggregate. The
-older `by_strategist` boolean is still accepted as a compatibility alias, but new
-configs should use `by_player_type`.
+The module writes `usage` and `usage_vs_rating` tables. It emits three static
+figures, `cost`, `input_tokens`, and `output_tokens`, each showing the average
+metric per player per game. Models used by the same player in a game are summed
+before averaging across complete player-game records. Output tokens include
+reasoning. Token averages remain available when pricing is unknown; cost averages
+require complete telemetry and known prices. Costs exclude cache discounts.
+The `usage` table includes unrated identities and baselines. Charts omit the
+Vanilla and Null baselines, and `usage_vs_rating` contains only rated identities.
+All three static charts follow the same Elo ordering, with unrated identities
+appended by cost. `condition_pairing` follows the shared presentation settings.
 
-Both cost modules average complete player-game records, so multiple players using
-the same model in a game count separately. Incomplete player-game records are
-excluded from averages. Tables include `avg_cost_per_player_game`, `avg_input`,
-`avg_output`, `player_games`, `complete_player_games`, and `na_player_games`.
-`avg_cost_per_game` remains an alias for `avg_cost_per_player_game`. `games`,
-`complete_games`, and `na_games` count distinct games; a complete game has no
-incomplete player records in the group. Older tables without `player_id` use
-`player_type` to identify players. Costs use catalog input and output prices and
-do not account for cached tokens or cache discounts. Output tokens include
-reasoning tokens.
+For each metric, the interactive chart fits Elo as `intercept + slope *
+log10(average usage)` across player identities and conditions, with one equally
+weighted observation per identity. The efficiency score is observed Elo minus
+fitted Elo; higher is better. At least three finite rated identities with
+positive usage and two distinct usage values are required for a fit. Zero values
+have no efficiency score and are excluded from logarithmic views. `log_x:false`
+uses a linear display axis while keeping the logarithmic regression.
 
-Cost versus skill renders a self-contained interactive chart in HTML reports.
-Hover shows average input and output tokens, cost per player per game, Elo,
-coverage, and efficiency. Legend entries filter models, and dragging zooms the
-chart. Markdown reports link to the interactive chart. `annotate` defaults to
-`false`; when enabled, it labels only the most and least efficient identities.
-The summary names those identities using `relative_strength_per_cost`, calculated
-as `10^((elo - 1500) / 400) / avg_cost_per_player_game`. Higher values mean more
-Elo-derived relative strength per unit cost. This comparison preserves separate
-player identities and conditions. Zero-cost identities have no efficiency score
-and are excluded from the log-cost chart.
+The resource selector switches cost, input tokens, and output tokens together
+with their fitted dotted curve, equation, and residual scores. A neutral table
+tooltip highlights Elo, baseline Elo, and Elo above the selected fit. The baseline
+line uses Vanilla's rating when available, otherwise 1500. `annotate:true` labels
+the identities with the highest and lowest residuals for the selected metric.
+The summary names the cost-efficiency extremes. Fits are descriptive comparisons
+within the displayed cohort, not predictions of gains from spending more.
+
+`usage_skill_fits` metadata and output columns use the metric keys `cost`, `input`,
+and `output`, such as `expected_elo_cost` and `efficiency_elo_cost`. Tables include
+`avg_cost_per_player_game`, `avg_input`, `avg_output`, and `player_games`.
+`token_complete_player_games` and `token_na_player_games` count token coverage;
+`cost_complete_player_games` and `cost_na_player_games` count cost coverage.
+`complete_player_games` and `na_player_games` are aliases for the cost counts.
+`avg_cost_per_game` aliases `avg_cost_per_player_game`; `games`, `complete_games`,
+and `na_games` count distinct games with complete or incomplete cost records.
 
 **Optional `exploratory.*` (off by default, registry-reserved, shipped only in `benchmark.full.template.json`):**
 
@@ -763,8 +767,7 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `performance.strength_panel` | Adjusted-strength summary | Summarizes model-adjusted strength, uncertainty, and experiment coverage for each player identity (bootstrap confidence intervals). |
 | `performance.turn_predicted` | Win-probability trends | Shows how each player identity's predicted chance of winning changes from the opening turns through the end of the game. |
 | `performance.controlled_seed_report` | Matched Maps | Aggregates games on shared maps by seed and final seat into the tables behind the report's Matched Maps chapter (§7.1). |
-| `exploratory.model_token_costs` | Model usage and cost | Summarizes token use and estimated US-dollar cost by model and player type. |
-| `exploratory.cost_vs_rating` | Cost versus skill | Compares average cost per player per game with each identity's estimated skill rating. |
+| `performance.usage_efficiency` | Usage, cost, and skill | Compares cost and token use per player per game with skill, and measures Elo above or below the fitted usage-skill curve. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
 identity; they cannot run, so they never appear on a report.
@@ -780,7 +783,7 @@ identity; they cannot run, so they never appear on a report.
                                          //   omitted ⇒ ["md", "html"]
   "sections": null,                      // null = every enabled analysis (canonical family order, members in dep order);
                                          //   or an explicit ordered list of stage ids to include (authored order kept)
-  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
                                          // null = a summary card for every resolved section; a list selects compact overview cards
   "section_overrides": {                 // optional inline-artifact selection by analysis stage id
     "bt_main": {"tables": ["ratings"], "figures": ["ratings"]}

@@ -231,18 +231,11 @@
       "params": { "aggregate": "mean", "by": "player_type" }
     },
     {
-      "id": "explore_token_costs",
-      "module": "exploratory.model_token_costs",
+      "id": "perf_usage_efficiency",
+      "module": "performance.usage_efficiency",
       "enabled": true,
-      "uses": { "tables": ["tokens"] },
-      "params": { "currency": "usd", "by_player_type": true }
-    },
-    {
-      "id": "explore_cost_vs_rating",
-      "module": "exploratory.cost_vs_rating",
-      "enabled": false,
       "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
-      "params": { "currency": "usd", "log_x": true, "annotate": true }
+      "params": { "currency": "usd", "log_x": true, "annotate": false }
     }
   ],
 
@@ -250,7 +243,7 @@
     "out_dir": "reports/",
     "formats": ["md", "html"],
     "sections": null,
-    "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+    "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
     "section_overrides": {},
     "title": null,
     "footer": null,

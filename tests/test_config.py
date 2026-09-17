@@ -59,10 +59,10 @@ def test_cross_template_redirects_and_trains_non_llm(configs_dir):
     assert subsets == {"score": "non_llm", "attention": "non_llm", "xgboost_cv": "non_llm"}
 
 
-def test_full_template_loads_with_disabled_cost_vs_rating(configs_dir):
+def test_full_template_loads_with_usage_efficiency(configs_dir):
     cfg = load_config(configs_dir / "benchmark.full.template.json")
-    stage = next(a for a in cfg.analyses if a.id == "explore_cost_vs_rating")
-    assert stage.enabled is False
+    stage = next(a for a in cfg.analyses if a.id == "perf_usage_efficiency")
+    assert stage.enabled is True
     assert stage.uses_analyses == ["bt_main"]
 
 
@@ -127,23 +127,23 @@ def test_presentation_stage_overrides_only_on_supported_modules(dev_spec, write_
 
 
 def test_uses_analyses_orders_consumer_after_producer(dev_spec, write_spec):
-    _analysis(dev_spec, "explore_token_costs")["uses"]["analyses"] = ["bt_main"]
+    _analysis(dev_spec, "perf_usage_efficiency")["uses"]["analyses"] = ["bt_main"]
     cfg = load_config(write_spec(dev_spec))
     dag = build_dag(cfg)
-    assert "bt_main" in dag.nodes["explore_token_costs"].deps
-    assert dag.order.index("bt_main") < dag.order.index("explore_token_costs")
+    assert "bt_main" in dag.nodes["perf_usage_efficiency"].deps
+    assert dag.order.index("bt_main") < dag.order.index("perf_usage_efficiency")
 
 
 @pytest.mark.parametrize("kind", ["unknown", "disabled", "self"])
 def test_uses_analyses_reference_errors(dev_spec, write_spec, kind):
-    consumer = _analysis(dev_spec, "explore_token_costs")
+    consumer = _analysis(dev_spec, "perf_usage_efficiency")
     if kind == "unknown":
         consumer["uses"]["analyses"] = ["ghost"]
     elif kind == "disabled":
         _analysis(dev_spec, "bt_main")["enabled"] = False
         consumer["uses"]["analyses"] = ["bt_main"]
     else:
-        consumer["uses"]["analyses"] = ["explore_token_costs"]
+        consumer["uses"]["analyses"] = ["perf_usage_efficiency"]
     with pytest.raises(ConfigError):
         load_config(write_spec(dev_spec))
 
@@ -262,8 +262,8 @@ def test_malformed_config_raises(name, dev_spec, write_spec):
         load_config(path)
 
 
-def test_model_token_costs_rejects_unknown_param(dev_spec, write_spec):
-    _analysis(dev_spec, "explore_token_costs")["params"]["bogus"] = True
+def test_usage_efficiency_rejects_unknown_param(dev_spec, write_spec):
+    _analysis(dev_spec, "perf_usage_efficiency")["params"]["bogus"] = True
     path = write_spec(dev_spec)
 
     with pytest.raises(ConfigError, match="unknown key"):
@@ -382,8 +382,8 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
         "stratified": "FALSE",
     }
     _analysis(dev_spec, "matchup_winrates")["params"]["include_score_ratio"] = "FALSE"
-    _analysis(dev_spec, "explore_token_costs")["params"]["by_player_type"] = "FALSE"
-    _analysis(dev_spec, "explore_token_costs")["params"]["by_strategist"] = "TRUE"
+    _analysis(dev_spec, "perf_usage_efficiency")["params"]["log_x"] = "FALSE"
+    _analysis(dev_spec, "perf_usage_efficiency")["params"]["annotate"] = "TRUE"
     dev_spec["data"]["filter"] = {"only_llm": "FaLsE"}
     dev_spec["report"]["include_disabled"] = "FALSE"
 
@@ -399,9 +399,9 @@ def test_boolean_strings_are_case_insensitive_and_normalized(dev_spec, write_spe
     assert cfg.analyses[0].raw["params"]["bootstrap"]["stratified"] is False
     winrates = next(a for a in cfg.analyses if a.id == "matchup_winrates")
     assert winrates.raw["params"]["include_score_ratio"] is False
-    token_costs = next(a for a in cfg.analyses if a.id == "explore_token_costs")
-    assert token_costs.raw["params"]["by_player_type"] is False
-    assert token_costs.raw["params"]["by_strategist"] is True
+    usage = next(a for a in cfg.analyses if a.id == "perf_usage_efficiency")
+    assert usage.raw["params"]["log_x"] is False
+    assert usage.raw["params"]["annotate"] is True
     assert cfg.data["filter"]["only_llm"] is False
     assert cfg.report["include_disabled"] is False
 

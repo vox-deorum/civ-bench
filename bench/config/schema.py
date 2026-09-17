@@ -167,9 +167,8 @@ ANALYSIS_MODULES = {
     "performance.turn_predicted",
     "performance.permutation_importance",
     "performance.controlled_seed_report",
+    "performance.usage_efficiency",
     # exploratory.*
-    "exploratory.model_token_costs",
-    "exploratory.cost_vs_rating",
     "exploratory.panel",
     "exploratory.turn",
     "exploratory.strategy_profiles",
@@ -203,10 +202,9 @@ ANALYSIS_PARAM_KEYS = {
     },
     "performance.turn_predicted": {"aggregate", "by"},
     "performance.controlled_seed_report": {"condition_pairing"},
-    "exploratory.model_token_costs": {
-        "currency", "by_player_type", "by_strategist", "condition_pairing",
+    "performance.usage_efficiency": {
+        "currency", "log_x", "annotate", "condition_pairing",
     },
-    "exploratory.cost_vs_rating": {"currency", "log_x", "annotate", "condition_pairing"},
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}

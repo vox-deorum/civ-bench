@@ -90,14 +90,15 @@ def report_env(tmp_path, write_spec, dev_spec):
         {"id": "pred_compare", "module": "prediction.compare", "enabled": True, "params": {}},
         {"id": "cal_reliability", "module": "calibration.reliability", "enabled": True,
          "params": {"n_bins": 5}},
-        {"id": "explore_token_costs", "module": "exploratory.model_token_costs",
-         "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
+        {"id": "perf_usage_efficiency", "module": "performance.usage_efficiency",
+         "enabled": True, "uses": {"tables": ["tokens"]},
+         "params": {}},
     ]
     # out_dir authored as the tmp root so it re-roots there; <name> is appended.
     spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"],
                       "sections": None,
                       "overview_sections": [
-                          "pred_metrics", "cal_reliability", "explore_token_costs"
+                          "pred_metrics", "cal_reliability", "perf_usage_efficiency"
                       ],
                       "section_overrides": {},
                       "title": None, "include_disabled": False}
@@ -116,7 +117,7 @@ def report_env(tmp_path, write_spec, dev_spec):
           tables={"reliability": pd.DataFrame({"bin": [0, 1], "freq": [0.1, 0.9]}),
                   "ece": pd.DataFrame({"ece": [0.031]})},
           figures=["reliability"])
-    _emit(cfg, "explore_token_costs", "exploratory.model_token_costs",
+    _emit(cfg, "perf_usage_efficiency", "performance.usage_efficiency",
           summary="Total spend $12.34 across 192 games.",
           tables={"token_costs": pd.DataFrame({"model": ["a"], "total_cost": [12.34]})},
           artifacts={"seating/ctrl.seating.json": '{"totalSeats": 2, "cells": {}}'})
@@ -130,7 +131,7 @@ def test_run_report_writes_md_and_html(report_env):
     assert result.n_sections == 4
     expected = {
         "report.md", "report.html", "prediction.html", "calibration.html",
-        "exploratory.html", "assets/report.css", "assets/report-help.js",
+        "performance.html", "assets/report.css", "assets/report-help.js",
     }
     assert expected == {
         str(path.relative_to(out)).replace("\\", "/")
@@ -143,8 +144,8 @@ def test_run_report_writes_md_and_html(report_env):
     assert md.startswith("# civbench-dev")
     assert "regenerated every result" not in md
     assert "Run **civbench-dev**" not in md
-    # Family chapters, canonical order: prediction → calibration → exploratory.
-    assert md.index("## Prediction") < md.index("## Calibration") < md.index("## Exploratory")
+    # Family chapters, canonical order: prediction → calibration → performance.
+    assert md.index("## Prediction") < md.index("## Calibration") < md.index("## Performance")
     prediction_summary = _summarize_family(
         FamilyGroup(key="prediction", title="Prediction")
     )
@@ -364,14 +365,14 @@ def test_artifacts_copied_and_linked(report_env):
     run_report(report_env)
     out = report_dir(report_env)
     # Subdir tree mirrored under assets/<id>/.
-    asset = out / "assets" / "explore_token_costs" / "seating" / "ctrl.seating.json"
+    asset = out / "assets" / "perf_usage_efficiency" / "seating" / "ctrl.seating.json"
     assert asset.exists()
     assert asset.read_text(encoding="utf-8") == '{"totalSeats": 2, "cells": {}}'
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "**Downloads and supporting files**" in md
-    assert "[ctrl.seating.json](assets/explore_token_costs/seating/ctrl.seating.json)" in md
-    html = (out / "exploratory.html").read_text(encoding="utf-8")
-    assert 'href="assets/explore_token_costs/seating/ctrl.seating.json"' in html
+    assert "[ctrl.seating.json](assets/perf_usage_efficiency/seating/ctrl.seating.json)" in md
+    html = (out / "performance.html").read_text(encoding="utf-8")
+    assert 'href="assets/perf_usage_efficiency/seating/ctrl.seating.json"' in html
 
 
 def test_html_family_pages_use_compact_module_defaults(report_env):
@@ -465,14 +466,14 @@ def test_explicit_sections_curate_and_reorder(report_env):
     out = report_dir(report_env)
     assert (out / "calibration.html").exists()
 
-    report_env.report["sections"] = ["explore_token_costs", "pred_metrics"]
-    report_env.report["overview_sections"] = ["explore_token_costs", "pred_metrics"]
+    report_env.report["sections"] = ["perf_usage_efficiency", "pred_metrics"]
+    report_env.report["overview_sections"] = ["perf_usage_efficiency", "pred_metrics"]
     result = run_report(report_env)
     md = (out / "report.md").read_text(encoding="utf-8")
     assert result.n_sections == 2
     assert "cal_reliability" not in md  # curated out
-    # Authored order respected across families: exploratory before prediction.
-    assert md.index("## Exploratory") < md.index("## Prediction")
+    # Authored order respected across families: performance before prediction.
+    assert md.index("## Performance") < md.index("## Prediction")
     assert not (out / "calibration.html").exists()
 
 
@@ -480,7 +481,7 @@ def test_html_uses_one_shared_responsive_stylesheet(report_env):
     run_report(report_env)
     out = report_dir(report_env)
     pages = [out / name for name in (
-        "report.html", "prediction.html", "calibration.html", "exploratory.html"
+        "report.html", "prediction.html", "calibration.html", "performance.html"
     )]
     for page in pages:
         html = page.read_text(encoding="utf-8")
@@ -630,13 +631,13 @@ def test_summary_markdown_renders_in_overview_and_details(report_env):
         "*estimated* from `**tokens**`. "
         "<script>alert(1)</script> [unsafe](javascript:alert(1))."
     )
-    _emit(report_env, "explore_token_costs", "exploratory.model_token_costs",
+    _emit(report_env, "perf_usage_efficiency", "performance.usage_efficiency",
           summary=summary)
     run_report(report_env)
     out = report_dir(report_env)
     md = (out / "report.md").read_text(encoding="utf-8")
     assert md.count(summary) == 2
-    for filename in ("report.html", "exploratory.html"):
+    for filename in ("report.html", "performance.html"):
         html = (out / filename).read_text(encoding="utf-8")
         assert "<strong>3</strong> models cost <strong>12.34 USD</strong>" in html
         assert "<strong>192</strong> games" in html

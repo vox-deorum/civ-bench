@@ -218,13 +218,12 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 }
 ```
 
-The modules, grouped into five families:
+The implemented modules, grouped into four families:
 
 - **ratings** rate skill: `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups`. Per-strategy Elo is `group_by: ["player_type", "strategy"]`, and confidence intervals are a `bootstrap` param, both on the ordinary fit rather than separate modules.
 - **prediction** scores the predictor: `evaluate`, `compare`. These opt in to scoring every enabled estimator by default; add `uses.estimators` only to narrow.
 - **calibration** checks honesty: `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline`.
-- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`. The last one emits the tables behind the report's controlled-seed chapter (see below).
-- **exploratory**: `model_token_costs` (uses the token table and pricing from `models.json`).
+- **performance**: `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, and `usage_efficiency`. The controlled-seed module emits the tables behind the report's Matched Maps chapter. Usage efficiency combines token telemetry, pricing, and ratings.
 
 Each module instance resolves a coded friendly name and one-line description from its parameters; `name` and `description` here override them for this one section on the report. The fitted rating modules use a distinct strategy identity when `group_by` includes `strategy`, so no config name override is needed for that variant. The resolved identity is persisted in the analysis manifest. The full list is in [configs/benchmark.md](../configs/benchmark.md) section 6.3.
 
@@ -253,7 +252,7 @@ When the strength table uses a controlled-design `block` adjustment, the bootstr
                                   //   an omitted formats list defaults to ["md", "html"]
   "sections": null,               // null = every enabled analysis in canonical family order;
                                   //   or an explicit ordered list of stage ids to curate
-  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "explore_token_costs", "explore_cost_vs_rating"],
+  "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
                                   // null = cards for every resolved section; a list keeps the HTML overview compact
   "section_overrides": {},        // stage id -> optional {"tables": ["..."], "figures": ["..."]}
   "title": null,                  // null = derive from friendly_name, else name

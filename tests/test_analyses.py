@@ -195,7 +195,7 @@ def test_registry_has_all_core_modules():
         "calibration.civ_effects", "calibration.cell_baseline",
         "performance.experiment_completeness",
         "performance.score_ratio", "performance.strength_panel", "performance.turn_predicted",
-        "exploratory.model_token_costs", "exploratory.cost_vs_rating",
+        "performance.usage_efficiency",
     }
     assert expected <= set(list_analyses())
 
@@ -769,25 +769,29 @@ def test_performance_turn_predicted(env):
 
 
 # ── exploratory ──────────────────────────────────────────────────────────────────
-def test_exploratory_model_token_costs(env):
-    r = env("exploratory.model_token_costs", {"currency": "usd"}, {"tables": ["tokens"]})
-    assert "token_costs_by_player_type" in r.table_paths
-    by_player = pd.read_csv(r.table_paths["token_costs_by_player_type"])
+def test_performance_usage_efficiency_outputs(env):
+    _write_ratings_artifact(env, [
+        {"player_type": "GPT-OSS-120B", "elo": 1600},
+        {"player_type": "Kimi-K2.5", "elo": 1700},
+    ])
+    r = env("performance.usage_efficiency", {"currency": "usd"},
+            {"tables": ["tokens"], "analyses": ["bt_main"]})
+    by_player = pd.read_csv(r.table_paths["usage"])
     assert {
-        "player_type", "model", "total_cost", "games", "complete_games",
+        "player_type", "total_cost", "games", "complete_games",
         "avg_cost_per_game",
     } <= set(by_player.columns)
-
-    tbl = pd.read_csv(r.table_paths["token_costs"])
-    assert "player_type" not in tbl.columns
-    assert "total_cost" in tbl.columns and "games" in tbl.columns
-    assert r.metadata["by_player_type"] is True
+    assert set(r.table_paths) == {"usage", "usage_vs_rating"}
+    assert set(r.figure_paths) == {"cost", "input_tokens", "output_tokens", "usage_vs_rating"}
+    assert all(Path(r.figure_paths[name]).suffix == ".png"
+               for name in ("cost", "input_tokens", "output_tokens"))
+    assert by_player["player_type"].is_unique
     assert "per player per game" in r.summary
     assert "cached tokens" in r.summary
 
 
 def test_token_costs_average_players_and_keep_complete_records(env):
-    from bench.analyses.exploratory.model_token_costs import (
+    from bench.analyses.performance.usage import (
         compute_game_costs, summarize_game_costs,
     )
 
@@ -824,7 +828,7 @@ def test_token_costs_average_players_and_keep_complete_records(env):
 
 
 def test_token_costs_combine_models_for_one_player(env):
-    from bench.analyses.exploratory.model_token_costs import (
+    from bench.analyses.performance.usage import (
         compute_game_costs, summarize_game_costs,
     )
 
@@ -843,7 +847,7 @@ def test_token_costs_combine_models_for_one_player(env):
 
 
 def test_compute_game_costs_accepts_missing_model_name(env):
-    from bench.analyses.exploratory.model_token_costs import compute_game_costs
+    from bench.analyses.performance.usage import compute_game_costs
 
     tokens = pd.DataFrame([{
         "game_id": "failed-game",
@@ -859,31 +863,6 @@ def test_compute_game_costs_accepts_missing_model_name(env):
     assert len(costs) == 1
     assert costs.iloc[0]["model"] == "Unattributed"
     assert bool(costs.iloc[0]["available"]) is False
-
-
-def test_exploratory_model_token_costs_can_use_model_only_view(env):
-    r = env(
-        "exploratory.model_token_costs",
-        {"currency": "usd", "by_player_type": False},
-        {"tables": ["tokens"]},
-    )
-
-    assert set(r.table_paths) == {"token_costs"}
-    tbl = pd.read_csv(r.table_paths["token_costs"])
-    assert "player_type" not in tbl.columns
-    assert r.metadata["by_player_type"] is False
-
-
-def test_exploratory_model_token_costs_accepts_by_strategist_alias(env):
-    r = env(
-        "exploratory.model_token_costs",
-        {"currency": "usd", "by_strategist": True},
-        {"tables": ["tokens"]},
-    )
-
-    assert "token_costs_by_player_type" in r.table_paths
-    tbl = pd.read_csv(r.table_paths["token_costs_by_player_type"])
-    assert {"player_type", "model"} <= set(tbl.columns)
 
 
 def _write_ratings_artifact(env, rows):
@@ -951,18 +930,18 @@ def test_paired_token_costs_follow_ratings_order(env, monkeypatch):
 
     monkeypatch.setattr("bench.plotting.pairing.plot_paired_rows", fake_plot)
     env(
-        "exploratory.model_token_costs",
+        "performance.usage_efficiency",
         {"currency": "usd"},
         {"tables": ["tokens"], "analyses": ["bt_main"]},
     )
-    assert captured["order"][:3] == ["GPT-OSS-120B", "Kimi-K2.5", "Vanilla"]
+    assert captured["order"] == ["GPT-OSS-120B", "Kimi-K2.5"]
 
 
 def test_paired_token_costs_declared_missing_rating_is_loud(env):
     env.cfg.presentation = {"condition_pairing": {"enabled": True}}
     with pytest.raises(AnalysisError, match="run stage 'bt_main' first"):
         env(
-            "exploratory.model_token_costs",
+            "performance.usage_efficiency",
             {"currency": "usd"},
             {"tables": ["tokens"], "analyses": ["bt_main"]},
         )
@@ -995,47 +974,41 @@ def test_global_completeness_filter_drops_incomplete_conditions_from_tokens(env)
     assert set(filtered["experiment"]) == {"llm-standard"}
 
 
-def test_cost_vs_rating_outputs_and_excludes_baseline(env, monkeypatch):
+def test_usage_vs_rating_outputs_and_excludes_baseline(env):
     env.cfg.presentation = {"condition_pairing": {"enabled": True}}
     _write_ratings_artifact(env, [
         {"player_type": "Vanilla", "elo": 1500, "se_elo": 20},
         {"player_type": "GPT-OSS-120B", "elo": 1600, "se_elo": 30},
         {"player_type": "Kimi-K2.5", "elo": 1700, "se_elo": 25},
     ])
-    def fail_on_errorbar(*args, **kwargs):
-        raise AssertionError("cost-vs-rating must not render CI/SE error bars")
-
-    monkeypatch.setattr("matplotlib.axes.Axes.errorbar", fail_on_errorbar)
     r = env(
-        "exploratory.cost_vs_rating",
+        "performance.usage_efficiency",
         {"currency": "usd", "log_x": True, "annotate": True},
         {"tables": ["tokens"], "analyses": ["bt_main"]},
         sid="cost_rating",
     )
-    assert "cost_vs_rating" in r.table_paths
-    assert "cost_vs_rating" in r.figure_paths
-    table = pd.read_csv(r.table_paths["cost_vs_rating"])
+    assert "usage_vs_rating" in r.table_paths
+    assert "usage_vs_rating" in r.figure_paths
+    table = pd.read_csv(r.table_paths["usage_vs_rating"])
     assert "Vanilla" not in set(table["player_type"])
     assert {"base_identity", "condition", "avg_cost_per_game", "elo"} <= set(table.columns)
     assert {"avg_input", "avg_output", "avg_cost_per_player_game",
-            "relative_strength_per_cost", "complete_player_games"} <= set(table.columns)
-    expected = 10 ** ((table["elo"] - 1500) / 400) / table["avg_cost_per_player_game"]
-    np.testing.assert_allclose(table["relative_strength_per_cost"], expected)
-    best = table.loc[expected.idxmax(), "player_type"]
-    worst = table.loc[expected.idxmin(), "player_type"]
-    assert f"Most cost-efficient: **{best}**" in r.summary
-    assert f"Least cost-efficient: **{worst}**" in r.summary
+            "efficiency_elo_cost", "complete_player_games"} <= set(table.columns)
+    assert table["efficiency_elo_cost"].isna().all()
+    assert "at least three rated identities" in r.summary
     assert "cached tokens" in r.summary
-    path = Path(r.figure_paths["cost_vs_rating"])
+    path = Path(r.figure_paths["usage_vs_rating"])
     assert path.suffix == ".html"
     html = path.read_text(encoding="utf-8")
     assert "Plotly.newPlot" in html
-    assert "Average input tokens" in html
-    assert "Average output tokens (including reasoning)" in html
+    assert "Input tokens" in html
+    assert "Output tokens" in html
+    assert "Baseline Elo" in html
+    assert "table_tooltip" in html
 
 
 @pytest.mark.parametrize("log_x", [False, True])
-def test_cost_vs_rating_zero_cost_has_no_efficiency_score(env, log_x):
+def test_usage_vs_rating_zero_cost_has_no_efficiency_score(env, log_x):
     tokens_path = env.cfg.data["tables"]["tokens"]
     tokens = pd.read_csv(tokens_path)
     tokens.loc[tokens["player_type"] == "GPT-OSS-120B",
@@ -1045,17 +1018,111 @@ def test_cost_vs_rating_zero_cost_has_no_efficiency_score(env, log_x):
         {"player_type": "GPT-OSS-120B", "elo": 1900},
         {"player_type": "Kimi-K2.5", "elo": 1500},
     ])
-    result = env("exploratory.cost_vs_rating", {"log_x": log_x},
+    result = env("performance.usage_efficiency", {"log_x": log_x},
                  {"tables": ["tokens"], "analyses": ["bt_main"]})
-    table = pd.read_csv(result.table_paths["cost_vs_rating"]).set_index("player_type")
-    assert pd.isna(table.loc["GPT-OSS-120B", "relative_strength_per_cost"])
-    assert "Most cost-efficient: **Kimi-K2.5**" in result.summary
-    assert "Zero-cost identities are excluded" in result.summary
+    table = pd.read_csv(result.table_paths["usage_vs_rating"]).set_index("player_type")
+    assert pd.isna(table.loc["GPT-OSS-120B", "efficiency_elo_cost"])
+    assert "at least three rated identities" in result.summary
+    assert "Zero values are excluded" in result.summary
 
 
-def test_cost_vs_rating_requires_analysis_dependency(env):
+def test_usage_vs_rating_requires_analysis_dependency(env):
     with pytest.raises(AnalysisError, match="requires the ratings stage"):
-        env("exploratory.cost_vs_rating", {}, {"tables": ["tokens"]})
+        env("performance.usage_efficiency", {}, {"tables": ["tokens"]})
+
+
+def test_usage_efficiency_summary_ranks_residuals_and_uses_actual_baseline(env):
+    tokens_path = env.cfg.data["tables"]["tokens"]
+    tokens = pd.read_csv(tokens_path)
+    template = tokens[tokens["player_type"] == "GPT-OSS-120B"].iloc[0].to_dict()
+    model = env.catalog.canonicalize_model_name(template["model_name"])
+    price = env.catalog.pricing_per_million()[model]["input_per_million"]
+    names = ["Cheap", "Good", "Mid", "High"]
+    pd.DataFrame([
+        {**template, "player_id": index, "player_type": name,
+         "input_tokens": cost * 1e6 / price, "output_tokens": 0, "reasoning_tokens": 0}
+        for index, (name, cost) in enumerate(zip(names, [0.01, 0.1, 1, 10]))
+    ]).to_csv(tokens_path, index=False)
+    _write_ratings_artifact(env, [
+        {"player_type": name, "elo": elo}
+        for name, elo in zip([*names, "Vanilla"], [1000, 1500, 1600, 1700, 1450])
+    ])
+    result = env("performance.usage_efficiency", {},
+                 {"tables": ["tokens"], "analyses": ["bt_main"]})
+    assert "Most cost-efficient: **Good** (**+160 Elo**" in result.summary
+    assert "Least cost-efficient: **Cheap** (**-120 Elo**" in result.summary
+    assert result.metadata["baseline_elo"] == 1450
+    assert result.metadata["usage_skill_fits"]["cost"]["n"] == 4
+    table = pd.read_csv(result.table_paths["usage_vs_rating"]).set_index("player_type")
+    assert table.loc["Good", "efficiency_elo_cost"] == pytest.approx(160)
+    assert table["efficiency_elo_output"].isna().all()
+
+
+@pytest.mark.parametrize("metric,column", [
+    ("cost", "avg_cost_per_player_game"), ("input", "avg_input"), ("output", "avg_output"),
+])
+def test_usage_efficiency_measures_elo_above_fitted_log_usage(metric, column):
+    from bench.analyses.performance.usage_efficiency import fit_usage_skill
+
+    table = pd.DataFrame({column: [0.01, 0.1, 1, 10, 0, np.nan, np.inf, 20],
+                          "elo": [1000, 1500, 1600, 1700, 2000, 1800, 1900, np.nan]})
+    fit = fit_usage_skill(table, metric)
+    assert fit == pytest.approx({"intercept": 1560, "slope": 220, "n": 4})
+    np.testing.assert_allclose(table.loc[:3, f"expected_elo_{metric}"], [1120, 1340, 1560, 1780])
+    np.testing.assert_allclose(table.loc[:3, f"efficiency_elo_{metric}"], [-120, 160, 40, -80])
+    assert table[f"efficiency_elo_{metric}"].idxmax() == 1
+    assert table.loc[4:, f"efficiency_elo_{metric}"].isna().all()
+
+
+@pytest.mark.parametrize("costs", [[], [1], [1, 2], [2, 2, 2]])
+def test_usage_efficiency_does_not_rank_underdetermined_fit(costs):
+    from bench.analyses.performance.usage_efficiency import fit_usage_skill
+
+    table = pd.DataFrame({"avg_cost_per_player_game": costs, "elo": [1500] * len(costs)})
+    assert fit_usage_skill(table, "cost") is None
+    assert table["efficiency_elo_cost"].isna().all()
+
+
+@pytest.mark.parametrize("log_x", [False, True])
+def test_usage_chart_switches_points_fits_and_tooltips(env, log_x):
+    from bench.analyses.base import AnalysisContext
+    from bench.analyses.performance.usage_efficiency import PerformanceUsageEfficiency, fit_usage_skill
+    from bench.plotting.pairing import PairingSpec
+
+    table = pd.DataFrame({
+        "player_type": ["Cheap", "Good", "Mid", "High", "Free"],
+        "base_identity": ["Cheap", "Good", "Mid", "High", "Free"],
+        "condition": ["base"] * 5,
+        "elo": [1000, 1500, 1600, 1700, 1400],
+        "avg_cost_per_player_game": [0.01, 0.1, 1, 10, 0],
+        "avg_input": [10, 100, 1000, 10000, 100000],
+        "avg_output": [1000, 100, 10, 1, 0],
+        "complete_player_games": [4] * 5, "na_player_games": [0] * 5,
+        "token_complete_player_games": [4] * 5, "token_na_player_games": [0] * 5,
+    })
+    fits = {metric: fit_usage_skill(table, metric) for metric in ("cost", "input", "output")}
+    ctx = AnalysisContext(config=env.cfg, catalog=env.catalog, stage_id="usage", stage_raw={},
+                          out_dir=Path(env.cfg.output.root))
+    figure = PerformanceUsageEfficiency._plot(
+        table, ctx, PairingSpec((), "base", "Base"), "usd", log_x, True, fits, 1450, "Vanilla",
+    )
+    assert figure.layout.shapes[0].y0 == 1450
+    assert figure.layout.xaxis.type == ("log" if log_x else "linear")
+    buttons = figure.layout.updatemenus[0].buttons
+    assert [button.label for button in buttons] == ["Cost", "Input tokens", "Output tokens"]
+    for metric, button in zip(("cost", "input", "output"), buttons):
+        visible = [trace for trace, shown in zip(figure.data, button.args[0]["visible"]) if shown]
+        curve = next(trace for trace in visible if trace.mode == "lines")
+        assert curve.line.dash == "dot"
+        np.testing.assert_allclose(curve.y, fits[metric]["intercept"] + fits[metric]["slope"] * np.log10(curve.x))
+        markers = [trace for trace in visible if trace.mode == "markers"]
+        good = next(trace for trace in markers if trace.name == "Good")
+        expected = table.loc[1, f"efficiency_elo_{metric}"]
+        assert good.customdata[0][4] == f"{expected:+,.0f}"
+        assert all(trace.hoverinfo == "none" and trace.error_y.array is None for trace in markers)
+        assert any("1450" in annotation["text"].replace(",", "") for annotation in button.args[1]["annotations"])
+        assert any(trace.name == "Free" for trace in markers) == (not log_x or metric == "input")
+    assert fits["cost"]["slope"] != fits["input"]["slope"]
 
 
 # ── ratings (R fit monkeypatched) ─────────────────────────────────────────────────

@@ -41,7 +41,7 @@ def _make_dev_spec() -> dict:
     The mutation tests in ``test_config.py`` index into this by position and id, so
     the shape is load-bearing: 3 estimators (``score``, ``attention``, ``xgboost``)
     in order, one ``strength`` adjust stage, and 17 analyses in the dev order
-    (``bt_main`` … ``explore_token_costs``). ``runs_dir`` is a neutral placeholder:
+    (``bt_main`` … ``perf_usage_efficiency``). ``runs_dir`` is a neutral placeholder:
     ``load_config`` never touches the filesystem there.
     """
     return {
@@ -235,11 +235,11 @@ def _make_dev_spec() -> dict:
                 "params": {"aggregate": "mean", "by": "player_type"},
             },
             {
-                "id": "explore_token_costs",
-                "module": "exploratory.model_token_costs",
+                "id": "perf_usage_efficiency",
+                "module": "performance.usage_efficiency",
                 "enabled": True,
-                "uses": {"tables": ["tokens"]},
-                "params": {"currency": "usd", "by_player_type": True},
+                "uses": {"tables": ["tokens"], "analyses": ["bt_main"]},
+                "params": {"currency": "usd", "log_x": True, "annotate": False},
             },
         ],
         "report": {

@@ -77,19 +77,20 @@ You return an `AnalysisResult`: `tables` (a dict of named DataFrames), `figures`
 
 The runner saves matplotlib figures as PNG and Plotly figures as self-contained HTML with embedded JavaScript. HTML reports embed interactive figures, and Markdown reports link to them. Figure selection uses the same names for both formats. Matched Maps and analysis charts use `bench.plotting.interactive.figure_html` for deterministic HTML and shared interaction settings. Matched Maps pages share one local Plotly asset; standalone analysis charts embed it. The report recognizes interactive figures by their `.html` extension.
 
-A minimal real module, [exploratory/model_token_costs.py](../bench/analyses/exploratory/model_token_costs.py):
+A simplified outline of [performance/usage_efficiency.py](../bench/analyses/performance/usage_efficiency.py):
 
 ```python
-from ..base import Analysis, AnalysisContext, AnalysisResult
+from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
+from bench.analyses.performance.usage import compute_game_costs, summarize_game_costs
 
-class ExploratoryModelTokenCosts(Analysis):
-    module = "exploratory.model_token_costs"
+class PerformanceUsageEfficiency(Analysis):
+    module = "performance.usage_efficiency"
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         tokens = ctx.apply_filter(ctx.load_table("tokens"))
-        pricing = ctx.catalog.pricing_per_million()
-        # ... compute per-row cost, aggregate ...
-        return AnalysisResult(tables={"token_costs": table}, summary="...")
+        records = compute_game_costs(tokens, ctx.catalog)
+        table = summarize_game_costs(records, ["player_type"])
+        return AnalysisResult(tables={"usage": table}, summary="Usage per player per game.")
 ```
 
 The steps to add one:

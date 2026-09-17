@@ -1,4 +1,4 @@
-"""Performance analyses: score-ratio OLS, strength panel, completeness, trajectories."""
+"""Performance analyses: score, strength, completeness, trajectories, and usage."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from .experiment_completeness import PerformanceExperimentCompleteness
 from .score_ratio import PerformanceScoreRatio
 from .strength_panel import PerformanceStrengthPanel
 from .turn_predicted import PerformanceTurnPredicted
+from .usage_efficiency import PerformanceUsageEfficiency
 
 __all__ = [
     "PerformanceControlledSeedReport",
@@ -14,4 +15,5 @@ __all__ = [
     "PerformanceScoreRatio",
     "PerformanceStrengthPanel",
     "PerformanceTurnPredicted",
+    "PerformanceUsageEfficiency",
 ]

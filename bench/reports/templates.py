@@ -56,12 +56,11 @@ _FAMILY_PURPOSES = {
         "positions affect the evaluation."
     ),
     "performance": (
-        "Compare strategists' strength, scores, and progress through the game, "
-        "with coverage checks to show which experiments support the results."
+        "Compare strategists' strength, progress, cost, and token use, with "
+        "coverage checks to show which experiments support the results."
     ),
     "exploratory": (
-        "Compare model usage and cost with strategic performance to understand "
-        "the resources needed to achieve stronger play."
+        "Explore game patterns and strategy profiles across the dataset."
     ),
 }
 

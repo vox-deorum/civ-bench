@@ -12,9 +12,9 @@ def test_report_defaults_are_discovered_without_importing_registry():
         "tables": [],
         "figures": ["matchup", "strength_mean", "strength_winrate"],
     }
-    assert analysis_report_defaults("exploratory.model_token_costs") == {
+    assert analysis_report_defaults("performance.usage_efficiency") == {
         "tables": [],
-        "figures": ["token_costs"],
+        "figures": ["cost", "input_tokens", "output_tokens", "usage_vs_rating"],
     }
 
 

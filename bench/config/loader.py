@@ -489,8 +489,6 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
         "weighted",
         "only_llm",
         "validate_ols",
-        "by_player_type",
-        "by_strategist",
         "include_score_ratio",
         "emit_seating",
         "log_x",
