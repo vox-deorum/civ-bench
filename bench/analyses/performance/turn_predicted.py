@@ -84,9 +84,9 @@ class PerformanceTurnPredicted(Analysis):
         fig = self._plot(over_progress, by, estimators, ctx)
         n_models = int(df["model"].nunique())
         summary = (
-            f"Win-probability trends summarize {agg} predictions from {n_models} "
-            f"estimator(s) for each {by} across "
-            f"{by_identity['n_games'].sum()} identity-game(s)."
+            f"Win-probability trends use {agg} predictions from **{n_models}** "
+            f"estimator(s) across **{by_identity['n_games'].sum()}** "
+            f"{by} identity-game(s)."
         )
         return AnalysisResult(
             tables={"by_identity": by_identity, "over_progress": over_progress},

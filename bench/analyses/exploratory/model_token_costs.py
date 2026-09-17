@@ -107,7 +107,7 @@ class ExploratoryModelTokenCosts(Analysis):
     module = "exploratory.model_token_costs"
     friendly_name = "Model usage and cost"
     description = (
-        "Summarizes token use and estimated US-dollar cost by model and player "
+        "Summarizes token use and estimated US-dollar API cost by model and player "
         "type."
     )
     report_defaults = {"tables": [], "figures": ["token_costs"]}
@@ -141,8 +141,8 @@ class ExploratoryModelTokenCosts(Analysis):
         total = model_tbl["total_cost"].sum(skipna=True)
         breakdown = " across player types" if by_player_type else ""
         summary = (
-            f"The {len(model_tbl)} model(s){breakdown} cost {total:.2f} "
-            f"{currency.upper()} across {int(model_tbl['games'].sum())} games."
+            f"**{len(model_tbl)}** model(s){breakdown} cost **{total:.2f} "
+            f"{currency.upper()}** (API pricing) across **{int(model_tbl['games'].sum())}** games."
         )
         if warning:
             summary = summary[:-1] + "; " + warning.rstrip(".") + "."

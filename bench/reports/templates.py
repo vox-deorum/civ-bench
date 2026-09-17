@@ -20,6 +20,7 @@ heatmap pages under ``controlled-seed/``.
 from __future__ import annotations
 
 from .context import ReportBuildContext
+from bench.reports.content import resolve_footer
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
@@ -137,22 +138,6 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
                 )
             )
 
-    n = len(sections)
-    section_noun = "analysis section" if n == 1 else "analysis sections"
-    n_families = len(groups) - (1 if controlled is not None else 0)
-    family_noun = "family" if n_families == 1 else "families"
-    if controlled is not None and n_families:
-        scope = f"{n_families} {family_noun} plus the controlled-seed chapter"
-    elif controlled is not None:
-        scope = "the controlled-seed chapter"
-    else:
-        scope = f"{len(groups)} {family_noun}"
-    intro = (
-        f"Run **{meta['run_name']}** (seed {meta['seed']}) produced {n} "
-        f"{section_noun} across {scope} from "
-        f"`{meta['config_path']}`; `civ-bench` regenerated every result from "
-        f"pipeline artifacts."
-    )
     section_by_id = {section.id: section for section in sections}
     overview_sections = [
         section_by_id[section_id]
@@ -166,8 +151,8 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         config_path=meta["config_path"],
         output_root=meta["output_root"],
         description=meta.get("description", "") or "",
+        footer=resolve_footer(meta.get("footer")),
         groups=groups,
         overview_sections=overview_sections,
-        intro=intro,
         controlled_seed=controlled,
     )

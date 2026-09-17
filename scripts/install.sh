@@ -13,7 +13,7 @@ echo "Using ${PYTHON} ($("${PYTHON}" --version 2>&1))"
 # --- Python dependencies (all required, no optional extras) ------------------
 PY_DEPS=(
     pandas numpy scipy statsmodels matplotlib seaborn plotly
-    scikit-learn tabulate
+    scikit-learn tabulate markdown-it-py
     torch xgboost optuna imbalanced-learn
 )
 
@@ -38,7 +38,7 @@ echo "[3/4] Verifying Python imports"
 "${PYTHON}" - <<'PYEOF'
 import importlib, sys
 mods = ['pandas','numpy','scipy','statsmodels','matplotlib','seaborn','plotly',
-        'sklearn','tabulate','torch','xgboost','optuna','imblearn']
+        'sklearn','tabulate','markdown_it','torch','xgboost','optuna','imblearn']
 missing = []
 for m in mods:
     try:

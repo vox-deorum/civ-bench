@@ -78,9 +78,9 @@ class PredictionCompare(Analysis):
         fig = self._plot(rank_corr)
 
         summary = (
-            f"The {len(estimators)} estimators reach mean within-decision rank "
-            f"agreement of {pairs['rank_spearman'].mean():.3f} across "
-            f"{len(merged):,} shared predictions (Spearman rho)."
+            f"**{len(estimators)}** estimators average **{pairs['rank_spearman'].mean():.3f}** "
+            f"within-decision rank agreement across **{len(merged):,}** shared predictions "
+            f"(Spearman rho)."
         )
         return AnalysisResult(
             tables={

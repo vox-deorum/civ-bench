@@ -64,9 +64,9 @@ class PerformanceScoreRatio(Analysis):
         tables["coefficients"] = coef
 
         summary = (
-            f"The {' + '.join(predictors)} model explains "
-            f"{result.rsquared * 100:.1f}% of variation in {target} across "
-            f"{int(result.nobs):,} observations (ordinary least squares regression)."
+            f"The {' + '.join(predictors)} model explains **{result.rsquared * 100:.1f}%** "
+            f"of variation in {target} across **{int(result.nobs):,}** observations "
+            "(ordinary least squares regression)."
         )
         return AnalysisResult(
             tables=tables, figures=figures, summary=summary,

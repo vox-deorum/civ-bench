@@ -14,6 +14,13 @@ from __future__ import annotations
 
 import html as _html
 
+from bench.reports.content import (
+    CITATION_MARKDOWN,
+    render_citation_html,
+    render_footer_html,
+    render_summary_html,
+)
+
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
@@ -102,8 +109,9 @@ def render_markdown(doc: ReportDocument) -> str:
     if doc.description:
         lines.append(f"*{doc.description}*")
         lines.append("")
-    lines.append(doc.intro)
-    lines.append("")
+    if doc.intro:
+        lines.append(doc.intro)
+        lines.append("")
 
     if doc.overview_sections:
         family_for = {
@@ -140,6 +148,9 @@ def render_markdown(doc: ReportDocument) -> str:
         for section in group.sections:
             lines.append(f'<a id="{anchors[id(section)]}"></a>')
             _render_section_md(section, lines)
+    lines.extend([CITATION_MARKDOWN, ""])
+    if doc.footer.strip():
+        lines.extend(["---", "", doc.footer.strip(), ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -268,6 +279,8 @@ h3 { margin-top: 1.75rem; }
 .module { color: #445164; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .meta, .caption { color: #687486; font-size: .88rem; }
 .caption { font-style: italic; }
+.report-footer { margin-top: 2rem; border-top: 1px solid #d8dee6; padding-top: 1rem; color: #687486; font-size: .88rem; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f0f3f7; }
 .empty { color: #778294; font-style: italic; }
 figure { margin: 1.25rem 0 2rem; }
 img { max-width: 100%; height: auto; border: 1px solid #e2e6eb; background: white; }
@@ -416,7 +429,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     parts.append(f"<h1>{_html.escape(doc.title)}</h1>")
     if doc.description:
         parts.append(f'<p class="caption">{_html.escape(doc.description)}</p>')
-    parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
+    if doc.intro:
+        parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
     parts.append('<section aria-labelledby="overview-heading">')
     parts.append('<h2 id="overview-heading">Overview</h2>')
     parts.append('<div class="overview-grid">')
@@ -433,7 +447,10 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
         parts.append(f'<p><a href="{_html.escape(target)}">View details</a></p>')
         parts.append("</article>")
-    parts.append("</div></section></main></body></html>")
+    parts.append("</div></section>")
+    parts.append(render_citation_html())
+    parts.append(render_footer_html(doc.footer))
+    parts.append("</main></body></html>")
     pages["report.html"] = "\n".join(parts) + "\n"
 
     for group in doc.groups:
@@ -449,6 +466,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
             parts.append(f"<p>{_md_inline_to_html(group.summary)}</p>")
         for section in group.sections:
             _render_section_html(section, parts, anchors[id(section)])
+        parts.append(render_footer_html(doc.footer))
         parts.append("</main></body></html>")
         pages[filenames[id(group)]] = "\n".join(parts) + "\n"
     if doc.controlled_seed is not None:
@@ -520,39 +538,5 @@ def _render_table_html(table: Table, parts: list[str]) -> None:
 
 
 def _md_inline_to_html(text: str) -> str:
-    """Escape text, then re-enable the tiny inline-markdown subset our summaries use
-    (``**bold**``, `` `code` ``). Keeps the HTML faithful to the markdown without a
-    full markdown parser dependency.
-
-    Code spans are emitted first and their contents are left verbatim, so a ``**``
-    inside a code span is never mistaken for bold (which would open a ``<strong>``
-    across the span and make the HTML disagree with the markdown).
-    """
-    escaped = _html.escape(text)
-    out: list[str] = []
-    i, n = 0, len(escaped)
-    while i < n:
-        if escaped[i] == "`":
-            close = escaped.find("`", i + 1)
-            if close == -1:  # unbalanced tick: leave it (and the rest) literal
-                out.append(_md_bold(escaped[i:]))
-                break
-            out.append(f"<code>{escaped[i + 1 : close]}</code>")
-            i = close + 1
-        else:
-            nxt = escaped.find("`", i)
-            out.append(_md_bold(escaped[i:] if nxt == -1 else escaped[i:nxt]))
-            i = n if nxt == -1 else nxt
-    return "".join(out)
-
-
-def _md_bold(text: str) -> str:
-    """Convert ``**bold**`` runs to ``<strong>`` in a code-free text segment."""
-    out = text
-    while "**" in out:
-        first = out.find("**")
-        second = out.find("**", first + 2)
-        if second == -1:
-            break
-        out = out[:first] + f"<strong>{out[first + 2 : second]}</strong>" + out[second + 2 :]
-    return out
+    """Render inline Markdown consistently across report pages."""
+    return render_summary_html(text)

@@ -33,19 +33,19 @@ class CalibrationCivEffects(Analysis):
         path = Path(adjust_dir) / "civ_effects.csv"
         if not path.exists():
             return AnalysisResult(
-                summary="Civilization strength effects are unavailable because the adjustment stage did not produce them."
+                summary="Civilization strength effects unavailable: the adjustment stage produced no table."
             )
         df = pd.read_csv(path)
         if df.empty:
             return AnalysisResult(
-                summary="Civilization strength effects are unavailable because civilization adjustment was disabled."
+                summary="Civilization strength effects unavailable: civilization adjustment was disabled."
             )
 
         df = df.sort_values("civ_effect").reset_index(drop=True)
         fig = self._plot(df)
         summary = (
-            f"Civilization strength effects range from {df['civ_effect'].min():+.3f} "
-            f"to {df['civ_effect'].max():+.3f} across {len(df)} civilizations "
+            f"Civilization effects span **{df['civ_effect'].min():+.3f}** to "
+            f"**{df['civ_effect'].max():+.3f}** across **{len(df)}** civilizations "
             f"(log-odds scale)."
         )
         return AnalysisResult(

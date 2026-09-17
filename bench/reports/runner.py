@@ -412,6 +412,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "config_path": str(cfg.config_path),
         "output_root": cfg.output.resolved_root,
         "description": cfg.description,
+        "footer": report_cfg.get("footer"),
         "overview_section_ids": overview_ids,
         "formats": formats,
     }

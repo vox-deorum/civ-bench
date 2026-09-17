@@ -498,6 +498,22 @@ def _read(out, name):
     return (out / name).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("footer", [None, "Copyright **Example** [Site](https://example.com)", ""])
+def test_footer_on_controlled_seed_pages(env, footer):
+    env()
+    env.cfg.report["footer"] = footer
+    run_report(env.cfg)
+    out = report_dir(env.cfg)
+    for page in (out / "controlled-seed").glob("*.html"):
+        html = page.read_text(encoding="utf-8")
+        assert ("<footer" in html) == (footer != "")
+        assert "@article{chen2026civbench," not in html
+        if footer is None:
+            assert 'href="https://arxiv.org/abs/2604.07733"' in html
+        elif footer:
+            assert 'Copyright <strong>Example</strong> <a href="https://example.com">Site</a>' in html
+
+
 def test_controlled_chapter_rides_along_with_the_family_report(rendered):
     env, result, out = rendered
     expected = {
@@ -838,8 +854,14 @@ def _tiny_doc() -> ControlledSeedDocument:
 
 
 def test_renderer_escapes_labels_and_query_parameters():
-    pages = render_controlled_seed_site(_tiny_doc())
+    doc = _tiny_doc()
+    doc.summary = "**2** runs for *one* seed, `**raw**` & <Model>."
+    pages = render_controlled_seed_site(doc)
     overview = pages["controlled-seed/index.html"]
+    assert (
+        "<p><strong>2</strong> runs for <em>one</em> seed, "
+        "<code>**raw**</code> &amp; &lt;Model&gt;.</p>"
+    ) in overview
     # Without navigation the chapter page renders standalone (centered layout).
     assert "controlled-content" in overview
     assert "<title>Controlled seed | Report &amp; &lt;Summary&gt;</title>" in overview

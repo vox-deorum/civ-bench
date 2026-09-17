@@ -58,8 +58,8 @@ class CalibrationLossByProgress(Analysis):
         table = pd.DataFrame(rows, columns=["model", "turn_progress_bin", "n_samples", *metrics])
         fig = self._plot(table, metrics, labels, ctx)
         summary = (
-            f"Prediction error is tracked across {n_bins} stages of game progress for "
-            f"{len(estimators)} estimator(s) using {', '.join(metrics)}."
+            f"Prediction error spans **{n_bins}** game-progress bins for "
+            f"**{len(estimators)}** estimator(s) ({', '.join(metrics)})."
         )
         return AnalysisResult(
             tables={"loss_by_progress": table},

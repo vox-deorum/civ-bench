@@ -155,14 +155,14 @@ class RatingsOutcomeMatchups(Analysis):
                 )
 
         summary = (
-            f"Observed wins compare {len(win_rate)} player types across "
-            f"{panel['game_id'].nunique()} games in a "
+            f"Observed wins: **{len(win_rate)}** player types across "
+            f"**{panel['game_id'].nunique()}** games, "
             f"{'reference view' if use_vs_reference else 'pairwise matrix'}"
         )
         if include_score_ratio:
             summary += "; score-ratio margins are row minus column"
         if display == "vs_reference" and not reference_available:
-            summary += f"; reference '{reference}' is absent, so the report rendered matrix figures instead"
+            summary += f"; reference '{reference}' is absent"
         summary += "."
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 

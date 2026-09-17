@@ -283,10 +283,10 @@ class PerformanceControlledSeedReport(Analysis):
             summary.loc[summary["strategist"] != vanilla_label].shape[0]
         )
         summary_text = (
-            f"Controlled seed comparison covers {n_seeds} seed(s) and {n_players} final "
-            f"seat(s) with {n_combos} strategist-condition combination(s) plus the "
-            f"dedicated Vanilla baseline '{baseline_experiment}' from "
-            f"{int(rows['game_id'].nunique())} controlled game(s)."
+            f"**{int(rows['game_id'].nunique())}** controlled games cover "
+            f"**{n_seeds}** seeds, **{n_players}** final seats, and "
+            f"**{n_combos}** strategist-condition combinations; "
+            f"Vanilla baseline: '{baseline_experiment}'."
         )
         no_baseline = int((~index["has_matched_vanilla"].astype(bool)).sum())
         no_probability = int((~index["has_probability"].astype(bool)).sum())
@@ -297,10 +297,10 @@ class PerformanceControlledSeedReport(Analysis):
                 "controlled rows"
             )
         elif no_baseline:
-            notes.append(f"{no_baseline} seed-player pair(s) lack a matched Vanilla baseline")
+            notes.append(f"**{no_baseline}** seed-player pair(s) lack a matched Vanilla baseline")
         if no_probability:
             notes.append(
-                f"{no_probability} seed-player pair(s) have no usable prediction rows"
+                f"**{no_probability}** seed-player pair(s) have no usable prediction rows"
             )
         if notes:
             summary_text += " Note: " + "; ".join(notes) + "."

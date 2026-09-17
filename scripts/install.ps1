@@ -18,7 +18,7 @@ Write-Host "Using $Python ($pyVersion)" -ForegroundColor Cyan
 # --- Python dependencies (all required, no optional extras) ------------------
 $PyDeps = @(
     'pandas', 'numpy', 'scipy', 'statsmodels', 'matplotlib', 'seaborn', 'plotly',
-    'scikit-learn', 'tabulate',
+    'scikit-learn', 'tabulate', 'markdown-it-py',
     'torch', 'xgboost', 'optuna', 'imbalanced-learn'
 )
 
@@ -40,7 +40,7 @@ if (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) {
 Write-Host "`n[3/4] Verifying Python imports" -ForegroundColor Cyan
 $ImportNames = @(
     'pandas', 'numpy', 'scipy', 'statsmodels', 'matplotlib', 'seaborn', 'plotly',
-    'sklearn', 'tabulate', 'torch', 'xgboost', 'optuna', 'imblearn'
+    'sklearn', 'tabulate', 'markdown_it', 'torch', 'xgboost', 'optuna', 'imblearn'
 )
 $ModList = ($ImportNames | ForEach-Object { "'$_'" }) -join ', '
 $checkPy = @"

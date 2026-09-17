@@ -11,8 +11,8 @@ with per-seed heatmaps and one HTML page per seed-player pair). No analysis
 hardcodes its place in the document, and the whole site regenerates from disk, so
 ``civ-bench report`` reproduces it without re-running any analysis (invariant 3).
 
-Import-light: needs pandas + the stdlib only (figures are already PNGs on disk), so
-it pulls neither matplotlib nor R; safe to import from the CLI report path.
+Figures are already PNGs on disk, so rendering pulls neither matplotlib nor R.
+Markdown footers use markdown-it-py; tables use pandas.
 """
 
 from __future__ import annotations

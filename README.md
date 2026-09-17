@@ -150,3 +150,14 @@ When you add a module or a validation rule, add or extend its test in the same c
 ## License
 
 Released under the [MIT License](LICENSE). Copyright (c) 2025 John Chen, University of Arizona.
+
+## Citation
+
+```bibtex
+@article{chen2026civbench,
+  title={CivBench: Progress-Based Evaluation for LLMs' Strategic Decision-Making in Civilization V},
+  author={Chen, John and Cheng, Sihan and Gurkan, Can and Lin, Mingyi},
+  journal={Conference on Language Modeling (COLM)},
+  year={2026}
+}
+```

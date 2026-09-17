@@ -38,6 +38,9 @@ class AnalysisResult:
     ``calibration.cell_baseline`` on a fully uncontrolled run) returns an empty
     result: :meth:`is_empty` is true and the runner records it without error.
 
+    ``summary`` is concise inline Markdown. Bold key numeric results with
+    ``**value**``; the report renders the formatting in overview and detail views.
+
     ``artifacts`` is the escape hatch for files that are neither a tabular CSV
     nor a figure (e.g. the generated ``seating/*.seating.json`` files): it maps a
     path *relative to the analysis dir* (subdirs allowed) to the file's text

@@ -144,7 +144,7 @@ class PerformanceExperimentCompleteness(Analysis):
         tables = build_experiment_completeness(panel, games, baseline_experiment)
         if not tables:
             return AnalysisResult(
-                summary="Experiment coverage is unavailable because the run has no controlled experiment rows.",
+                summary="Experiment coverage unavailable: the run has no controlled experiment rows.",
             )
 
         tokens = self._load_tokens(ctx)
@@ -168,10 +168,10 @@ class PerformanceExperimentCompleteness(Analysis):
         warning_experiments = int((comp["warning"].fillna("ok").astype(str) != "ok").sum())
         failed_turns = int(comp["failed_turn_count"].fillna(0).sum())
         summary = (
-            f"The run contains {present_games} of {required_games} planned games, "
-            f"with {missing_games} missing slot(s), {repeated_slots} repeated slot(s), "
-            f"{failed_turns} failed decision turn(s), and "
-            f"{warning_experiments} experiment(s) with warnings"
+            f"**{present_games}/{required_games}** planned games are present: "
+            f"**{missing_games}** missing slot(s), **{repeated_slots}** repeated slot(s), "
+            f"**{failed_turns}** failed decision turn(s), and "
+            f"**{warning_experiments}** experiment(s) with warnings"
         )
 
         artifacts: dict[str, str] = {}
@@ -183,8 +183,8 @@ class PerformanceExperimentCompleteness(Analysis):
                 out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)
                 open_total = int(sum(r["open_cells"] for r in index_rows))
                 summary += (
-                    f"; generated {len(index_rows)} seating.json file(s) with "
-                    f"{open_total} open cell(s)"
+                    f"; generated **{len(index_rows)}** seating.json file(s) with "
+                    f"**{open_total}** open cell(s)"
                 )
             if warnings:
                 notes = "; ".join(

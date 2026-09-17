@@ -341,11 +341,11 @@ class PerformanceStrengthPanel(Analysis):
             )
             if adv_fig is not None:
                 figures["logit_advantage"] = adv_fig
-            adv_note = f"logit-advantage view over {len(cell)} cell-baselined rows"
+            adv_note = f"logit-advantage view over **{len(cell)}** cell-baselined rows"
             if by == "player_type":
                 vrow = adv_tbl[adv_tbl[by] == ctx.catalog.vanilla_label]
                 if not vrow.empty:
-                    adv_note += f"; Vanilla mean = {float(vrow['mean'].iloc[0]):+.3f}"
+                    adv_note += f"; Vanilla mean = **{float(vrow['mean'].iloc[0]):+.3f}**"
 
         coverage = self._load_coverage(ctx, table_id)
         if coverage is not None:
@@ -362,13 +362,13 @@ class PerformanceStrengthPanel(Analysis):
                 ).sum()
             )
             report_notes.append(
-                f"cell-coverage report has {len(coverage)} cells, "
-                f"{missing} missing, {no_baseline} without Vanilla baseline"
+                f"**{len(coverage)}** cells: "
+                f"**{missing}** missing, **{no_baseline}** without Vanilla baseline"
             )
         summary = (
-            f"The strength panel covers {len(summary_tbl)} identities by {metric}, "
-            f"including {n_prelim} preliminary result(s) with fewer than "
-            f"{min_games_prelim} games"
+            f"{metric}: **{len(summary_tbl)}** identities, "
+            f"**{n_prelim}** preliminary with fewer than "
+            f"**{min_games_prelim}** games"
         )
         if report_notes:
             summary += "; " + "; ".join(report_notes)

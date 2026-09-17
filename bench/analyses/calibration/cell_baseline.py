@@ -56,12 +56,12 @@ class CalibrationCellBaseline(Analysis):
         baseline_path = adjust_dir / "cell_baseline.csv"
         if not baseline_path.exists():
             return AnalysisResult(
-                summary="Starting-position baselines are unavailable because the adjustment stage did not produce them."
+                summary="Starting-position baselines unavailable: the adjustment stage produced no table."
             )
         cb = pd.read_csv(baseline_path)
         if cb.empty:
             return AnalysisResult(
-                summary="Starting-position baselines are unavailable because the run has no controlled experiment rows."
+                summary="Starting-position baselines unavailable: the run has no controlled experiment rows."
             )
 
         coverage = self._load_coverage(adjust_dir)
@@ -79,8 +79,8 @@ class CalibrationCellBaseline(Analysis):
         # dropped (it duplicates the explicit reference), so don't count it here either.
         implicit_exps = set(cb.loc[cb["pathway"] == "implicit", "experiment"].unique()) - explicit_exps
         summary = (
-            f"Starting-position baselines cover {cb['seed'].nunique()} map seed(s) "
-            f"and {len(implicit_exps)} inferred condition(s), "
+            f"Starting-position baselines cover **{cb['seed'].nunique()}** map seed(s) "
+            f"and **{len(implicit_exps)}** inferred condition(s), "
             f"{'with' if explicit_exps else 'without'} an explicit reference."
         )
         return AnalysisResult(

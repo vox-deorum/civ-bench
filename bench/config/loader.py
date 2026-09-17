@@ -575,6 +575,8 @@ def _validate_report(report: dict) -> None:
         _check_type(report["out_dir"], (str,), "report.out_dir")
     if "title" in report and report["title"] is not None:
         _check_type(report["title"], (str,), "report.title")
+    if "footer" in report and report["footer"] is not None:
+        _check_type(report["footer"], (str,), "report.footer")
     if "include_disabled" in report:
         report["include_disabled"] = coerce_bool(
             report["include_disabled"], "report.include_disabled"

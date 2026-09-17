@@ -18,6 +18,8 @@ from typing import Optional
 
 import pandas as pd
 
+from bench.config.schema import REPORT_DEFAULT_FOOTER
+
 
 @dataclass
 class Figure:
@@ -103,6 +105,7 @@ class ReportDocument:
     intro: str = ""
     overview_sections: list[Section] = field(default_factory=list)
     controlled_seed: Optional["ControlledSeedDocument"] = None
+    footer: str = REPORT_DEFAULT_FOOTER
 
     @property
     def n_sections(self) -> int:
@@ -134,6 +137,7 @@ class ControlledSeedDocument:
     probability_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     downloads: list[Download] = field(default_factory=list)
+    footer: str = REPORT_DEFAULT_FOOTER
 
     @property
     def vanilla_label(self) -> str:

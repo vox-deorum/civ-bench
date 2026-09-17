@@ -291,6 +291,20 @@ def test_report_page_fields_load(dev_spec, write_spec):
     assert cfg.report["section_overrides"]["bt_main"]["tables"] == ["ratings"]
 
 
+@pytest.mark.parametrize("footer", [None, "", "Copyright **Example**\n\n[Site](https://example.com)"])
+def test_report_footer_loads(dev_spec, write_spec, footer):
+    dev_spec["report"]["footer"] = footer
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["footer"] == footer
+
+
+@pytest.mark.parametrize("footer", [42, False, [], {}])
+def test_report_footer_rejects_non_text(dev_spec, write_spec, footer):
+    dev_spec["report"]["footer"] = footer
+    with pytest.raises(ConfigError, match=r"report\.footer"):
+        load_config(write_spec(dev_spec))
+
+
 def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
     """data.extract.auto_fix is an accepted bool (coerced from a string like the siblings)."""
     dev_spec["data"]["extract"]["auto_fix"] = "FALSE"

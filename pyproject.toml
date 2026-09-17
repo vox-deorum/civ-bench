@@ -23,6 +23,7 @@ dependencies = [
   "plotly",
   "scikit-learn",
   "tabulate",
+  "markdown-it-py",
   "torch",
   "xgboost",
   "optuna",

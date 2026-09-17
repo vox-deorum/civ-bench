@@ -39,6 +39,7 @@ import numpy as np
 
 from .assets import REPORT_COMMON_JS
 from .context import ReportBuildContext
+from bench.reports.content import render_footer_html, render_summary_html, resolve_footer
 from .errors import ReportError
 from .model import ControlledSeedDocument
 
@@ -90,6 +91,7 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         config_path=ctx.meta["config_path"],
         output_root=ctx.meta["output_root"],
         description=ctx.meta.get("description", "") or "",
+        footer=resolve_footer(ctx.meta.get("footer")),
         section_id=section.id,
         summary=section.summary,
         metadata=dict(section.metadata or {}),
@@ -451,7 +453,7 @@ def _render_overview(
     parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}</h1>")
     if doc.description:
         parts.append(f'<p class="caption">{_esc(doc.description)}</p>')
-    parts.append(f"<p>{_esc(doc.summary)}</p>")
+    parts.append(f"<p>{render_summary_html(doc.summary)}</p>")
     meta_bits = []
     if doc.metadata.get("baseline_experiment"):
         meta_bits.append(
@@ -497,6 +499,7 @@ def _render_overview(
             )
         parts.append("</ul></section>")
 
+    parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
     parts.append('<script src="../assets/report-common.js" defer></script>')
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
@@ -767,6 +770,7 @@ def _render_detail(
     parts.append(_comparison_table(doc, seed, player_id))
     parts.append("</section>")
 
+    parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
     parts.append(
         f'<script type="application/json" id="curve-data">{_chart_data(series)}</script>'
