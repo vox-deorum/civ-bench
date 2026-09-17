@@ -24,6 +24,7 @@ from bench.reports.content import resolve_footer
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
+    CONTROLLED_SEED_PURPOSE,
     CONTROLLED_SEED_TITLE,
     controlled_seed_document,
 )
@@ -37,6 +38,31 @@ _FAMILY_TITLES = {
     "calibration": "Calibration",
     "performance": "Performance",
     "exploratory": "Exploratory",
+}
+
+_FAMILY_PURPOSES = {
+    "ratings": (
+        "Compare strategists' relative skill across games, using ratings that "
+        "summarize how consistently they outperform their opponents."
+    ),
+    "prediction": (
+        "Compare how well win-probability estimators predict game outcomes, "
+        "since these estimates underpin the strength scores used to evaluate "
+        "strategists."
+    ),
+    "calibration": (
+        "Check whether predicted win probabilities match observed win rates, "
+        "and examine how prediction errors, civilizations, and starting "
+        "positions affect the evaluation."
+    ),
+    "performance": (
+        "Compare strategists' strength, scores, and progress through the game, "
+        "with coverage checks to show which experiments support the results."
+    ),
+    "exploratory": (
+        "Compare model usage and cost with strategic performance to understand "
+        "the resources needed to achieve stronger play."
+    ),
 }
 
 # Stable display order for the families; unknown families sort after these, in the
@@ -89,7 +115,9 @@ def _join_titles(titles: list[str]) -> str:
 
 
 def _summarize_family(group: FamilyGroup) -> str:
-    """Return one sentence describing the results collected on a family page."""
+    """Explain what readers can learn from this family of analyses."""
+    if group.key in _FAMILY_PURPOSES:
+        return _FAMILY_PURPOSES[group.key]
     titles = [section.title for section in group.sections]
     noun = "result" if len(titles) == 1 else "results"
     return f"This page brings together the {noun} for {_join_titles(titles)}."
@@ -123,17 +151,13 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
                 key=CONTROLLED_SEED_DIR,
                 title=CONTROLLED_SEED_TITLE,
                 sections=[annex_section],
-                summary=(
-                    "Per-seed heatmaps compare every strategist and condition "
-                    "across final player positions, with one detail page per "
-                    "seed-player pair."
-                ),
+                summary=CONTROLLED_SEED_PURPOSE,
             )
         )
         if "html" in (meta.get("formats") or []):
             annex_section.downloads.append(
                 Download(
-                    label="Controlled-seed heatmap pages (HTML)",
+                    label="Matched-map heatmaps (HTML)",
                     rel_path=CONTROLLED_SEED_OVERVIEW,
                 )
             )

@@ -1,4 +1,7 @@
-"""Shared Markdown rendering for report summaries, citations, and footers."""
+"""Shared report summaries, help tooltips, citations, and footers."""
+
+import html
+import re
 
 from markdown_it import MarkdownIt
 
@@ -22,6 +25,43 @@ def resolve_footer(value: str | None) -> str:
 def render_summary_html(summary: str) -> str:
     """Render inline CommonMark with raw HTML escaped and unsafe links disabled."""
     return MarkdownIt("commonmark", {"html": False}).renderInline(summary)
+
+
+def report_summary(summary: str, metadata: dict) -> str:
+    """Keep baseline provenance in metadata and use its public report label."""
+    baseline = metadata.get("baseline_experiment")
+    if baseline:
+        for quoted in (f"'{baseline}'", f'"{baseline}"', f"`{baseline}`"):
+            summary = summary.replace(f": {quoted}", "").replace(f" {quoted}", "")
+    summary = re.sub(r"\bVanilla\b", "VPAI", summary)
+    # Older saved manifests carry unformatted coverage counts.
+    if summary.startswith("Controlled seed comparison covers "):
+        summary = summary.replace("Controlled seed comparison covers ", "The comparison covers ", 1)
+        summary = re.sub(r"(?<!\*)\b\d+\b(?!\*)", r"**\g<0>**", summary)
+    return summary
+
+
+def metadata_text(metadata: dict) -> str:
+    """Format analysis provenance for a tooltip or Markdown disclosure."""
+    parts = []
+    for key, value in metadata.items():
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value)
+        parts.append(f"{key}: {value}")
+    return "; ".join(parts)
+
+
+def render_help_html(text: str, tip_id: str, label: str = "Details") -> str:
+    """An escaped help control shared by every HTML report page."""
+    if not text.strip():
+        return ""
+    return (
+        '<span class="report-help">'
+        f'<button type="button" class="help-toggle" aria-label="{html.escape(label)}" '
+        f'aria-describedby="{html.escape(tip_id)}" aria-expanded="false">?</button>'
+        f'<span class="help-text" role="tooltip" id="{html.escape(tip_id)}">'
+        f'{html.escape(text)}</span></span>'
+    )
 
 
 def render_footer_html(footer: str) -> str:

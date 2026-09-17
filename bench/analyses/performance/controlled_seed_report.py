@@ -209,7 +209,7 @@ def _interpolate_curves(
 
 class PerformanceControlledSeedReport(Analysis):
     module = "performance.controlled_seed_report"
-    friendly_name = "Controlled seed comparison"
+    friendly_name = "Matched Maps"
     description = (
         "Aggregates controlled-seed games by seed and final seat into the tables "
         "behind the dedicated controlled-seed HTML report."
@@ -286,18 +286,18 @@ class PerformanceControlledSeedReport(Analysis):
             f"**{int(rows['game_id'].nunique())}** controlled games cover "
             f"**{n_seeds}** seeds, **{n_players}** final seats, and "
             f"**{n_combos}** strategist-condition combinations; "
-            f"Vanilla baseline: '{baseline_experiment}'."
+            "with a dedicated VPAI baseline."
         )
         no_baseline = int((~index["has_matched_vanilla"].astype(bool)).sum())
         no_probability = int((~index["has_probability"].astype(bool)).sum())
         notes = []
         if not has_baseline:
             notes.append(
-                f"the dedicated baseline experiment '{baseline_experiment}' has no "
+                "the dedicated VPAI baseline has no "
                 "controlled rows"
             )
         elif no_baseline:
-            notes.append(f"**{no_baseline}** seed-player pair(s) lack a matched Vanilla baseline")
+            notes.append(f"**{no_baseline}** seed-player pair(s) lack a matched VPAI baseline")
         if no_probability:
             notes.append(
                 f"**{no_probability}** seed-player pair(s) have no usable prediction rows"

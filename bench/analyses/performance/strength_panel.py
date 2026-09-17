@@ -280,7 +280,7 @@ def build_experiment_completeness(
 
 class PerformanceStrengthPanel(Analysis):
     module = "performance.strength_panel"
-    friendly_name = "Adjusted-strength summary"
+    friendly_name = "Gameplay strength"
     description = (
         "Summarizes model-adjusted strength, uncertainty, and experiment coverage "
         "for each player identity (bootstrap confidence intervals)."

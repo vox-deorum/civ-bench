@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import html as _html
 
+from bench.reports.assets import REPORT_HELP_JS
 from bench.reports.content import (
     CITATION_MARKDOWN,
     render_citation_html,
     render_footer_html,
     render_summary_html,
+    render_help_html,
+    metadata_text,
+    report_summary,
 )
 
 from .controlled_seed import (
@@ -85,19 +89,20 @@ def _build_anchors(doc: ReportDocument) -> dict:
 
 def _metadata_line(metadata: dict) -> str:
     """A compact ``key: value`` rendering of an analysis's metadata, or ``""``."""
-    if not metadata:
-        return ""
-    parts = []
-    for key, value in metadata.items():
-        if isinstance(value, (list, tuple)):
-            value = ", ".join(str(v) for v in value)
-        parts.append(f"{key}: {value}")
-    return "; ".join(parts)
+    return metadata_text(metadata)
 
 
 def _section_summary(section: Section) -> str:
     """Return the result sentence shown in overview and detailed views."""
-    return section.summary.strip() or "No result summary was produced for this analysis."
+    return report_summary(section.summary.strip(), section.metadata) or "No result summary was produced for this analysis."
+
+
+def _section_details(section: Section) -> str:
+    return "\n\n".join(filter(None, (
+        section.description,
+        f"Module: {section.module}",
+        _metadata_line(section.metadata),
+    )))
 
 
 # ── markdown ──────────────────────────────────────────────────────────────────
@@ -157,6 +162,7 @@ def render_markdown(doc: ReportDocument) -> str:
 def _render_section_md(section: Section, lines: list[str]) -> None:
     lines.append(f"### {section.title}")
     lines.append("")
+    lines.extend(["<details>", "<summary>Technical details</summary>", ""])
     lines.append(f"*Module: `{section.module}`*")
     if section.description:
         lines.append("")
@@ -165,6 +171,7 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
     if meta:
         lines.append("")
         lines.append(f"*{meta}*")
+    lines.extend(["", "</details>"])
     lines.append("")
     lines.append(_section_summary(section))
     lines.append("")
@@ -221,6 +228,8 @@ def _format_cell(value) -> str:
         return f"{value:g}"
     if value is None:
         return ""
+    if isinstance(value, str) and value == "Vanilla":
+        return "VPAI"
     return str(value)
 
 
@@ -231,6 +240,7 @@ def _display_frame(frame):
     out = frame.copy()
     for col in out.columns:
         out[col] = out[col].map(_format_cell)
+    out.columns = ["VPAI" if str(col) == "Vanilla" else col for col in out.columns]
     return out
 
 
@@ -278,6 +288,11 @@ h3 { margin-top: 1.75rem; }
 .overview-card p { margin: .45rem 0; }
 .module { color: #445164; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .meta, .caption { color: #687486; font-size: .88rem; }
+.report-help { display: inline-block; position: relative; margin-left: .35rem; vertical-align: middle; font-size: .85rem; font-weight: 400; line-height: 1.5; }
+.help-toggle { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border: 1px solid #7a8798; border-radius: 50%; padding: 0; color: #445164; background: #fff; font: inherit; cursor: help; }
+.help-toggle:focus-visible { outline: 2px solid #175ca8; outline-offset: 2px; }
+.help-text { display: none; position: absolute; top: 100%; left: 0; z-index: 40; width: max-content; max-width: min(30rem, 80vw); max-height: 65vh; overflow: auto; padding: .7rem .85rem; border: 1px solid #a8b3c2; border-radius: .35rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); white-space: pre-line; overflow-wrap: anywhere; text-align: left; font-style: normal; }
+.report-help:not(.help-dismissed):hover .help-text, .report-help:not(.help-dismissed):focus-within .help-text, .report-help.help-open .help-text { display: block; }
 .caption { font-style: italic; }
 .report-footer { margin-top: 2rem; border-top: 1px solid #d8dee6; padding-top: 1rem; color: #687486; font-size: .88rem; }
 pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f0f3f7; }
@@ -404,6 +419,7 @@ def _page_start(doc: ReportDocument, page_title: str) -> list[str]:
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{_html.escape(page_title)}</title>",
         '<link rel="stylesheet" href="assets/report.css">',
+        '<script src="assets/report-help.js" defer></script>',
         "</head><body>",
         '<a class="skip-link" href="#main-content">Skip to content</a>',
     ]
@@ -421,7 +437,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         for group in doc.groups
         for section in group.sections
     }
-    pages: dict[str, str] = {}
+    pages: dict[str, str] = {"assets/report-help.js": REPORT_HELP_JS}
 
     parts = _page_start(doc, doc.title)
     parts.extend(_render_navigation(doc, anchors, filenames, "report"))
@@ -443,7 +459,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
             target = f"{filenames[id(group)]}#{anchors[id(section)]}"
         parts.append('<article class="overview-card">')
         parts.append(f'<p class="eyebrow">{_html.escape(group.title)}</p>')
-        parts.append(f"<h2>{_html.escape(section.title)}</h2>")
+        help_html = render_help_html(_section_details(section), "help-" + anchors[id(section)] + "-overview")
+        parts.append(f"<h2>{_html.escape(section.title)}{help_html}</h2>")
         parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
         parts.append(f'<p><a href="{_html.escape(target)}">View details</a></p>')
         parts.append("</article>")
@@ -461,7 +478,8 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.extend(_render_navigation(doc, anchors, filenames, group.key))
         parts.append('<main class="content" id="main-content">')
         parts.append(f'<p class="eyebrow">{_html.escape(doc.title)}</p>')
-        parts.append(f'<h1 id="{anchors[id(group)]}">{_html.escape(group.title)}</h1>')
+        help_html = render_help_html(doc.description, "help-" + anchors[id(group)], "About this benchmark")
+        parts.append(f'<h1 id="{anchors[id(group)]}">{_html.escape(group.title)}{help_html}</h1>')
         if group.summary:
             parts.append(f"<p>{_md_inline_to_html(group.summary)}</p>")
         for section in group.sections:
@@ -484,13 +502,8 @@ def render_html(doc: ReportDocument) -> str:
 
 def _render_section_html(section: Section, parts: list[str], anchor: str) -> None:
     parts.append(f'<section aria-labelledby="{anchor}">')
-    parts.append(f'<h2 id="{anchor}">{_html.escape(section.title)}</h2>')
-    parts.append(f'<p class="module">Module: {_html.escape(section.module)}</p>')
-    if section.description:
-        parts.append(f'<p class="caption">{_html.escape(section.description)}</p>')
-    meta = _metadata_line(section.metadata)
-    if meta:
-        parts.append(f'<p class="meta">{_html.escape(meta)}</p>')
+    help_html = render_help_html(_section_details(section), "help-" + anchor)
+    parts.append(f'<h2 id="{anchor}">{_html.escape(section.title)}{help_html}</h2>')
     parts.append(f"<p>{_md_inline_to_html(_section_summary(section))}</p>")
     if section.empty:
         parts.append(

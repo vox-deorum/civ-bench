@@ -37,9 +37,12 @@ from urllib.parse import urlencode
 
 import numpy as np
 
-from .assets import REPORT_COMMON_JS
+from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
 from .context import ReportBuildContext
-from bench.reports.content import render_footer_html, render_summary_html, resolve_footer
+from bench.reports.content import (
+    render_footer_html, render_summary_html, resolve_footer, render_help_html,
+    report_summary, metadata_text,
+)
 from .errors import ReportError
 from .model import ControlledSeedDocument
 
@@ -55,7 +58,12 @@ CONTROLLED_SEED_TABLES = (
 # page per (seed, player_id) pair inside the directory.
 CONTROLLED_SEED_DIR = "controlled-seed"
 CONTROLLED_SEED_OVERVIEW = f"{CONTROLLED_SEED_DIR}/index.html"
-CONTROLLED_SEED_TITLE = "Controlled seed"
+CONTROLLED_SEED_TITLE = "Matched Maps"
+CONTROLLED_SEED_PURPOSE = (
+    "Compare strategists and experimental conditions with a VPAI baseline on "
+    "the same maps and starting positions, so differences in performance can "
+    "be assessed with the starting setup held constant."
+)
 
 
 # ── document building ─────────────────────────────────────────────────────────
@@ -385,7 +393,7 @@ def _heatmap(
         parts.append('<tbody class="vanilla-body">')
         parts.append(
             f'<tr class="vanilla-row"><th scope="row" class="row-label">'
-            f"{_esc(vanilla)}</th>"
+            "VPAI</th>"
         )
         if kind == "strength":
             parts.append(avg_cell(vanilla, vanilla))
@@ -433,6 +441,7 @@ def _page_start(
     parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
     parts.append(f"<title>{_esc(page_title)}</title>")
     parts.append('<link rel="stylesheet" href="../assets/report.css">')
+    parts.append('<script src="../assets/report-help.js" defer></script>')
     parts.append("</head><body>")
     parts.append('<a class="skip-link" href="#main-content">Skip to content</a>')
     if navigation:
@@ -440,6 +449,15 @@ def _page_start(
     main_class = "content" if navigation else "controlled-content"
     parts.append(f'<main class="{main_class}" id="main-content">')
     return parts
+
+
+def _chapter_details(doc: ControlledSeedDocument) -> str:
+    provenance = {
+        key: doc.metadata[key]
+        for key in ("baseline_experiment", "estimator", "strength_table")
+        if doc.metadata.get(key)
+    }
+    return "\n\n".join(filter(None, (doc.description, metadata_text(provenance))))
 
 
 def _render_overview(
@@ -450,40 +468,29 @@ def _render_overview(
     headings = _civ_headings(doc)
     parts = _page_start(doc, f"{CONTROLLED_SEED_TITLE} | {doc.title}", navigation)
     parts.append(f'<p class="eyebrow">{_esc(doc.title)}</p>')
-    parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}</h1>")
-    if doc.description:
-        parts.append(f'<p class="caption">{_esc(doc.description)}</p>')
-    parts.append(f"<p>{render_summary_html(doc.summary)}</p>")
-    meta_bits = []
-    if doc.metadata.get("baseline_experiment"):
-        meta_bits.append(
-            f"dedicated baseline: {_esc(doc.metadata['baseline_experiment'])}"
-        )
-    if doc.metadata.get("estimator"):
-        meta_bits.append(f"estimator: {_esc(doc.metadata['estimator'])}")
-    if doc.metadata.get("strength_table"):
-        meta_bits.append(f"strength table: {_esc(doc.metadata['strength_table'])}")
-    if meta_bits:
-        parts.append(f'<p class="meta">{"; ".join(meta_bits)}</p>')
-    parts.append(
-        '<p class="caption">Each cell averages every unique run for its seed, final '
+    details = _chapter_details(doc) + "\n\n" + (
+        'Each cell averages every unique run for its seed, final '
         "player position, strategist, and condition; seating rotations and repeated "
         "runs contribute equally. The strength heatmap's leading Avg column pools "
-        "each row's runs. Click a cell to open the matching seed-player detail "
-        "page.</p>"
+        "each row's runs."
     )
+    help_html = render_help_html(details, "chapter-help", "About this comparison")
+    parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}{help_html}</h1>")
+    parts.append(f"<p>{_esc(CONTROLLED_SEED_PURPOSE)}</p>")
+    parts.append(f"<p>{render_summary_html(report_summary(doc.summary, doc.metadata))}</p>")
+    parts.append('<p>Click a cell to explore that starting position.</p>')
 
     for seed in seeds:
-        parts.append(f'<section aria-labelledby="seed-{seed}-heading">')
+        parts.append(f'<section aria-labelledby="seed-{seed}">')
         parts.append(f'<h2 id="seed-{seed}">Seed {seed}</h2>')
         parts.append('<figure class="heat-figure">')
-        parts.append(
-            "<figcaption>Mean adjusted strength (red 0, yellow 0.5, blue 1)</figcaption>"
-        )
+        tip = render_help_html("Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row.", f"strength-{seed}-help")
+        parts.append(f"<figcaption>Mean adjusted strength{tip}</figcaption>")
         parts.append(_heatmap(doc, summary, seed, players, combos, "strength", headings))
         parts.append("</figure>")
         parts.append('<figure class="heat-figure">')
-        parts.append("<figcaption>Dominant victory focus (largest mean share)</figcaption>")
+        tip = render_help_html("The victory focus with the largest mean share across runs.", f"focus-{seed}-help")
+        parts.append(f"<figcaption>Dominant victory focus{tip}</figcaption>")
         parts.append(_heatmap(doc, summary, seed, players, combos, "focus", headings))
         parts.append("</figure>")
         parts.append(_focus_legend())
@@ -536,7 +543,7 @@ def _page_series(
             series[key] = {
                 "strategist": key[0],
                 "condition": key[1],
-                "label": key[0] if is_vanilla else f"{key[0]} · {key[1]}",
+                "label": "VPAI" if is_vanilla else f"{key[0]} · {key[1]}",
                 "vanilla": is_vanilla,
                 "color": color,
                 "dash": _DASH_PATTERNS[condition_rank.get(key[1], 0) % len(_DASH_PATTERNS)],
@@ -654,8 +661,8 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
         is_vanilla = str(row["strategist"]) == vanilla
         row_open = '<tr class="vanilla-row">' if is_vanilla else "<tr>"
         parts.append(row_open)
-        parts.append(f"<td>{_esc(row['strategist'])}</td>")
-        parts.append(f"<td>{_esc(row['condition'])}</td>")
+        parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['strategist'])}</td>")
+        parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['condition'])}</td>")
         parts.append(f"<td>{int(row['run_count'])}</td>")
         parts.append(f"<td>{_esc(_fmt_probability(row['mean_weighted_victory_probability']))}</td>")
         parts.append(_strength_cell(row, is_vanilla))
@@ -695,7 +702,6 @@ def _render_detail(
 ) -> str:
     seed = int(index_row["seed"])
     player_id = int(index_row["player_id"])
-    vanilla = doc.vanilla_label
     series = _page_series(doc, seed, player_id)
     strategists = []
     for entry in series:
@@ -714,10 +720,11 @@ def _render_detail(
         parts.append(f'<a href="{_page_filename(next_seed, next_player)}">Player {next_player} →</a>')
     parts.append("</nav>")
     parts.append(f'<p class="eyebrow">{_esc(doc.title)}</p>')
-    parts.append(f"<h1>Seed {seed} · Player {player_id}</h1>")
+    help_html = render_help_html(_chapter_details(doc), "page-help", "About this benchmark")
+    parts.append(f"<h1>Seed {seed} · Player {player_id}{help_html}</h1>")
     parts.append(
-        f'<p class="meta">Civilization: {_esc(index_row["civilization"])} · '
-        f"{int(index_row['run_count'])} source run(s)</p>"
+        f'<p>Civilization: {_esc(index_row["civilization"])} · '
+        f"<strong>{int(index_row['run_count'])}</strong> runs</p>"
     )
     if int(index_row["n_civilizations"]) > 1:
         parts.append(
@@ -727,7 +734,7 @@ def _render_detail(
         )
     if not bool(index_row["has_matched_vanilla"]):
         parts.append(
-            '<p class="warning">The dedicated Vanilla baseline is unavailable for this '
+            '<p class="warning">The dedicated VPAI baseline is unavailable for this '
             "seed-player pair; the reference curve is omitted.</p>"
         )
     if not bool(index_row["has_probability"]):
@@ -737,7 +744,14 @@ def _render_detail(
         )
 
     parts.append('<section aria-labelledby="curves-heading">')
-    parts.append('<h2 id="curves-heading">Victory-probability curves</h2>')
+    tip = render_help_html(
+        "Each curve is the mean of every run's interpolated victory probability "
+        "on the fixed 0 to 1 progress grid. The VPAI reference curve is drawn "
+        "thicker when present. The vertical axis fits the visible curves. "
+        "Hover the chart to compare every checked condition's probability "
+        "at one progress point.", "curves-help",
+    )
+    parts.append(f'<h2 id="curves-heading">Victory-probability curves{tip}</h2>')
     if strategists:
         parts.append(
             '<div class="chart-controls" id="strategist-filters" role="group" '
@@ -756,17 +770,11 @@ def _render_detail(
         'aria-label="Mean victory probability over normalized game progress"></div>'
     )
     parts.append('<ul id="curve-legend" class="curve-legend"></ul>')
-    parts.append(
-        '<p class="caption">Each curve is the mean of every run\'s interpolated '
-        "victory probability on the fixed 0 to 1 progress grid; the "
-        f"{_esc(vanilla)} reference curve is drawn thicker when present. The "
-        "vertical axis fits the visible curves. Hover the chart to compare "
-        "every checked condition's probability at one progress point.</p>"
-    )
     parts.append("</section>")
 
     parts.append('<section aria-labelledby="comparison-heading">')
-    parts.append('<h2 id="comparison-heading">Comparison table</h2>')
+    tip = render_help_html("Per-condition means over every unique run occupying this final position. Seating rotations and repeated runs contribute equally.", "comparison-help")
+    parts.append(f'<h2 id="comparison-heading">Comparison table{tip}</h2>')
     parts.append(_comparison_table(doc, seed, player_id))
     parts.append("</section>")
 
@@ -792,6 +800,7 @@ def render_controlled_seed_site(
     caller renders it accordingly). Without it the pages render standalone.
     """
     pages: dict[str, str] = {
+        "assets/report-help.js": REPORT_HELP_JS,
         CONTROLLED_SEED_OVERVIEW: _render_overview(doc, navigation)
     }
     rows = doc.index_table.to_dict("records")

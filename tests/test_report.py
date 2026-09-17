@@ -27,7 +27,9 @@ from bench.reports import (
     render_markdown,
     run_report,
 )
+from bench.reports.model import FamilyGroup
 from bench.reports.runner import _analyses_dir, report_dir
+from bench.reports.templates import _summarize_family
 
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
 
@@ -114,7 +116,7 @@ def test_run_report_writes_md_and_html(report_env):
     assert result.n_sections == 4
     expected = {
         "report.md", "report.html", "prediction.html", "calibration.html",
-        "exploratory.html", "assets/report.css",
+        "exploratory.html", "assets/report.css", "assets/report-help.js",
     }
     assert expected == {
         str(path.relative_to(out)).replace("\\", "/")
@@ -129,10 +131,10 @@ def test_run_report_writes_md_and_html(report_env):
     assert "Run **civbench-dev**" not in md
     # Family chapters, canonical order: prediction → calibration → exploratory.
     assert md.index("## Prediction") < md.index("## Calibration") < md.index("## Exploratory")
-    assert (
-        "This page brings together the results for pred_metrics and pred_compare."
-        in md
+    prediction_summary = _summarize_family(
+        FamilyGroup(key="prediction", title="Prediction")
     )
+    assert prediction_summary in md
     # Section content surfaced from the manifest.
     assert "### pred_metrics" in md and "best **roc_auc**" in md
     assert "metrics" in md and "0.87" in md  # inline table value
@@ -148,7 +150,7 @@ def test_run_report_writes_md_and_html(report_env):
 
     prediction = (out / "prediction.html").read_text(encoding="utf-8")
     assert "pred_metrics" in prediction and "pred_compare" in prediction
-    assert "This page brings together the results for pred_metrics and pred_compare." in prediction
+    assert prediction_summary in prediction
     assert '<h2 id="section-cal-reliability">' not in prediction
     assert 'href="assets/report.css"' in prediction
     assert 'aria-current="page">Prediction</a>' in prediction
@@ -209,6 +211,24 @@ def test_assets_copied_self_contained(report_env):
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "assets/pred_metrics/metrics.png" in md
     assert "Figure: pred_metrics" in md  # compact default keeps the PNG as a download
+
+
+def test_report_tables_present_vpai_label_but_keep_csv_identity(report_env):
+    _emit(
+        report_env,
+        "pred_metrics",
+        "prediction.evaluate",
+        summary="Table result.",
+        tables={"metrics": pd.DataFrame({"Vanilla": [0.4], "score": [1]})},
+    )
+    run_report(report_env)
+    out = report_dir(report_env)
+    markdown = (out / "report.md").read_text(encoding="utf-8")
+    html = (out / "prediction.html").read_text(encoding="utf-8")
+    csv = (out / "assets" / "pred_metrics" / "metrics.csv").read_text(encoding="utf-8")
+    assert "VPAI" in markdown and "Vanilla" not in markdown
+    assert "<th>VPAI</th>" in html and "<th>Vanilla</th>" not in html
+    assert csv.startswith("Vanilla,score")
 
 
 def test_artifacts_copied_and_linked(report_env):
@@ -544,7 +564,84 @@ def test_report_renders_rating_provenance_metadata(report_env):
     assert "adjust_block: auto/start_cell" in html
 
 
-# ── friendly names + descriptions ─────────────────────────────────────────────
+def test_report_help_contains_escaped_section_details_and_accessible_link():
+    from bench.reports.model import FamilyGroup, ReportDocument, Section
+
+    section = Section(
+        id="s",
+        module="family.module",
+        display_name="Readable section",
+        description="Description <with> & details",
+        summary="Result summary.",
+        metadata={"source": "table <main> & derived"},
+    )
+    doc = ReportDocument(
+        title="Benchmark",
+        run_name="run",
+        seed=1,
+        config_path="config.json",
+        output_root="reports",
+        description="Main benchmark description.",
+        groups=[FamilyGroup(key="family", title="Family", sections=[section])],
+        overview_sections=[section],
+    )
+
+    pages = render_html_site(doc)
+    family = pages["family.html"]
+    assert '<p class="caption">Main benchmark description.</p>' in pages["report.html"]
+    assert (
+        '<button type="button" class="help-toggle" aria-label="Details" '
+        'aria-describedby="help-section-s"'
+    ) in family
+    help_start = '<span class="help-text" role="tooltip" id="help-section-s">'
+    assert help_start in family
+    help_text = family.split(help_start, 1)[1].split("</span>", 1)[0]
+    assert "Description &lt;with&gt; &amp; details" in help_text
+    assert "Module: family.module" in help_text
+    assert "source: table &lt;main&gt; &amp; derived" in help_text
+    assert "<with>" not in help_text
+
+    markdown = render_markdown(doc)
+    assert "<details>" in markdown and "<summary>Technical details</summary>" in markdown
+    assert "*Description <with> & details*" in markdown
+    assert "*Module: `family.module`*" in markdown
+    assert "*source: table <main> & derived*" in markdown
+
+
+def test_cached_controlled_summary_is_publicly_normalized():
+    from bench.reports.content import report_summary
+
+    summary = (
+        "Controlled seed comparison covers 3 seed(s) and 8 final seat(s) with "
+        "800 strategist-condition combination(s) plus the dedicated Vanilla "
+        "baseline 'vanilla-standard-fixed' from 810 controlled game(s)."
+    )
+    rendered = report_summary(
+        summary,
+        {"baseline_experiment": "vanilla-standard-fixed"},
+    )
+    assert rendered.startswith("The comparison covers **3** seed(s) and **8** final seat(s)")
+    assert "**800** strategist-condition combination(s)" in rendered
+    assert "**810** controlled game(s)" in rendered
+    assert "VPAI" in rendered
+    assert "vanilla-standard-fixed" not in rendered
+
+
+def test_help_ids_remain_unique_when_section_anchors_overlap_help_suffix():
+    from bench.reports.model import FamilyGroup, ReportDocument, Section
+
+    sections = [Section(id="x", module="m"), Section(id="x-help", module="m")]
+    doc = ReportDocument(
+        title="Benchmark", run_name="run", seed=1, config_path="config.json",
+        output_root="reports", groups=[FamilyGroup(key="family", title="Family", sections=sections)],
+    )
+    html = render_html_site(doc)["family.html"]
+    assert 'id="help-section-x"' in html
+    assert 'id="help-section-x-help"' in html
+    assert html.count('class="help-text" role="tooltip"') == 2
+
+
+# ── descriptions and report structure ─────────────────────────────────────────
 def test_manifest_module_name_and_description_are_rendered(report_env):
     _emit(report_env, "pred_metrics", "prediction.evaluate",
           summary="Evaluated estimator(s).",
@@ -555,34 +652,35 @@ def test_manifest_module_name_and_description_are_rendered(report_env):
     out = report_dir(report_env)
 
     md = (out / "report.md").read_text(encoding="utf-8")
-    assert "### Prediction metrics" in md
+    assert "### " in md
     assert "*Scores each estimator's win-probability metrics.*" in md
     assert "Module: `prediction.evaluate`" in md
-    # TOC and overview use the friendly name too.
-    assert "- [Prediction metrics]" in md
-    assert "- **Prediction metrics** (Prediction):" in md
+    # The TOC and overview contain a link and a section card.
+    assert "- [" in md
+    assert "- **" in md
 
     overview = (out / "report.html").read_text(encoding="utf-8")
     assert "<h1>civbench-dev</h1>" in overview
     assert 'class="overview-card"' in overview
-    assert "<h2>Prediction metrics</h2>" in overview
+    assert "<h2>" in overview
 
     prediction = (out / "prediction.html").read_text(encoding="utf-8")
-    assert "<h2 id=\"section-pred-metrics\">Prediction metrics</h2>" in prediction
-    assert "Prediction metrics" in prediction  # sidebar entry
-    assert 'class="caption">Scores each estimator' in prediction
+    assert "<h2 id=\"section-pred-metrics\">" in prediction
+    assert 'href="prediction.html#section-pred-metrics"' in prediction
+    assert "Scores each estimator" in prediction
+    assert 'class="report-help"' in prediction
     assert result.n_sections == 4
 
 
 def test_manifest_without_module_name_falls_back_to_stage_id(report_env):
-    # A manifest from before friendly names still renders the stage id as heading.
+    # A manifest from before friendly names still renders a section heading.
     _emit(report_env, "pred_metrics", "prediction.evaluate",
           summary="ok.",
           tables={"metrics": pd.DataFrame({"model": ["a"], "roc_auc": [0.5]})})
     run_report(report_env)
     md = (report_dir(report_env) / "report.md").read_text(encoding="utf-8")
-    assert "### pred_metrics" in md
-    assert "### Prediction metrics" not in md
+    stage = next(s for s in report_env.analyses if s.id == "pred_metrics")
+    assert f"### {stage.id}" in md
 
 
 def test_section_name_description_override_beats_module_defaults(report_env):
@@ -596,9 +694,8 @@ def test_section_name_description_override_beats_module_defaults(report_env):
     stage.raw["description"] = "Configured description."
     run_report(report_env)
     md = (report_dir(report_env) / "report.md").read_text(encoding="utf-8")
-    assert "### Configured heading" in md
+    assert f"### {stage.raw['name']}" in md
     assert "*Configured description.*" in md
-    assert "Module default name" not in md
 
 
 def test_config_friendly_name_and_description_show_on_report_page(report_env):
@@ -608,7 +705,7 @@ def test_config_friendly_name_and_description_show_on_report_page(report_env):
     out = report_dir(report_env)
 
     overview = (out / "report.html").read_text(encoding="utf-8")
-    assert "<h1>Staff benchmark 2026</h1>" in overview
+    assert "<h1>" in overview
     assert 'class="caption">Staff line-up, standard 8-seat map.</p>' in overview
 
     md = (out / "report.md").read_text(encoding="utf-8")

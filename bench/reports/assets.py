@@ -15,6 +15,52 @@ series stay distinguishable.
 
 from __future__ import annotations
 
+REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Escape. */
+(function () {
+  "use strict";
+  document.querySelectorAll(".report-help").forEach(function (help) {
+    var button = help.querySelector(".help-toggle");
+    function dismiss() {
+      help.classList.remove("help-open");
+      help.classList.add("help-dismissed");
+      button.setAttribute("aria-expanded", "false");
+    }
+    function reveal() {
+      help.classList.remove("help-dismissed");
+      button.setAttribute("aria-expanded", "true");
+      var tip = help.querySelector(".help-text");
+      tip.style.left = "0px";
+      var rect = tip.getBoundingClientRect();
+      tip.style.left = Math.min(0, window.innerWidth - rect.right - 12) + "px";
+    }
+    button.addEventListener("click", function () {
+      if (help.classList.contains("help-open")) {
+        dismiss();
+      } else {
+        help.classList.add("help-open");
+        reveal();
+      }
+    });
+    button.addEventListener("focus", reveal);
+    help.addEventListener("mouseenter", reveal);
+    help.addEventListener("mouseleave", function () {
+      if (!help.contains(document.activeElement) && !help.classList.contains("help-open")) {
+        dismiss();
+      }
+    });
+    help.addEventListener("focusout", function (event) {
+      if (!help.contains(event.relatedTarget)) { dismiss(); }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") { dismiss(); }
+    });
+    document.addEventListener("click", function (event) {
+      if (!help.contains(event.target)) { dismiss(); }
+    });
+  });
+}());
+"""
+
 REPORT_COMMON_JS = """/* civ-bench shared report utilities.
    Deterministic vanilla JavaScript: no packages, no network. Loaded by every
    report page that scripts its own content; defines window.civBench. */

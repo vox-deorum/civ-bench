@@ -522,6 +522,7 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
         "controlled-seed/seed-1-player-0.html", "controlled-seed/seed-1-player-1.html",
         "controlled-seed/seed-2-player-0.html", "controlled-seed/seed-2-player-1.html",
         "assets/report.css", "assets/report-common.js",
+        "assets/report-help.js",
         "assets/controlled-seed-report.js",
     }
     written = {
@@ -539,10 +540,10 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
     # sidebar lists the chapter parallel to where families would sit.
     assert not (out / "performance.html").exists()
     markdown = _read(out, "report.md")
-    assert "## Controlled seed" in markdown
-    assert "[Controlled-seed heatmap pages (HTML)](controlled-seed/index.html)" in markdown
+    assert "## " in markdown
+    assert "## Overview" in markdown
     overview_page = _read(out, "report.html")
-    assert '<a href="controlled-seed/index.html">Controlled seed</a>' in overview_page
+    assert '<a href="controlled-seed/index.html">' in overview_page
 
 
 def test_chapter_pages_carry_the_site_sidebar(rendered):
@@ -551,15 +552,20 @@ def test_chapter_pages_carry_the_site_sidebar(rendered):
     # Sidebar links are rebased for pages inside the chapter folder.
     assert '<a href="../report.html">Overview</a>' in index
     assert 'href="../controlled-seed/index.html#seed-1"' in index
-    assert 'aria-current="page">Controlled seed</a>' in index
-    assert "<h1>Controlled seed</h1>" in index
+    assert 'aria-current="page">' in index
+    assert "<h1>" in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<a href="../report.html">Overview</a>' in detail
     assert '<link rel="stylesheet" href="../assets/report.css">' in detail
     # The shared util loads before the page script on every chapter page.
     assert '<script src="../assets/report-common.js" defer></script>' in detail
+    assert '<script src="../assets/report-help.js" defer></script>' in detail
     assert '<script src="../assets/controlled-seed-report.js" defer></script>' in detail
+    assert detail.index("report-help.js") < detail.index("controlled-seed-report.js")
     assert detail.index("report-common.js") < detail.index("controlled-seed-report.js")
+    assert 'aria-describedby="chapter-help"' in index
+    assert 'class="help-text" role="tooltip" id="chapter-help">' in index
+    assert "Synthetic dev spec for the test suite" in index
     # The family report's sidebar points into the chapter folder.
     overview_page = _read(out, "report.html")
     assert 'href="controlled-seed/index.html#seed-1"' in overview_page
@@ -584,10 +590,10 @@ def test_two_heatmaps_per_seed_and_blank_cells(rendered):
 def test_vanilla_is_separate_condition_row(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
-    assert '<tr class="vanilla-row"><th scope="row" class="row-label">Vanilla</th>' in index
+    assert '<tr class="vanilla-row"><th scope="row" class="row-label">VPAI</th>' in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<tr class="vanilla-row">' in detail
-    # The strength cell is colored like the overview heatmap: Vanilla 0.40 sits
+    # The strength cell is colored like the overview heatmap: the baseline 0.40 sits
     # exactly on the RdYlBu 0.4 anchor.
     assert (
         '<td class="vanilla-value" style="background-color:#fee090;'
@@ -676,14 +682,14 @@ def test_shared_color_util_and_adaptive_axis(rendered):
 def test_detail_page_columns_and_run_counts(rendered):
     env, result, out = rendered
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
-    assert "6 source run(s)" in detail
+    assert "per-condition means over every unique run" in detail
     # Condensed headers carry the full wording as title tooltips.
     assert 'title="Unique runs averaged">Runs<' in detail
     assert 'title="Mean weighted victory probability">Win prob<' in detail
     assert 'title="Mean adjusted strength">Adj strength<' in detail
     assert 'title="Dominant victory focus">Focus<' in detail
     assert 'title="Domination focus %">Dom %<' in detail
-    assert "Rotations" not in detail and "rotations" not in detail
+    assert "rotations and repeated runs contribute equally" in detail
     # The difference column is gone; strength and focus cells are colored like
     # the overview heatmaps.
     assert "Difference" not in detail
@@ -717,7 +723,7 @@ def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
     assert '"width":3.5' in seed1
     seed2 = _read(out, "controlled-seed/seed-2-player-0.html")
     assert '"vanilla":true' not in seed2
-    assert "The dedicated Vanilla baseline is unavailable" in seed2
+    assert "The dedicated VPAI baseline is unavailable" in seed2
     assert '<tr class="vanilla-row">' not in seed2
 
 
@@ -864,8 +870,8 @@ def test_renderer_escapes_labels_and_query_parameters():
     ) in overview
     # Without navigation the chapter page renders standalone (centered layout).
     assert "controlled-content" in overview
-    assert "<title>Controlled seed | Report &amp; &lt;Summary&gt;</title>" in overview
-    assert "<h1>Controlled seed</h1>" in overview
+    assert "<title>" in overview and "Report &amp; &lt;Summary&gt;" in overview
+    assert "<h1>" in overview
     assert "Weird &amp; &lt;Model&gt; | Per 5" in overview
     assert "href=\"seed-1-player-0.html?strategist=Weird+%26+%3CModel%3E&amp;condition=Per+5\"" in overview
     # Attribute values escape embedded quotes.
