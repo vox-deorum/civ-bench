@@ -100,6 +100,13 @@ def run_adjust(
     from ..extract.issues import read_problem_game_ids, resolve_issues_path
 
     problem_ids = read_problem_game_ids(resolve_issues_path(cfg.data))
+    from bench.config.filters import resolve_filter_spec
+    from bench.data.failures import failed_game_ids_from_tokens
+
+    problem_ids |= failed_game_ids_from_tokens(
+        (cfg.data.get("tables") or {}).get("tokens"),
+        resolve_filter_spec(cfg.data.get("filter"), cfg.filters, "data.filter"),
+    )
 
     artifacts = builder(
         predictions_path,

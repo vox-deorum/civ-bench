@@ -211,6 +211,16 @@ def _tables(result) -> dict[str, pd.DataFrame]:
     return {name: pd.read_csv(path) for name, path in result.table_paths.items()}
 
 
+def test_controlled_seed_report_excludes_failed_games_with_cached_strength(env):
+    pd.DataFrame([
+        {"experiment": TREAT_EXP, "game_id": "tr-s1-r0b", "player_id": 0,
+         "valid_turn_count": 5, "failed_turn_count": 1},
+    ]).to_csv(env.paths["tokens"], index=False)
+    tables = _tables(env())
+    row = _summary_row(tables, 1, 0, "GPT-OSS-120B-Simple", "Every-turn")
+    assert row["run_count"] == 2
+
+
 def _summary_row(tables, seed, player_id, strategist, condition):
     frame = tables["seed_player_summary"]
     match = frame[

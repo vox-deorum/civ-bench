@@ -21,13 +21,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from bench.data.loading import drop_problem_games
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 
 
 COMPLETENESS_COLUMNS = [
     "experiment", "required_games", "present_games", "missing_games",
-    "completeness_pct", "repeated_slots", "warning",
+    "completeness_pct", "repeated_slots", "excluded_games", "warning",
 ]
 REPEATED_GAMES_COLUMNS = [
     "experiment", "seed", "seating_rotation", "n_games", "game_ids",
@@ -169,6 +170,7 @@ def build_experiment_completeness(
     panel: pd.DataFrame,
     games: pd.DataFrame | None = None,
     baseline_experiment: str | None = None,
+    excluded_game_ids=None,
 ) -> dict[str, pd.DataFrame]:
     """Compact controlled-design game completeness diagnostics.
 
@@ -191,6 +193,9 @@ def build_experiment_completeness(
     cell_issue_rows: list[dict] = []
 
     for experiment, exp_df in controlled.groupby("experiment", sort=True):
+        accepted = drop_problem_games(exp_df, excluded_game_ids)
+        excluded_games = exp_df["game_id"].nunique() - accepted["game_id"].nunique()
+        exp_df = accepted
         slot_groups = exp_df.groupby(["seed", "seating_rotation"], sort=True)["game_id"]
         present_slots: set[tuple[int, int]] = set()
         repeated_slots = 0
@@ -249,6 +254,8 @@ def build_experiment_completeness(
             cell_counts["n_games"] != expected_per_cell
         ).any())
         warnings = []
+        if excluded_games:
+            warnings.append(f"{excluded_games} game(s) excluded by decision failure cutoff")
         if missing_games:
             warnings.append(f"{missing_games} missing slot(s)")
         if repeated_slots:
@@ -265,6 +272,7 @@ def build_experiment_completeness(
             "completeness_pct": round((required - missing_games) / required, 4)
             if required else float("nan"),
             "repeated_slots": int(repeated_slots),
+            "excluded_games": int(excluded_games),
             "warning": "; ".join(warnings) if warnings else "ok",
         })
 

@@ -145,26 +145,46 @@ class AnalysisContext:
         )
 
     # ── filter resolution ────────────────────────────────────────────────────
-    def apply_filter(self, df: pd.DataFrame) -> pd.DataFrame:
+    def resolved_filter(self) -> dict:
+        """Resolve this stage's selection and quality thresholds."""
+        from bench.config.filters import intersect_filter_specs, resolve_filter_spec
+
+        return intersect_filter_specs(
+            resolve_filter_spec(self.config.data.get("filter"), self.config.filters, "data.filter"),
+            resolve_filter_spec(self.stage_filter, self.config.filters, "stage.filter"),
+        )
+
+    def decision_failure_ids(self) -> set[str]:
+        """Resolve game exclusions from all player traces, before player filters."""
+        from bench.data.failures import failed_game_ids_from_tokens
+
+        if not hasattr(self, "_decision_failure_ids"):
+            self._decision_failure_ids = failed_game_ids_from_tokens(
+                self._canonical_path("tokens"), self.resolved_filter(),
+            )
+        return self._decision_failure_ids
+
+    def apply_filter(self, df: pd.DataFrame, *, include_quality: bool = True) -> pd.DataFrame:
         """Apply the global ``data.filter`` narrowed by this stage's ``filter``."""
-        from ..config.filters import resolve_filter_spec
         from ..data.loading import apply_filter_spec, incomplete_experiments_from_games
 
-        filter_spec = self.config.data.get("filter")
-        global_spec = resolve_filter_spec(filter_spec, self.config.filters, "data.filter")
+        global_spec = self.resolved_filter()
+        failure_ids = self.decision_failure_ids() if include_quality else set()
+        if not include_quality:
+            global_spec.pop("min_condition_completeness", None)
+            global_spec["max_decision_failure_pct"] = None
         condition_incomplete = None
         if global_spec.get("min_condition_completeness") is not None:
             conditions = self._games_for_filter()
             condition_incomplete = incomplete_experiments_from_games(
-                str(conditions), global_spec, self._problem_game_ids()
+                str(conditions), global_spec, self._problem_game_ids(), failure_ids,
             )
         return apply_filter_spec(
             df,
             catalog=self.catalog,
-            filter_spec=filter_spec,
-            presets=self.config.filters,
-            stage_filter=self.stage_filter,
+            filter_spec=global_spec,
             condition_incomplete=condition_incomplete,
+            decision_failure_ids=failure_ids,
         )
 
     def _games_for_filter(self) -> str:

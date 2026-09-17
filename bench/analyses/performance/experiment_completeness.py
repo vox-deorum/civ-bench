@@ -27,7 +27,9 @@ def _failed_turn_list(values: pd.Series) -> str:
         for item in value.split(","):
             item = item.strip()
             if item:
-                turns.add(int(item))
+                # CSV inference represents a lone turn as a float when other
+                # traces have blank failed-turn lists.
+                turns.add(int(float(item)))
     return ",".join(str(turn) for turn in sorted(turns))
 
 
@@ -60,10 +62,12 @@ def attach_decision_turn_failures(
     source = tokens.copy()
     source["valid_turn_count"] = pd.to_numeric(
         source["valid_turn_count"], errors="coerce"
-    ).fillna(0).astype(int)
+    )
     source["failed_turn_count"] = pd.to_numeric(
         source["failed_turn_count"], errors="coerce"
-    ).fillna(0).astype(int)
+    )
+    source = source.dropna(subset=["valid_turn_count", "failed_turn_count"])
+    source = source[source["valid_turn_count"] > 0]
     if "player_type" not in source.columns:
         source["player_type"] = "N/A"
     if "failed_turns" not in source.columns:
@@ -79,7 +83,7 @@ def attach_decision_turn_failures(
     )
     per_player["failure_pct"] = (
         per_player["failed_turn_count"]
-        / per_player["valid_turn_count"].replace(0, pd.NA)
+        / per_player["valid_turn_count"].replace(0, float("nan"))
     ).astype(float).round(4)
 
     experiment = per_player.groupby("experiment", as_index=False).agg(
@@ -90,14 +94,14 @@ def attach_decision_turn_failures(
     experiment["avg_failure_count"] = experiment["avg_failure_count"].round(4)
     experiment["failure_pct"] = (
         experiment["failed_turn_count"]
-        / experiment["valid_turn_count"].replace(0, pd.NA)
+        / experiment["valid_turn_count"].replace(0, float("nan"))
     ).astype(float).round(4)
     experiment = experiment.drop(columns="valid_turn_count")
 
     out = out.merge(experiment, on="experiment", how="left")
     for index, row in out.iterrows():
         failed = row["failed_turn_count"]
-        if pd.isna(failed):
+        if pd.isna(failed) or pd.isna(row["failure_pct"]):
             out.at[index, "warning"] = _append_warning(
                 row["warning"], "decision-turn failure telemetry unavailable"
             )
@@ -135,13 +139,26 @@ class PerformanceExperimentCompleteness(Analysis):
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
         table_id = ctx.strength_table_id()
-        panel = ctx.apply_filter(ctx.load_table(table_id))
+        strength = ctx.load_table(table_id)
         games = self._load_games(ctx)
-        baseline_experiment = ctx.strength_provenance(table_id, panel).get(
+        baseline_experiment = ctx.strength_provenance(table_id, strength).get(
             "adjust_baseline_experiment"
         )
+        # Canonical rows retain the design and configured seats even when quality
+        # filters removed an entire experiment upstream of the strength panel.
+        try:
+            panel = ctx.load_table("panel")
+        except AnalysisError:
+            panel = strength
+        if games is not None and {"game_id", "seed", "seating_rotation"} <= set(games.columns):
+            panel = panel.drop(columns=["seed", "seating_rotation"], errors="ignore").merge(
+                games[["game_id", "seed", "seating_rotation"]].drop_duplicates("game_id"),
+                on="game_id", how="left", validate="many_to_one",
+            )
+        panel = ctx.apply_filter(panel, include_quality=False)
+        excluded_ids = ctx.decision_failure_ids()
 
-        tables = build_experiment_completeness(panel, games, baseline_experiment)
+        tables = build_experiment_completeness(panel, games, baseline_experiment, excluded_ids)
         if not tables:
             return AnalysisResult(
                 summary="No controlled experiment coverage is available.",
@@ -149,10 +166,13 @@ class PerformanceExperimentCompleteness(Analysis):
             )
 
         tokens = self._load_tokens(ctx)
+        if tokens is not None:
+            tokens = tokens[tokens["game_id"].isin(panel["game_id"])]
         tables["experiment_completeness"], decision_failures = (
             attach_decision_turn_failures(tables["experiment_completeness"], tokens)
         )
         tables["decision_turn_failures"] = decision_failures
+        decision_failures["excluded_game"] = decision_failures["game_id"].astype(str).isin(excluded_ids)
 
         out = {}
         for name, table in tables.items():
@@ -180,7 +200,7 @@ class PerformanceExperimentCompleteness(Analysis):
         artifacts: dict[str, str] = {}
         if bool(self.params.get("emit_seating", True)):
             artifacts, index_rows, warnings = generate_seating_files(
-                panel, games, baseline_experiment
+                panel, games, baseline_experiment, excluded_ids,
             )
             if index_rows:
                 out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)
@@ -203,6 +223,7 @@ class PerformanceExperimentCompleteness(Analysis):
                     "missing_slots": missing_games,
                     "repeated_slots": repeated_slots,
                     "failed_decision_turns": failed_turns,
+                    "excluded_games": int(comp["excluded_games"].sum()),
                     "experiments_with_warnings": warning_experiments,
                 },
                 "seating": {
@@ -221,6 +242,8 @@ class PerformanceExperimentCompleteness(Analysis):
 
     def _load_tokens(self, ctx: AnalysisContext):
         try:
-            return ctx.apply_filter(ctx.load_table("tokens"))
+            # Every player trace can reject the game, including players omitted
+            # from the analysis selection. Keep those traces in the explanation.
+            return ctx.load_table("tokens")
         except AnalysisError:
             return None

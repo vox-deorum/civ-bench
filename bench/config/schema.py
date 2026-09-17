@@ -61,6 +61,7 @@ FILTER_KEYS = {
     "min_games",
     "turn_range",
     "min_condition_completeness",
+    "max_decision_failure_pct",
 }
 
 # ── groupings (§3.2) ───────────────────────────────────────────────────────

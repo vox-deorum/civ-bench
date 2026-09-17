@@ -9,6 +9,8 @@ diagnostics (warn vs. throw), and the ``run_adjust`` file-writing integration.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import math
 
 import numpy as np
@@ -469,7 +471,7 @@ def _run_spec(turns_path, pred_path, panel_path, games_path, save_path, params, 
             "extract": {"enabled": False},
             "tables": {
                 "turns": str(turns_path), "panel": str(panel_path),
-                "games": str(games_path), "tokens": "runs/model_token_usage.csv",
+                "games": str(games_path), "tokens": str(Path(games_path).parent / "tokens.csv"),
             },
         },
         "estimators": [{
@@ -516,6 +518,21 @@ def test_run_adjust_missing_predictions_raises(tmp_path, write_spec):
     cfg = load_config(write_spec(spec))
     with pytest.raises(AdjustError, match="predictions not found"):
         run_adjust(cfg, cfg.adjust[0].raw)
+
+
+def test_run_adjust_filters_failures_from_existing_predictions(tmp_path, write_spec):
+    games = _uncontrolled_games()
+    games.append({**games[0], "game_id": "bad"})
+    pp, pa, gp = _write(tmp_path, games)
+    save = tmp_path / "out" / "panel.csv"
+    spec = _run_spec(tmp_path / "turns.csv", pp, pa, gp, save, {"block": "none"})
+    pd.DataFrame([
+        {"experiment": "exp-llm", "game_id": "bad", "player_id": 0,
+         "valid_turn_count": 5, "failed_turn_count": 1},
+    ]).to_csv(spec["data"]["tables"]["tokens"], index=False)
+    cfg = load_config(write_spec(spec))
+    result = run_adjust(cfg, cfg.adjust[0].raw)
+    assert set(pd.read_csv(result.table_path)["game_id"]) == {"g1"}
 
 
 # ── config validation: free-form baseline_experiment id ──────────────────────

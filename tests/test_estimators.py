@@ -12,6 +12,7 @@ miniature).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -193,7 +194,7 @@ def _spec(turns_csv, model_dir, save_predictions, extra_estimator=None):
                 "turns": str(turns_csv),
                 "panel": "runs/panel_data.csv",
                 "games": "runs/game_data.csv",
-                "tokens": "runs/model_token_usage.csv",
+                "tokens": str(Path(turns_csv).parent / "tokens.csv"),
             },
         },
         "estimators": estimators,
@@ -278,6 +279,22 @@ def test_predict_subset_empty_raises(turns_csv, score_model_dir, tmp_path, write
         run_estimator(cfg, cfg.estimators[0].raw)
 
 
+def test_estimator_excludes_game_when_one_player_reaches_failure_cutoff(
+    turns_csv, score_model_dir, tmp_path, write_spec,
+):
+    save_pred = tmp_path / "predictions.csv"
+    spec = _spec(turns_csv, score_model_dir, save_pred)
+    pd.DataFrame([
+        {"experiment": "exp-llm", "game_id": "game-0", "player_id": 0,
+         "valid_turn_count": 10, "failed_turn_count": 2},
+        {"experiment": "exp-llm", "game_id": "game-0", "player_id": 1,
+         "valid_turn_count": 100, "failed_turn_count": 0},
+    ]).to_csv(spec["data"]["tables"]["tokens"], index=False)
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    assert set(pd.read_csv(save_pred)["game_id"]) == {"game-1"}
+
+
 def test_missing_model_dir_fails_loudly(turns_csv, tmp_path, write_spec):
     save_pred = tmp_path / "predictions.csv"
     cfg = load_config(write_spec(_spec(turns_csv, tmp_path / "nope", save_pred)))
@@ -307,7 +324,7 @@ def _train_spec(turns_csv, save_predictions, *, model="score", predict="in_sampl
                 "turns": str(turns_csv),
                 "panel": "runs/panel_data.csv",
                 "games": "runs/game_data.csv",
-                "tokens": "runs/model_token_usage.csv",
+                "tokens": str(Path(turns_csv).parent / "tokens.csv"),
             },
         },
         "estimators": [estimator],

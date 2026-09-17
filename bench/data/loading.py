@@ -30,6 +30,7 @@ def apply_filter_spec(
     presets: Optional[dict] = None,
     stage_filter=None,
     condition_incomplete=None,
+    decision_failure_ids=None,
 ) -> pd.DataFrame:
     """Apply benchmark filter semantics to an already loaded dataframe.
 
@@ -41,8 +42,12 @@ def apply_filter_spec(
     has already judged incomplete (computed once from the ``games`` table against
     the global ``min_condition_completeness``); it lets tables that carry no
     ``seed``/``seating_rotation`` grid (tokens, turns, panel, predictions) still
-    drop incomplete conditions. A table that does carry the grid re-derives the
-    set itself and the two are merged.
+    drop incomplete conditions. Without that set, a table carrying the grid
+    computes coverage itself. Rejected games remain part of the reference grid.
+
+    ``decision_failure_ids`` excludes whole games before row-level selection.
+    Callers compute this set from the canonical token table. When omitted, a
+    frame with failure telemetry can compute its own exclusions.
     """
     presets = presets or {}
     resolved = resolve_filter_spec(filter_spec, presets, "filter")
@@ -52,7 +57,11 @@ def apply_filter_spec(
             resolve_filter_spec(stage_filter, presets, "stage.filter"),
         )
 
-    out = df
+    if decision_failure_ids is None:
+        from bench.data.failures import failed_game_ids
+
+        decision_failure_ids = failed_game_ids(df, resolved)
+    out = drop_problem_games(df, decision_failure_ids)
     cond_col = "condition" if "condition" in out.columns else "experiment"
 
     experiments = resolved.get("experiments")
@@ -98,8 +107,8 @@ def apply_filter_spec(
     mcc = resolved.get("min_condition_completeness")
     if mcc is not None and cond_col in out.columns:
         incomplete = set(condition_incomplete or ())
-        if {"seed", "seating_rotation"} <= set(out.columns):
-            incomplete |= incomplete_experiments(out, mcc, cond_col)
+        if condition_incomplete is None and {"seed", "seating_rotation"} <= set(df.columns):
+            incomplete |= incomplete_experiments(df, mcc, cond_col, decision_failure_ids)
         if incomplete:
             out = out[~out[cond_col].astype(str).isin(incomplete)]
 
@@ -115,7 +124,7 @@ def _as_list(value):
 
 
 def condition_completeness(
-    df: pd.DataFrame, cond_col: Optional[str] = None
+    df: pd.DataFrame, cond_col: Optional[str] = None, excluded_game_ids=None,
 ) -> dict[str, float]:
     """Per-condition fraction of controlled ``(seed, seating_rotation)`` slots it
     occupies, evaluated against the union of controlled slots as the reference grid
@@ -146,6 +155,7 @@ def condition_completeness(
         return {}
     out: dict[str, float] = {}
     for exp, grp in controlled.groupby(cond, sort=True):
+        grp = drop_problem_games(grp, excluded_game_ids)
         present = {
             (int(s), int(r))
             for s, r in grp[["seed", "seating_rotation"]].itertuples(index=False, name=None)
@@ -155,11 +165,13 @@ def condition_completeness(
 
 
 def incomplete_experiments(
-    df: pd.DataFrame, threshold: float, cond_col: Optional[str] = None
+    df: pd.DataFrame, threshold: float, cond_col: Optional[str] = None,
+    excluded_game_ids=None,
 ) -> set[str]:
     """Condition names whose slot completeness is below ``threshold`` (in ``(0, 1]``)."""
     return {
-        exp for exp, frac in condition_completeness(df, cond_col).items() if frac < threshold
+        exp for exp, frac in condition_completeness(df, cond_col, excluded_game_ids).items()
+        if frac < threshold
     }
 
 
@@ -167,6 +179,7 @@ def incomplete_experiments_from_games(
     games_path,
     resolved_filter: Optional[dict],
     problem_ids=None,
+    decision_failure_ids=None,
 ) -> Optional[set[str]]:
     """Incomplete-condition names computed once from the canonical ``games`` table.
 
@@ -178,7 +191,7 @@ def incomplete_experiments_from_games(
     if mcc is None:
         return None
     games = drop_problem_games(pd.read_csv(games_path), problem_ids)
-    return incomplete_experiments(games, mcc)
+    return incomplete_experiments(games, mcc, excluded_game_ids=decision_failure_ids)
 
 
 def _cond_col(df: pd.DataFrame) -> str:
@@ -194,5 +207,5 @@ def drop_problem_games(df: pd.DataFrame, problem_ids) -> pd.DataFrame:
     is excluded consistently rather than only in ``load_table``.
     """
     if problem_ids is not None and len(problem_ids) and "game_id" in df.columns:
-        return df[~df["game_id"].isin(problem_ids)]
+        return df[~df["game_id"].astype(str).isin(problem_ids)]
     return df

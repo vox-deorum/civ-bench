@@ -158,17 +158,17 @@ render the matrix instead.
 
 ### 3.1 `filters`: named, reusable filter presets
 
-A filter is the **same shape everywhere** it appears (`data.filter` and every stage's `filter`), so define the common ones once and reference them by name instead of repeating the object. Every field is optional; an omitted field means "no constraint".
+A filter is the **same shape everywhere** it appears (`data.filter` and every stage's `filter`), so define the common ones once and reference them by name instead of repeating the object. Every field is optional; an omitted field means "no constraint", except `max_decision_failure_pct`, whose effective default is `0.2`.
 
 ```jsonc
 "filters": {
   "llm_only":     { "only_llm": true, "min_games": 5 },
-  "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5 },
+  "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5, "max_decision_failure_pct": 0.2 },
   "late_game":    { "turn_range": [200, null] }
 }
 ```
 
-The full filter shape (every field optional; omitted ⇒ no constraint):
+The full filter shape (every field optional; omitted ⇒ no constraint, except `max_decision_failure_pct`, whose effective default is `0.2`):
 
 ```jsonc
 {
@@ -179,10 +179,11 @@ The full filter shape (every field optional; omitted ⇒ no constraint):
   "min_games":           1,      // drop player types with fewer games than this
   "turn_range":          null,   // null = all turns; or [min_turn, max_turn] (absolute turn numbers;
                                  //   either bound may be null, e.g. [200, null] = turn 200 onward)
-  "min_condition_completeness": null  // null = keep every controlled condition; a number in (0, 1]
+  "min_condition_completeness": null, // null = keep every controlled condition; a number in (0, 1]
                                       //   drops, as a whole, controlled conditions whose occupied
                                       //   (seed, seating_rotation) slot fraction is below it (1.0 ⇒
                                       //   drop any condition missing a slot)
+  "max_decision_failure_pct": 0.2     // effective default 0.2; null disables; number in (0, 1]
 }
 ```
 
@@ -194,9 +195,11 @@ The full filter shape (every field optional; omitted ⇒ no constraint):
 
 A stage's `filter` is then **intersected** with the resolved global `data.filter`: a stage can only narrow, never widen (§6.1). Referencing an undefined preset name is a validation error.
 
-The same resolved filter object is what the shared data loaders accept, so analysis modules should pass config-shaped filters through the loader helpers instead of translating `experiments`, `players`, `only_llm`, `min_games`, `turn_range`, and `min_condition_completeness` by hand.
+The same resolved filter object is what the shared data loaders accept, so analysis modules should pass config-shaped filters through the loader helpers instead of translating `experiments`, `players`, `only_llm`, `min_games`, `turn_range`, `min_condition_completeness`, and `max_decision_failure_pct` by hand.
 
-- **`min_condition_completeness` is a global condition filter.** A controlled *condition* is an experiment's `seed × seating_rotation` grid. The filter evaluates every controlled experiment against the union of controlled slots it can see (the whole controlled design) and drops, as a whole, every experiment whose occupied-slot fraction is below the threshold; `1.0` means "skip every condition missing any slot". Because it is a global filter it applies consistently to every stage that loads a table: the estimator predictions, the strength panel, the ratings, and the descriptive analyses such as `performance.usage_efficiency`. The grid is resolved once from the canonical `games` table, so tables that carry no `seed`/`seating_rotation` columns (tokens, turns, panel, predictions) still drop the same incomplete conditions by `experiment`. The `games` table therefore must be present (and extracted) when the filter is set.
+- **`max_decision_failure_pct` is a global game filter.** Its effective default is `0.2`; set it to `null` to disable it. A game is accepted only when every player trace has `failed_turn_count / valid_turn_count < threshold`. The comparison is exclusive, so a trace at or above the threshold excludes the whole game. The cutoff uses raw exact telemetry counters, collapses repeated model rows once per player, and is evaluated from whole-game telemetry independently of player or turn filters. The resolved cutoff is inherited by estimator, adjust, and analysis stages. Games with unknown failure rates, including missing, legacy, or zero-denominator telemetry, are retained. Completeness warns when an experiment has no usable telemetry. A stage-level threshold may only narrow the resolved global cutoff.
+
+- **`min_condition_completeness` is a global condition filter.** A controlled *condition* is an experiment's `seed × seating_rotation` grid. The filter evaluates every controlled experiment against the union of controlled slots it can see (the whole controlled design) and drops, as a whole, every experiment whose occupied-slot fraction is below the threshold; `1.0` means "skip every condition missing any slot". Occupied slots are measured after the decision-failure quality filter, while the raw canonical `panel` and `games` design remains available for scheduling and diagnostics. A condition with zero accepted games remains visible as a zero-accepted experiment. Diagnostics bypass this filter so the schedule remains visible; a seating slot with only rejected games stays open until a valid replacement completes it. Because it is a global filter it applies consistently to every stage that loads a table: the estimator predictions, the strength panel, the ratings, and the descriptive analyses such as `performance.usage_efficiency`. The grid is resolved once from the canonical `games` table, so tables that carry no `seed`/`seating_rotation` columns (tokens, turns, panel, predictions) still drop the same incomplete conditions by `experiment`. The `games` table therefore must be present (and extracted) when the filter is set.
 
 ### 3.2 `groupings`: named rating-identity dimensions
 
@@ -416,7 +419,7 @@ The reason it exists: a `ratings.bradley_terry` fit is not run over raw `panel_d
   - `cell_baseline.csv`, the **VPAI seating×seed effect** from the controlled (`block`) path: `experiment, pathway, seed, player_id, civilization, cell_baseline, n_vanilla, win_rate, n_games, n_models, has_vanilla_baseline, vanilla_connected`. It carries every pathway that actually ran (`pathway ∈ {explicit, implicit}`); a default `baseline_experiment:null` run normally contains only implicit rows. When both explicit and implicit exist for a condition/cell, the report compares `implicit - explicit` on the logit scale.
   - `cell_coverage.csv`, the **controlled-design cell coverage report**: for each controlled experiment, which `(seed, player_id)` cells of the **entirety** reference grid it is missing. Columns: `experiment, seed, player_id, civilization, in_entirety, n_rows, n_vanilla, has_baseline, missing` (`missing = true` ⇒ the experiment has no rows for that cell). The "entirety" is the full baseline cell set: the `baseline_experiment`'s cells when set (a pure VP self-play spans every seat across every seed/rotation), else the union of `(seed, player_id)` cells observed across the controlled subset. This is a **report-only** diagnostic (WARN, never fatal; distinct from the hard-error "a row needs adjustment but its selected baseline cell is missing"); written only when controlled rows exist.
 
-  `performance.experiment_completeness` derives compact game-level completeness tables from the strength panel and token telemetry as its own report section. `experiment_completeness.csv` contains `experiment, required_games, present_games, missing_games, completeness_pct, repeated_slots, failed_turn_count, avg_failure_count, failure_pct, warning`. The average is the mean failed turn count per player trace. The percentage is total failed turns divided by total selected turn roots. `decision_turn_failures.csv` identifies every affected `experiment, game_id, player_id` and lists its failed turns. `repeated_games.csv` lists exact duplicate game ids by seed and rotation, and gap or issue detail tables are written when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct `game_id`s, and `warning` is `ok` or a readable issue summary rather than a boolean.
+  `performance.experiment_completeness` derives compact game-level completeness tables from canonical panel, games, and token telemetry, using the strength stage's baseline configuration as its own report section. `experiment_completeness.csv` contains `experiment, required_games, present_games, missing_games, excluded_games, completeness_pct, repeated_slots, failed_turn_count, avg_failure_count, failure_pct, warning`. The average is the mean failed turn count per player trace. The percentage is total failed turns divided by total selected turn roots. `excluded_games` counts games rejected by the decision-failure cutoff. `decision_turn_failures.csv` identifies every affected `experiment, game_id, player_id`, lists its failed turns, and includes `excluded_game`. Telemetry diagnostics retain all player traces for the selected games, including rejected traces and players outside the player filter. `repeated_games.csv` lists exact duplicate game ids by seed and rotation, and gap or issue detail tables are written when needed. `required_games` is the full controlled `seed × seating_rotation` grid, using the explicit `baseline_experiment` grid when configured and present, else the controlled union. `present_games` counts distinct accepted `game_id`s, and `warning` is `ok` or a readable issue summary rather than a boolean. An experiment without usable telemetry receives a completeness warning.
 
   A mixed dataset writes these files; each is simply empty/absent when its path didn't run (`cell_baseline.csv`/`cell_coverage.csv` are empty on a fully uncontrolled run). `performance.strength_panel` always surfaces whichever exist (§6.2); no flag.
 
@@ -886,7 +889,7 @@ The chapter lives in its own directory beside the family pages:
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.
 6. **Registry membership**: every analysis `module` resolves in the analysis registry; every `adjust` `module` resolves in the adjust registry (currently `strength`); every estimator `model` resolves in `catalogs.models` `prediction_models`.
 7. **Adjust wiring**: each `adjust` stage must declare exactly one estimator in `uses.estimators`. A `uses.tables` name must resolve to either a `data.tables` key or an enabled `adjust` stage `id`; strength-based ratings (`ratings.bradley_terry`, `ratings.plackett_luce`, `ratings.matchups`) must reference a `strength` table (no `adjust` stage ⇒ a validation error, since there is nothing to rate).
-8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; list filters merge left-to-right; a stage `filter` may not select experiments/players/turns excluded by the resolved global `data.filter` or lower constraints like `only_llm`/`min_games`/`min_condition_completeness`; a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable); `min_condition_completeness` is null or a number in `(0, 1]`.
+8. **Filter resolution**: every preset name in any `filter` exists in top-level `filters`; list filters merge left-to-right; a stage `filter` may not select experiments/players/turns excluded by the resolved global `data.filter` or lower constraints like `only_llm`/`min_games`/`min_condition_completeness`; a `turn_range` must be `[min, max]` with `min <= max` (either bound nullable); `min_condition_completeness` and `max_decision_failure_pct` are each null or a number in `(0, 1]`; a stage `max_decision_failure_pct` may only be stricter than the global value.
 9. **Grouping resolution**: in a `ratings.*` `group_by`, every dimension past the base (`group_by[0]`, typically `player_type`) must name a grouping defined in top-level `groupings` (§3.2); referencing an undefined grouping is an error. Each grouping's `kind` must be implemented (currently only `argmax`); an `argmax` grouping's `labels`, when present, must be positional with `columns`.
 10. **Bootstrap**: a `ratings.*` `bootstrap`, when not null, requires an integer `n >= 1`; its resampling is seeded from the top-level `seed` (determinism: same config ⇒ same CIs).
 11. **No missing dependencies**: there is no graceful degradation. A stage requiring an uninstalled package (torch/xgboost/optuna/R) **aborts the run** with an install hint. Run `scripts/install` first so every dependency is present.

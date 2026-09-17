@@ -560,3 +560,49 @@ def test_stage_filter_cannot_lower_global_min_condition_completeness(
     dev_spec["analyses"][0]["filter"] = {"min_condition_completeness": 0.5}
     with pytest.raises(ConfigError, match="min_condition_completeness"):
         load_config(write_spec(dev_spec))
+
+
+# ── decision-failure filter ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("value", [None, 0.2, 0.05, 1])
+def test_max_decision_failure_pct_accepted_in_global_filter(dev_spec, write_spec, value):
+    dev_spec["filters"]["staff_recent"]["max_decision_failure_pct"] = value
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.filters["staff_recent"]["max_decision_failure_pct"] == value
+
+
+@pytest.mark.parametrize("value", [0, -0.1, 1.1, True, "20%"])
+def test_max_decision_failure_pct_bad_value_is_loud(dev_spec, write_spec, value):
+    dev_spec["filters"]["staff_recent"]["max_decision_failure_pct"] = value
+    with pytest.raises(ConfigError, match="max_decision_failure_pct"):
+        load_config(write_spec(dev_spec))
+
+
+def test_max_decision_failure_pct_stage_uses_default_and_cannot_widen(dev_spec, write_spec):
+    dev_spec["analyses"][0]["filter"] = {"max_decision_failure_pct": 0.2}
+    load_config(write_spec(dev_spec))
+    dev_spec["analyses"][0]["filter"] = {"max_decision_failure_pct": 0.21}
+    with pytest.raises(ConfigError, match="max_decision_failure_pct"):
+        load_config(write_spec(dev_spec))
+    dev_spec["analyses"][0]["filter"] = {"max_decision_failure_pct": None}
+    with pytest.raises(ConfigError, match="max_decision_failure_pct"):
+        load_config(write_spec(dev_spec))
+
+
+def test_max_decision_failure_pct_null_global_allows_numeric_stage(dev_spec, write_spec):
+    dev_spec["filters"]["staff_recent"]["max_decision_failure_pct"] = None
+    dev_spec["analyses"][0]["filter"] = {"max_decision_failure_pct": 0.1}
+    load_config(write_spec(dev_spec))
+
+
+def test_max_decision_failure_pct_intersection_uses_stricter_threshold():
+    from bench.config.filters import (
+        DEFAULT_MAX_DECISION_FAILURE_PCT,
+        intersect_filter_specs,
+    )
+
+    assert intersect_filter_specs({}, {})["max_decision_failure_pct"] == DEFAULT_MAX_DECISION_FAILURE_PCT
+    assert intersect_filter_specs({}, {"max_decision_failure_pct": 0.1})["max_decision_failure_pct"] == 0.1
+    assert intersect_filter_specs({"max_decision_failure_pct": 0.3}, {"max_decision_failure_pct": 0.1})["max_decision_failure_pct"] == 0.1
+    assert intersect_filter_specs({"max_decision_failure_pct": None}, {})["max_decision_failure_pct"] is None
+    assert intersect_filter_specs({"max_decision_failure_pct": None}, {"max_decision_failure_pct": 0.1})["max_decision_failure_pct"] == 0.1

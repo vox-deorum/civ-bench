@@ -14,6 +14,8 @@ from . import schema as S
 from .errors import ConfigError
 from .validation import coerce_bool
 
+DEFAULT_MAX_DECISION_FAILURE_PCT = 0.2
+
 
 def _check_filter_keys(obj: dict, where: str) -> None:
     unknown = sorted(set(obj) - set(S.FILTER_KEYS))
@@ -77,6 +79,18 @@ def validate_filter_object(obj: dict, where: str) -> None:
         if isinstance(mcc, bool) or not isinstance(mcc, (int, float)) or not 0 < mcc <= 1:
             raise ConfigError(
                 f"{where}.min_condition_completeness: must be null or a "
+                "number in (0, 1]."
+            )
+
+    max_failure = obj.get("max_decision_failure_pct")
+    if max_failure is not None:
+        if (
+            isinstance(max_failure, bool)
+            or not isinstance(max_failure, (int, float))
+            or not 0 < max_failure <= 1
+        ):
+            raise ConfigError(
+                f"{where}.max_decision_failure_pct: must be null or a "
                 "number in (0, 1]."
             )
 
@@ -146,6 +160,23 @@ def intersect_filter_specs(base: dict, narrow: dict) -> dict:
         if thresholds:
             out["min_condition_completeness"] = max(thresholds)
 
+    # Failure percentage is a ceiling: a stage may only lower the global
+    # threshold. An omitted global value uses the default, while explicit null
+    # disables this filter unless a stage supplies a numeric threshold.
+    base_failure = base.get("max_decision_failure_pct", DEFAULT_MAX_DECISION_FAILURE_PCT)
+    if "max_decision_failure_pct" in narrow:
+        narrow_failure = narrow["max_decision_failure_pct"]
+        if base_failure is None:
+            out["max_decision_failure_pct"] = narrow_failure
+        elif narrow_failure is None:
+            out["max_decision_failure_pct"] = base_failure
+        else:
+            out["max_decision_failure_pct"] = min(base_failure, narrow_failure)
+    elif "max_decision_failure_pct" in base:
+        out["max_decision_failure_pct"] = base_failure
+    else:
+        out["max_decision_failure_pct"] = DEFAULT_MAX_DECISION_FAILURE_PCT
+
     if "turn_range" in base or "turn_range" in narrow:
         blo, bhi = _range_bounds(base.get("turn_range"))
         nlo, nhi = _range_bounds(narrow.get("turn_range"))
@@ -180,6 +211,20 @@ def ensure_filter_narrows(base: dict, candidate: dict, where: str) -> None:
             f"{where}.min_condition_completeness: cannot be lower than the global "
             f"min_condition_completeness={base_mcc}."
         )
+
+    base_failure = base.get(
+        "max_decision_failure_pct", DEFAULT_MAX_DECISION_FAILURE_PCT
+    )
+    if "max_decision_failure_pct" in candidate:
+        candidate_failure = candidate["max_decision_failure_pct"]
+        if base_failure is not None and (
+            candidate_failure is None or candidate_failure > base_failure
+        ):
+            effective = base_failure
+            raise ConfigError(
+                f"{where}.max_decision_failure_pct: cannot be null or higher than "
+                f"the global effective max_decision_failure_pct={effective}."
+            )
 
     if "turn_range" in candidate:
         blo, bhi = _range_bounds(base.get("turn_range"))

@@ -318,6 +318,11 @@ def _load_and_filter(
     df = build_feature_frame(turns_csv, use_variants=use_variants, filter_zero_score=False)
     filter_spec = cfg.data.get("filter")
     global_spec = resolve_filter_spec(filter_spec, cfg.filters, "data.filter")
+    from bench.data.failures import failed_game_ids_from_tokens
+
+    failure_ids = failed_game_ids_from_tokens(
+        (cfg.data.get("tables") or {}).get("tokens"), global_spec,
+    )
     condition_incomplete = None
     if global_spec.get("min_condition_completeness") is not None:
         games_csv = _table_path(cfg, "games")
@@ -328,12 +333,13 @@ def _load_and_filter(
                 f"Run extract first."
             )
         condition_incomplete = incomplete_experiments_from_games(
-            games_csv, global_spec
+            games_csv, global_spec, decision_failure_ids=failure_ids,
         )
     df = apply_filter_spec(
         df, catalog=catalog,
         filter_spec=filter_spec, presets=cfg.filters,
         condition_incomplete=condition_incomplete,
+        decision_failure_ids=failure_ids,
     )
     if df.empty:
         raise EstimatorError(

@@ -348,7 +348,9 @@ class PerformanceControlledSeedReport(Analysis):
         self, ctx: AnalysisContext, table_id: str, baseline_experiment: str
     ) -> pd.DataFrame:
         stage = self.stage_id
-        games = ctx.load_table("games")
+        from bench.data.loading import drop_problem_games
+
+        games = drop_problem_games(ctx.load_table("games"), ctx.decision_failure_ids())
         _require_columns(
             games, ["game_id", "experiment", "seed", "seating_rotation"], "games", stage
         )

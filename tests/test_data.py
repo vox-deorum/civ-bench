@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from bench.catalog import Catalog
 from bench.data import apply_filter_spec
+from bench.data.failures import decision_failure_games, failed_game_ids
 
 
 def _catalog() -> Catalog:
@@ -117,3 +119,101 @@ def test_apply_filter_spec_uses_precomputed_incomplete_conditions_on_gridless_ta
     )
     assert set(out["experiment"]) == {"full", "plain"}
 
+
+# ── decision-failure game filter ────────────────────────────────────────────
+
+def _failure_tokens(rows):
+    return pd.DataFrame([
+        {
+            "experiment": exp, "game_id": game, "player_id": player,
+            "valid_turn_count": valid, "failed_turn_count": failed,
+            "failure_pct": failed / valid if valid else 0.0,
+        }
+        for exp, game, player, valid, failed in rows
+    ])
+
+
+def test_decision_failure_default_is_exact_and_unrounded():
+    tokens = _failure_tokens([
+        ("exp", "exact", 0, 5, 1),
+        ("exp", "below", 0, 100000, 19999),
+    ])
+    tokens["failure_pct"] = tokens["failure_pct"].round(4)
+    assert failed_game_ids(tokens, {}) == {"exact"}
+
+
+def test_decision_failure_excludes_any_player_even_when_game_average_is_low():
+    tokens = _failure_tokens([
+        ("exp", "bad", 0, 5, 1),
+        ("exp", "bad", 1, 100, 0),
+    ])
+    games = decision_failure_games(tokens).set_index("game_id")
+    assert games.loc["bad", "failure_pct"] < 0.2
+    assert failed_game_ids(tokens, {}) == {"bad"}
+
+
+def test_decision_failure_duplicate_model_rows_do_not_change_result():
+    tokens = _failure_tokens([
+        ("exp", "bad", 0, 10, 2),
+        ("exp", "bad", 0, 10, 2),
+        ("exp", "good", 0, 10, 1),
+        ("exp", "good", 0, 10, 1),
+    ])
+    assert failed_game_ids(tokens, {}) == {"bad"}
+
+
+@pytest.mark.parametrize("resolved, expected", [
+    ({"max_decision_failure_pct": None}, set()),
+    ({"max_decision_failure_pct": 0.3}, {"high"}),
+])
+def test_decision_failure_null_and_custom_cutoff(resolved, expected):
+    tokens = _failure_tokens([
+        ("exp", "high", 0, 10, 4),
+        ("exp", "medium", 0, 10, 1),
+    ])
+    assert failed_game_ids(tokens, resolved) == expected
+
+
+def test_decision_failure_missing_legacy_and_zero_telemetry_are_retained():
+    missing = pd.DataFrame([{"experiment": "exp", "game_id": "g", "player_id": 0}])
+    legacy = pd.DataFrame([{
+        "experiment": "exp", "game_id": "g", "player_id": 0,
+        "valid_turn_count": 10,
+    }])
+    zero = _failure_tokens([("exp", "zero", 0, 0, 0)])
+    assert failed_game_ids(missing, {}) == set()
+    assert failed_game_ids(legacy, {}) == set()
+    assert failed_game_ids(zero, {}) == set()
+
+
+def test_completeness_excludes_failed_games_and_keeps_design_reference_grid():
+    from bench.data import condition_completeness, incomplete_experiments
+
+    games = pd.DataFrame([
+        {"experiment": "full", "game_id": "f0", "seed": 1, "seating_rotation": 0},
+        {"experiment": "full", "game_id": "f1", "seed": 1, "seating_rotation": 1},
+        {"experiment": "gone", "game_id": "g0", "seed": 1, "seating_rotation": 0},
+        {"experiment": "gone", "game_id": "g1", "seed": 1, "seating_rotation": 1},
+    ])
+    assert condition_completeness(games, excluded_game_ids={"g0", "g1"}) == {
+        "full": 1.0, "gone": 0.0,
+    }
+    assert incomplete_experiments(games, 1.0, excluded_game_ids={"g0", "g1"}) == {"gone"}
+
+
+def test_precomputed_failure_ids_filter_gridless_tables_before_min_games():
+    tokens = pd.DataFrame({
+        "experiment": ["exp", "exp", "exp"],
+        "game_id": ["bad", "good-1", "good-2"],
+        "player_type": ["A", "A", "A"],
+    })
+    out = apply_filter_spec(
+        tokens,
+        filter_spec={"min_games": 2},
+        decision_failure_ids={"bad"},
+    )
+    assert out["game_id"].tolist() == ["good-1", "good-2"]
+    out = apply_filter_spec(
+        tokens, filter_spec={"min_games": 3}, decision_failure_ids={"bad"},
+    )
+    assert out.empty

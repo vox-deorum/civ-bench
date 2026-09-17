@@ -10,7 +10,7 @@
   },
 
   "filters": {
-    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5, "min_condition_completeness": null },
+    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5, "min_condition_completeness": null, "max_decision_failure_pct": 0.2 },
     "llm_only": { "only_llm": true, "min_games": 5 },
     "late_game": { "turn_range": [200, null] }
   },

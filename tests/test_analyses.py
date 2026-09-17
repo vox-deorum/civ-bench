@@ -500,6 +500,88 @@ def test_experiment_completeness_warns_for_legacy_token_csv():
     assert failures.empty
 
 
+@pytest.mark.parametrize("replacement", [False, True])
+def test_failure_filter_reopens_slots_and_preserves_rejected_experiments(env, replacement):
+    from bench.analyses.base import AnalysisContext
+
+    # All games from one condition fail in just one player trace. Other players'
+    # successful decisions must not dilute that player's 20% failure rate.
+    paths = env.cfg.data["tables"]
+    tokens = pd.read_csv(paths["tokens"])
+    tokens["failed_turns"] = tokens["failed_turns"].fillna("").astype(str)
+    bad = (tokens["experiment"] == "llm-standard") & (tokens["player_id"] == 1)
+    tokens.loc[bad, "failed_turn_count"] = 1
+    tokens.loc[bad, "failed_turns"] = "3"
+    if replacement:
+        tokens.loc[tokens["game_id"] == "G7", "failed_turn_count"] = 0
+        tokens.loc[tokens["game_id"] == "G7", "failed_turns"] = ""
+    tokens.to_csv(paths["tokens"], index=False)
+    env.cfg.data["filter"] = {"min_condition_completeness": 1.0}
+    ctx = AnalysisContext(env.cfg, env.catalog, "check", {}, Path(paths["tokens"]).parent)
+    # Simulate upstream removal, including the completeness condition filter.
+    strength_path = env.cfg.adjust[0].raw["save"]
+    strength = pd.read_csv(strength_path)
+    filtered = ctx.apply_filter(strength)
+    assert "llm-standard" not in set(filtered["experiment"])
+    filtered.to_csv(strength_path, index=False)
+
+    result = env("performance.experiment_completeness", uses={"tables": ["strength"]})
+    comp = pd.read_csv(result.table_paths["experiment_completeness"]).set_index("experiment")
+    row = comp.loc["llm-standard"]
+    assert row["required_games"] == 6
+    assert row["present_games"] == int(replacement)
+    assert row["excluded_games"] == 8 - int(replacement)
+    assert row["missing_games"] == 6 - int(replacement)
+    details = pd.read_csv(result.table_paths["decision_turn_failures"])
+    assert details["excluded_game"].all()
+    assert len(details) == 8 - int(replacement)
+    state = json.loads(Path(result.artifact_paths["seating/llm-standard.seating.json"]).read_text())
+    completed = [cell["gameID"] for seeds in state["cells"].values() for cell in seeds.values()]
+    assert completed == (["G7"] if replacement else [])
+    assert state["seedCount"] == 3
+    assert state["configSlots"] == [0, 1, 2]
+
+
+def test_analysis_failure_filter_uses_all_players_and_stage_cutoff(env):
+    from bench.analyses.base import AnalysisContext
+
+    path = env.cfg.data["tables"]["tokens"]
+    tokens = pd.read_csv(path)
+    tokens.loc[(tokens["game_id"] == "G1") & (tokens["player_id"] == 1), "failed_turn_count"] = 1
+    tokens.to_csv(path, index=False)
+    env.cfg.data["filter"] = {"max_decision_failure_pct": None}
+    stage = {"filter": {"max_decision_failure_pct": 0.2, "players": ["Kimi-K2.5"]}}
+    ctx = AnalysisContext(env.cfg, env.catalog, "check", stage, Path(path).parent)
+    accepted = ctx.apply_filter(ctx.load_table("panel"))
+    assert "G1" not in set(accepted["game_id"])
+    assert set(accepted["player_type"]) == {"Kimi-K2.5"}
+    unfiltered = AnalysisContext(env.cfg, env.catalog, "check", {}, Path(path).parent)
+    assert "G1" in set(unfiltered.apply_filter(unfiltered.load_table("panel"))["game_id"])
+    result = env(
+        "performance.experiment_completeness", uses={"tables": ["strength"]},
+        stage_filter=stage["filter"],
+    )
+    failures = pd.read_csv(result.table_paths["decision_turn_failures"])
+    assert set(failures["game_id"]) == {"G1"}
+    assert set(failures["player_id"]) == {1}
+    assert failures["excluded_game"].all()
+
+
+@pytest.mark.parametrize("valid, failed", [(0, 0), (5, None)])
+def test_completeness_missing_decision_counters_are_unavailable(valid, failed):
+    from bench.analyses.performance.experiment_completeness import attach_decision_turn_failures
+
+    completeness = pd.DataFrame([{"experiment": "ctrl", "warning": "ok"}])
+    tokens = pd.DataFrame([{
+        "experiment": "ctrl", "game_id": "g", "player_id": 0,
+        "valid_turn_count": valid, "failed_turn_count": failed,
+    }])
+    summary, failures = attach_decision_turn_failures(completeness, tokens)
+    assert pd.isna(summary.iloc[0]["failure_pct"])
+    assert "telemetry unavailable" in summary.iloc[0]["warning"]
+    assert failures.empty
+
+
 def test_strength_panel_coverage_summary_counts_gaps():
     from bench.analyses.performance.strength_panel import PerformanceStrengthPanel
 
