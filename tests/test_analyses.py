@@ -1171,7 +1171,7 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x, null_baseline
         if null_baseline_elo is None:
             assert not null_annotations
         else:
-            assert null_annotations == ["<b>Null baseline: 1,100 Elo (lower bound)</b>"]
+            assert null_annotations == ["<b>Null baseline: 1,100 Elo</b>"]
         assert any(trace.name == "Free" for trace in markers) == (not log_x or metric == "input")
     assert fits["cost"]["slope"] != fits["input"]["slope"]
 

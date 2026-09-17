@@ -193,7 +193,7 @@ class PerformanceUsageEfficiency(Analysis):
                 annotations.append({
                     "x": 1, "y": null_baseline_elo, "xref": "paper", "yref": "y", "xanchor": "right",
                     "yanchor": "bottom",
-                    "text": f"<b>Null baseline: {null_baseline_elo:,.0f} Elo (lower bound)</b>",
+                    "text": f"<b>Null baseline: {null_baseline_elo:,.0f} Elo</b>",
                     "showarrow": False, "bgcolor": "white", "font": {"color": "#64748b"},
                 })
             fit = fits[metric]
