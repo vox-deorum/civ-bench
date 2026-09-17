@@ -3,7 +3,8 @@
 Executes one ``analyses`` node from the resolved DAG: builds the
 :class:`AnalysisContext` (output-root-aware table/estimator resolvers), runs the
 registered module, then persists the returned :class:`AnalysisResult` (tables to
-CSV and figures to PNG under ``<root>/analyses/<id>/``) and returns a small
+CSV, static PNG figures, and self-contained interactive HTML figures under
+``<root>/analyses/<id>/``) and returns a small
 summary object for the CLI / report stage.
 
 Alongside the artifacts it writes a small ``result.json`` **manifest** (id,
@@ -13,7 +14,7 @@ plain ``civ-bench report`` reads each enabled analysis's manifest + artifacts
 without re-running the module (invariant 3: reports are generated, never
 authored).
 
-Imports matplotlib (figures), statsmodels (regressions), and optionally calls
+Imports matplotlib (static figures), statsmodels (regressions), and optionally calls
 ``Rscript`` (ratings), so it lives off the import-light config/dry-run path and
 is only imported from the CLI run dispatch.
 """
@@ -31,6 +32,9 @@ import matplotlib
 
 matplotlib.use("Agg")  # batch rendering: no display, deterministic file output
 import matplotlib.pyplot as plt  # noqa: E402
+from plotly.basedatatypes import BaseFigure  # noqa: E402
+
+from bench.plotting.interactive import figure_html  # noqa: E402
 
 from ..catalog import Catalog  # noqa: E402
 from ..config import RunConfig  # noqa: E402
@@ -96,9 +100,13 @@ def run_analysis(
             table.to_csv(path, index=False)
             table_paths[name] = str(path)
         for name, fig in result.figures.items():
-            path = out_dir / f"{name}.png"
-            fig.savefig(path, dpi=150, bbox_inches="tight")
-            plt.close(fig)
+            if isinstance(fig, BaseFigure):
+                path = out_dir / f"{name}.html"
+                path.write_text(figure_html(fig, name), encoding="utf-8")
+            else:
+                path = out_dir / f"{name}.png"
+                fig.savefig(path, dpi=150, bbox_inches="tight")
+                plt.close(fig)
             figure_paths[name] = str(path)
         for rel, content in result.artifacts.items():
             # `rel` may carry subdirs (e.g. "seating/<exp>.seating.json").

@@ -3,8 +3,8 @@
 Ported from ``exploratory/model_token_costs.ipynb``: from ``model_token_usage``,
 compute per-row cost = ``input_tokens/1e6 * input_price + (reasoning+output)/1e6
 * output_price`` using the catalog's per-model pricing (``pricing_per_million``),
-aggregate to per-game totals (a game with any missing token field is counted but
-excluded from the averages, mirroring the legacy ``complete_group_sum``), then
+aggregate to per-player-game totals (incomplete records are counted but
+excluded from the averages), then
 summarize costs by player type + model by default, while also preserving the
 legacy per-model aggregate.
 """
@@ -14,7 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..base import Analysis, AnalysisContext, AnalysisResult
+from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
+
+
+COST_NOTE = (
+    "Costs do not account for cached tokens or cache discounts. "
+    "Output token averages include reasoning tokens."
+)
 
 
 def _complete_sum(s: pd.Series) -> float:
@@ -50,6 +56,8 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
         + df["combined_output_tokens"] / 1_000_000 * df["output_per_million"]
     )
     identity_cols = ["game_id"]
+    if "player_id" in df.columns:
+        identity_cols.append("player_id")
     if "player_type" in df.columns:
         identity_cols.append("player_type")
     identity_cols.append("model")
@@ -67,8 +75,13 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
 
 
 def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-    """Summarize per-game costs with explicit complete-game denominators."""
-    per_game = per_identity_game.groupby(["game_id", *group_cols], as_index=False).agg(
+    """Average complete player-game records, combining models used by one player."""
+    identity_cols = ["game_id"]
+    # Older token tables identify players only by type.
+    for column in ("player_id", "player_type"):
+        if column in per_identity_game.columns and column not in group_cols:
+            identity_cols.append(column)
+    per_game = per_identity_game.groupby([*identity_cols, *group_cols], as_index=False).agg(
         input_tokens=("input_tokens", _complete_sum),
         combined_output_tokens=("combined_output_tokens", _complete_sum),
         total_cost=("total_cost", _complete_sum),
@@ -77,7 +90,10 @@ def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str])
         ["input_tokens", "combined_output_tokens", "total_cost"]
     ].notna().all(axis=1)
     valid = per_game[per_game["available"]]
-    games = per_game.groupby(group_cols, as_index=False).agg(
+    game_availability = per_game.groupby(["game_id", *group_cols], as_index=False).agg(
+        available=("available", "all"),
+    )
+    games = game_availability.groupby(group_cols, as_index=False).agg(
         games=("game_id", "nunique"),
         na_games=("available", lambda values: int((~values).sum())),
     )
@@ -85,12 +101,19 @@ def summarize_game_costs(per_identity_game: pd.DataFrame, group_cols: list[str])
         avg_input=("input_tokens", "mean"),
         avg_output=("combined_output_tokens", "mean"),
         total_cost=("total_cost", "sum"),
+        avg_cost_per_player_game=("total_cost", "mean"),
     )
     summary_tbl = games.merge(averages, on=group_cols, how="left")
-    summary_tbl["complete_games"] = summary_tbl["games"] - summary_tbl["na_games"]
-    summary_tbl["avg_cost_per_game"] = (
-        summary_tbl["total_cost"] / summary_tbl["complete_games"].replace(0, np.nan)
+    players = per_game.groupby(group_cols, as_index=False).agg(
+        player_games=("available", "size"),
+        complete_player_games=("available", "sum"),
     )
+    summary_tbl = summary_tbl.merge(players, on=group_cols, how="left")
+    summary_tbl["na_player_games"] = (
+        summary_tbl["player_games"] - summary_tbl["complete_player_games"]
+    )
+    summary_tbl["complete_games"] = summary_tbl["games"] - summary_tbl["na_games"]
+    summary_tbl["avg_cost_per_game"] = summary_tbl["avg_cost_per_player_game"]
     if "model" in group_cols:
         prices = per_identity_game.drop_duplicates("model").set_index("model")[
             ["input_per_million", "output_per_million"]
@@ -138,18 +161,22 @@ class ExploratoryModelTokenCosts(Analysis):
             fig = self._plot(plot_tbl, currency, catalog)
         else:
             fig, warning = self._plot_paired(plot_tbl, currency, ctx, pairing)
-        total = model_tbl["total_cost"].sum(min_count=1)
-        costs = plot_tbl.loc[np.isfinite(plot_tbl["avg_cost_per_game"]), "avg_cost_per_game"]
+        costs = plot_tbl.loc[
+            np.isfinite(plot_tbl["avg_cost_per_player_game"]), "avg_cost_per_player_game"
+        ]
         if costs.empty:
-            summary = "No complete game costs are available."
+            summary = "No complete player-game costs are available."
         else:
             cost_group = "player and model combinations" if by_player_type else "models"
             summary = (
-                f"Estimated spend totals **{total:.2f} {currency.upper()}**; "
-                f"average game costs across {cost_group} range from **{costs.min():.2f}** to "
-                f"**{costs.max():.2f} {currency.upper()}**."
+                f"Average cost per player per game across {cost_group} ranges from "
+                f"**{costs.min():.2f}** to **{costs.max():.2f} {currency.upper()}**."
             )
-        metadata = {"currency": currency, "by_player_type": by_player_type}
+        summary += " " + COST_NOTE
+        metadata = {
+            "currency": currency, "by_player_type": by_player_type,
+            "cost_basis": "per player per complete game", "cached_tokens_accounted_for": False,
+        }
         if warning:
             metadata["warning"] = warning
         return AnalysisResult(
@@ -164,20 +191,20 @@ class ExploratoryModelTokenCosts(Analysis):
         return summarize_game_costs(df, group_cols)
 
     def _plot_paired(self, tbl, currency, ctx, pairing):
-        from ...plotting.pairing import (
+        from bench.plotting.pairing import (
             attach_pair_columns,
             paired_sort_order,
             plot_paired_rows,
         )
 
         work = attach_pair_columns(tbl, ctx.catalog, pairing, "player_type")
-        cost_order = paired_sort_order(work, pairing, "avg_cost_per_game", ascending=False)
+        cost_order = paired_sort_order(work, pairing, "avg_cost_per_player_game", ascending=False)
         warning = ""
         upstream = ctx.uses_analyses()
         if upstream:
             ratings = ctx.load_analysis_table(upstream[0], "ratings")
             if "player_type" not in ratings.columns or "elo" not in ratings.columns:
-                from ..errors import AnalysisError
+                from bench.analyses.errors import AnalysisError
 
                 raise AnalysisError(
                     f"exploratory.model_token_costs '{self.stage_id}': analysis "
@@ -187,7 +214,7 @@ class ExploratoryModelTokenCosts(Analysis):
             rating_order = paired_sort_order(rated, pairing, "elo", ascending=False)
             available = set(work["base_identity"].astype(str))
             priced = set(
-                work.loc[work["avg_cost_per_game"].notna(), "base_identity"].astype(str)
+                work.loc[work["avg_cost_per_player_game"].notna(), "base_identity"].astype(str)
             )
             row_order = [
                 identity for identity in rating_order
@@ -202,29 +229,31 @@ class ExploratoryModelTokenCosts(Analysis):
             )
 
         plot_tbl = tbl.copy()
-        plot_tbl["n_label"] = plot_tbl["complete_games"].map(
+        plot_tbl["n_label"] = plot_tbl["complete_player_games"].map(
             lambda value: f"n={int(value)}" if pd.notna(value) else ""
         )
         fig = plot_paired_rows(
             plot_tbl,
             catalog=ctx.catalog,
             spec=pairing,
-            value_col="avg_cost_per_game",
+            value_col="avg_cost_per_player_game",
             identity_col="player_type",
             annotate_col="n_label",
             row_order=row_order,
             ascending=False,
-            xlabel=f"Average cost per complete game ({currency.upper()})",
-            title="Estimated token cost per game by player type",
+            xlabel=f"Average cost per player per game ({currency.upper()})",
+            title="Estimated token cost per player by player type",
         )
         return fig, warning
 
     def _plot(self, tbl: pd.DataFrame, currency: str, catalog):
         import matplotlib.pyplot as plt
 
-        from ...plotting.styles import get_player_color
+        from bench.plotting.styles import get_player_color
 
-        priced = tbl.dropna(subset=["total_cost"])
+        priced = tbl.dropna(subset=["avg_cost_per_player_game"]).sort_values(
+            "avg_cost_per_player_game", ascending=False, kind="stable"
+        )
         if priced.empty:
             return None
         fig, ax = plt.subplots(figsize=(8, max(3, 0.4 * len(priced) + 1.5)))
@@ -233,8 +262,8 @@ class ExploratoryModelTokenCosts(Analysis):
             priced["player_type"].astype(str) + " / " + priced["model"].astype(str)
         )
         colors = [get_player_color(catalog, m) for m in priced["model"]]
-        ax.barh(labels[::-1], priced["total_cost"][::-1], color=colors[::-1])
-        ax.set_xlabel(f"Total cost ({currency.upper()})")
+        ax.barh(labels[::-1], priced["avg_cost_per_player_game"][::-1], color=colors[::-1])
+        ax.set_xlabel(f"Average cost per player per game ({currency.upper()})")
         title = "Estimated token cost by player type" if "player_type" in priced.columns else (
             "Estimated token cost by model"
         )

@@ -33,7 +33,9 @@ class AnalysisResult:
     """What an analysis returns: named tables, named figures, and one result sentence.
 
     ``tables`` and ``figures`` are keyed by a short slug (used for the persisted
-    filename); ``figures`` values are matplotlib ``Figure`` objects. An analysis
+    filename); ``figures`` values are matplotlib ``Figure`` objects or Plotly
+    graph objects. The runner writes matplotlib figures as PNG files and Plotly
+    figures as self-contained HTML files. An analysis
     that legitimately produces nothing for the given inputs (e.g.
     ``calibration.cell_baseline`` on a fully uncontrolled run) returns an empty
     result: :meth:`is_empty` is true and the runner records it without error.

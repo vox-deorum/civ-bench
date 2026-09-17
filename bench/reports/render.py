@@ -183,6 +183,13 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         lines.append("")
         return
     for figure in section.figures:
+        if figure.interactive:
+            caption = figure.caption.replace("[", "(").replace("]", ")")
+            lines.append(
+                f"[Figure: {caption} (interactive HTML)]({figure.rel_path})"
+            )
+            lines.append("")
+            continue
         # Bracket/paren in a caption would break the inline image link; the path
         # is artifact-controlled (assets/<id>/<name>.png) so only the caption needs it.
         alt = figure.caption.replace("[", "(").replace("]", ")")
@@ -299,6 +306,8 @@ pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f0f3f7; }
 .empty { color: #778294; font-style: italic; }
 figure { margin: 1.25rem 0 2rem; }
 img { max-width: 100%; height: auto; border: 1px solid #e2e6eb; background: white; }
+.interactive-figure { width: 100%; min-height: 700px; border: 1px solid #e2e6eb; background: white; }
+.interactive-figure-link { margin: .4rem 0 0; font-size: .88rem; }
 .table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #d8dee6; border-radius: .35rem; background: white; }
 table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { border-bottom: 1px solid #e0e5eb; padding: .4rem .65rem; text-align: right; white-space: nowrap; }
@@ -332,10 +341,6 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .chart-controls { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; margin: .75rem 0; }
 .chart-controls .controls-label { color: #445164; font-weight: 650; }
 .chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
-.curve-chart svg { max-width: 100%; height: auto; cursor: crosshair; }
-.curve-legend { display: flex; flex-wrap: wrap; gap: .8rem; margin: .5rem 0; padding: 0; list-style: none; font-size: .85rem; }
-.curve-legend .curve-swatch { display: inline-block; width: 1.6rem; margin-right: .3rem; vertical-align: middle; }
-.curve-legend li.preselected { border: 1px solid #175ca8; border-radius: .3rem; padding: .05rem .4rem; font-weight: 650; background: #eef3fa; }
 table.comparison td.vanilla-value { font-weight: 700; }
 @media (max-width: 820px) {
   .sidebar { position: static; width: auto; max-height: none; }
@@ -513,6 +518,17 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         parts.append("</section>")
         return
     for figure in section.figures:
+        if figure.interactive:
+            escaped_path = _html.escape(figure.rel_path)
+            escaped_caption = _html.escape(figure.caption)
+            parts.append(
+                f'<figure><iframe class="interactive-figure" src="{escaped_path}" '
+                f'title="{escaped_caption}" loading="lazy"></iframe>'
+                f'<figcaption class="caption">{escaped_caption}</figcaption>'
+                f'<p class="interactive-figure-link"><a href="{escaped_path}">'
+                "Open interactive figure (HTML)</a></p></figure>"
+            )
+            continue
         parts.append(
             f'<figure><img src="{_html.escape(figure.rel_path)}" '
             f'alt="{_html.escape(figure.caption)}">'

@@ -13,12 +13,12 @@ tables per controlled seed (mean adjusted strength on a fixed RdYlBu scale, red 
 0, yellow at 0.5, blue at 1, with a leading Avg column pooling each condition
 row's runs, plus the dominant victory focus with a stable categorical color per
 strategy), one detail page per ``(seed, player_id)`` pair, and static
-vanilla-JavaScript assets for tooltips, the strategist checkboxes, and the
-probability-curve chart with its per-progress comparison tooltip. Every value,
-color, link, and query string is computed server-side, so unchanged inputs
-re-render byte-identically; the browser script only reads embedded data. The
-chart's Y axis fits the visible curves, and same-family strategists that share a
-catalog color are spread through the shared
+JavaScript assets for tooltips, the strategist checkboxes, and an offline Plotly
+probability-curve chart. Every value, color, link, and query string is computed
+server-side, so unchanged inputs re-render byte-identically; the browser script
+only changes trace visibility, color, and emphasis. The chart's Y axis fits the
+visible curves, and same-family strategists that share a catalog color are spread
+through the shared
 :js:func:`civBench.distinguishColors` util in :mod:`bench.reports.assets`.
 
 Rows are strategist-condition combinations and columns are final ``player_id``
@@ -31,13 +31,13 @@ global row and column grid and leaves unobserved combinations blank.
 from __future__ import annotations
 
 import html as _html
-import json
 from typing import Optional
 from urllib.parse import urlencode
 
 import numpy as np
 
 from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
+from bench.plotting.interactive import figure_html, plotly_javascript
 from .context import ReportBuildContext
 from bench.reports.content import (
     render_footer_html, render_summary_html, resolve_footer, render_help_html,
@@ -132,13 +132,9 @@ _STRENGTH_SCALE = (
 _TEXT_DARK = "#18202a"
 _TEXT_LIGHT = "#ffffff"
 
-# SVG dash patterns cycled by condition position, so one strategist's conditions
-# stay distinguishable while sharing its color.
-_DASH_PATTERNS = ("", "6 4", "2 3", "8 3 2 3")
-
-_CHART_WIDTH = 760
-_CHART_HEIGHT = 420
-_CHART_MARGIN = {"left": 52, "right": 18, "top": 18, "bottom": 44}
+# Plotly dash styles cycled by condition position, so one strategist's
+# conditions stay distinguishable while sharing its color.
+_DASH_PATTERNS = ("solid", "dash", "dot", "dashdot")
 
 
 # ── small formatting / color helpers ──────────────────────────────────────────
@@ -704,18 +700,45 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
     return "".join(parts)
 
 
-def _chart_data(series: list[dict]) -> str:
-    data = {
-        "xLabel": "Turn progress",
-        "yLabel": "Mean predicted win probability",
-        "series": series,
-        "chartWidth": _CHART_WIDTH,
-        "chartHeight": _CHART_HEIGHT,
-        "margin": _CHART_MARGIN,
-    }
-    text = json.dumps(data, separators=(",", ":"), allow_nan=False)
-    # Keep the JSON blob from closing its own script element.
-    return text.replace("</", "<\\/")
+def _chart_figure(series: list[dict]):
+    """Build the detail-page probability chart with stable trace metadata."""
+    import plotly.graph_objects as go
+
+    figure = go.Figure()
+    for entry in series:
+        points = entry["points"]
+        figure.add_trace(go.Scatter(
+            x=[point[0] for point in points],
+            y=[point[1] for point in points],
+            mode="lines",
+            name=_esc(entry["label"]),
+            meta={
+                "strategist": entry["strategist"],
+                "condition": entry["condition"],
+                "vanilla": entry["vanilla"],
+                "base_color": entry["color"],
+                "base_width": entry["width"],
+            },
+            line={"color": entry["color"], "dash": entry["dash"], "width": entry["width"]},
+            hovertemplate="%{fullData.name}: %{y:.3f}<extra></extra>",
+        ))
+    figure.update_layout(
+        template="plotly_white",
+        height=420,
+        margin={"l": 60, "r": 20, "t": 18, "b": 56},
+        hovermode="x unified",
+        legend={
+            "orientation": "h", "y": -0.22,
+            "itemclick": False, "itemdoubleclick": False,
+        },
+        xaxis={"title": "Turn progress", "range": [0, 1], "tickformat": ".2f"},
+        yaxis={
+            "title": "Mean predicted win probability", "autorange": True,
+            "autorangeoptions": {"clipmin": 0, "clipmax": 1},
+            "tickformat": ".2f",
+        },
+    )
+    return figure
 
 
 def _render_detail(
@@ -792,11 +815,12 @@ def _render_detail(
                 f"{_esc(_strategist_label(doc, name))}</label>"
             )
         parts.append("</div>")
-    parts.append(
-        '<div id="curve-chart" class="curve-chart" role="img" '
-        'aria-label="Mean victory probability over normalized game progress"></div>'
-    )
-    parts.append('<ul id="curve-legend" class="curve-legend"></ul>')
+    parts.append(figure_html(
+        _chart_figure(series),
+        "matched-map",
+        full_html=False,
+        include_plotlyjs="../assets/plotly.min.js",
+    ))
     parts.append("</section>")
 
     parts.append('<section aria-labelledby="comparison-heading">')
@@ -807,9 +831,6 @@ def _render_detail(
 
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
-    parts.append(
-        f'<script type="application/json" id="curve-data">{_chart_data(series)}</script>'
-    )
     parts.append('<script src="../assets/report-common.js" defer></script>')
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
@@ -828,6 +849,7 @@ def render_controlled_seed_site(
     """
     pages: dict[str, str] = {
         "assets/report-help.js": REPORT_HELP_JS,
+        "assets/plotly.min.js": plotly_javascript(),
         CONTROLLED_SEED_OVERVIEW: _render_overview(doc, navigation)
     }
     rows = doc.index_table.to_dict("records")
@@ -850,11 +872,9 @@ def render_controlled_seed_site(
 
 # ── the static browser script ─────────────────────────────────────────────────
 CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
-   Deterministic vanilla JavaScript: no packages, no network. Tooltips on
-   heatmap cells; strategist checkboxes, the SVG probability-curve chart (its
-   Y axis fits the visible curves), and the per-progress comparison tooltip on
-   seed-player detail pages. Same-family strategist colors are spread through
-   the shared civBench.distinguishColors util (assets/report-common.js). */
+   Tooltips on heatmap cells plus Plotly trace controls for seed-player detail
+   pages. Same-family strategist colors are spread through the shared
+   civBench.distinguishColors util (assets/report-common.js). */
 (function () {
   "use strict";
 
@@ -930,46 +950,22 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     document.addEventListener("focusout", hideTooltip);
   });
 
-  // ── detail page: checkboxes + SVG curve chart + progress tooltip ─────────
+  // ── detail page: Plotly chart controls ──────────────────────────────────
   function readQuery() {
     var params = {};
-    var search = window.location.search.substring(1);
-    if (!search) {
-      return params;
-    }
-    search.split("&").forEach(function (pair) {
-      var parts = pair.split("=");
-      if (parts[0]) {
-        params[decodeURIComponent(parts[0].replace(/\\+/g, " "))] =
-          decodeURIComponent((parts[1] || "").replace(/\\+/g, " "));
-      }
-    });
+    var search = new URLSearchParams(window.location.search);
+    search.forEach(function (value, key) { params[key] = value; });
     return params;
   }
 
-  function svgTag(name, attributes) {
-    var element = document.createElementNS("http://www.w3.org/2000/svg", name);
-    Object.keys(attributes).forEach(function (key) {
-      element.setAttribute(key, attributes[key]);
-    });
-    return element;
-  }
-
   function initChart() {
-    var dataNode = document.getElementById("curve-data");
     var filters = document.getElementById("strategist-filters");
-    var chartHost = document.getElementById("curve-chart");
-    var legendHost = document.getElementById("curve-legend");
-    if (!dataNode || !chartHost) {
-      return;
-    }
-    var data = JSON.parse(dataNode.textContent);
-    if (!data.series.length) {
-      chartHost.textContent = "No probability curves are available for this page.";
+    var chart = document.getElementById("plotly-matched-map");
+    if (!chart || !window.Plotly || !chart.data) {
       return;
     }
     var query = readQuery();
-    var preselectedCondition = query.condition || null;
+    var highlightedCondition = query.condition || null;
 
     var boxes = [];
     if (filters) {
@@ -991,19 +987,8 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
       }
       boxes.forEach(function (box) {
         box.addEventListener("change", function () {
-          hideTooltip();
-          render();
+          updateChart();
         });
-      });
-    }
-
-    function visibleSeries() {
-      var checked = {};
-      boxes.forEach(function (box) {
-        checked[box.value] = box.checked;
-      });
-      return data.series.filter(function (entry) {
-        return entry.vanilla || !boxes.length || checked[entry.strategist];
       });
     }
 
@@ -1012,278 +997,31 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
     var colorMap = null;
     if (window.civBench && window.civBench.distinguishColors) {
       colorMap = window.civBench.distinguishColors(
-        data.series.map(function (entry) {
-          return { key: entry.strategist, color: entry.color };
+        chart.data.map(function (trace) {
+          return { key: trace.meta.strategist, color: trace.meta.base_color };
         })
       );
     }
-    function colorOf(entry) {
-      return (colorMap && colorMap[entry.strategist]) || entry.color;
-    }
-
-    var margin = data.margin;
-    var width = data.chartWidth;
-    var height = data.chartHeight;
-    var plotWidth = width - margin.left - margin.right;
-    var plotHeight = height - margin.top - margin.bottom;
-
-    function x(value) {
-      return margin.left + value * plotWidth;
-    }
-
-    // The Y axis fits the visible curves instead of the full 0-to-1 range.
-    var yMin = 0;
-    var yMax = 1;
-
-    function y(value) {
-      return margin.top + (1 - (value - yMin) / (yMax - yMin)) * plotHeight;
-    }
-
-    function fitYRange(series) {
-      var values = [];
-      series.forEach(function (entry) {
-        entry.points.forEach(function (point) {
-          values.push(point[1]);
+    function updateChart() {
+      var checked = {};
+      boxes.forEach(function (box) { checked[box.value] = box.checked; });
+      var visible = [];
+      var colors = [];
+      var widths = [];
+      chart.data.forEach(function (trace) {
+        var meta = trace.meta;
+        visible.push(meta.vanilla || !boxes.length || checked[meta.strategist]);
+        colors.push((colorMap && colorMap[meta.strategist]) || meta.base_color);
+        widths.push(meta.vanilla ? meta.base_width :
+          (highlightedCondition === meta.condition ? 3 : meta.base_width));
+      });
+      window.Plotly.restyle(chart, {visible: visible, "line.color": colors,
+        "line.width": widths}).then(function () {
+          return window.Plotly.relayout(chart, {"yaxis.autorange": true});
         });
-      });
-      if (!values.length) {
-        yMin = 0;
-        yMax = 1;
-        return;
-      }
-      var lo = Math.min.apply(null, values);
-      var hi = Math.max.apply(null, values);
-      var pad = (hi - lo) > 0 ? (hi - lo) * 0.08 : 0.05;
-      yMin = Math.max(0, lo - pad);
-      yMax = Math.min(1, hi + pad);
     }
 
-    function yTicks() {
-      var range = yMax - yMin;
-      var steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1];
-      var step = steps[steps.length - 1];
-      for (var i = 0; i < steps.length; i++) {
-        if (range / steps[i] <= 5) {
-          step = steps[i];
-          break;
-        }
-      }
-      var ticks = [];
-      var first = Math.ceil(yMin / step - 1e-9);
-      var last = Math.floor(yMax / step + 1e-9);
-      for (var k = first; k <= last; k++) {
-        ticks.push(Math.round(step * k * 1e6) / 1e6);
-      }
-      return ticks;
-    }
-
-    var svg = null;
-    var guide = null;        // hover guide: one vertical line + a dot per series
-    var guideLine = null;
-    var guideDots = [];
-    var progressSteps = [];  // sorted union of the visible series' x values
-
-    function collectProgress(series) {
-      var seen = {};
-      progressSteps = [];
-      series.forEach(function (entry) {
-        entry.points.forEach(function (point) {
-          if (!seen[point[0]]) {
-            seen[point[0]] = true;
-            progressSteps.push(point[0]);
-          }
-        });
-      });
-      progressSteps.sort(function (a, b) { return a - b; });
-    }
-
-    function nearestProgress(value) {
-      var best = progressSteps[0];
-      var bestDistance = Math.abs(value - best);
-      for (var i = 1; i < progressSteps.length; i++) {
-        var distance = Math.abs(value - progressSteps[i]);
-        if (distance < bestDistance) {
-          best = progressSteps[i];
-          bestDistance = distance;
-        }
-      }
-      return best;
-    }
-
-    function buildGuide(series) {
-      guide = svgTag("g", { "class": "chart-guide", display: "none" });
-      guideLine = svgTag("line", {
-        y1: margin.top, y2: margin.top + plotHeight,
-        stroke: "#445164", "stroke-width": 1, "stroke-dasharray": "4 3"
-      });
-      guide.appendChild(guideLine);
-      guideDots = series.map(function (entry) {
-        var dot = svgTag("circle", {
-          r: 4, fill: colorOf(entry), stroke: "#ffffff",
-          "stroke-width": 1.5, display: "none"
-        });
-        guide.appendChild(dot);
-        return { dot: dot, entry: entry };
-      });
-      svg.appendChild(guide);
-    }
-
-    function render() {
-      var series = visibleSeries();
-      if (!series.length) {
-        svg = null;
-        guide = null;
-        chartHost.textContent = "Check a strategist to show its curves.";
-        if (legendHost) {
-          legendHost.textContent = "";
-        }
-        return;
-      }
-
-      var chart = svgTag("svg", {
-        viewBox: "0 0 " + width + " " + height,
-        width: "100%",
-        preserveAspectRatio: "xMidYMid meet"
-      });
-      fitYRange(series);
-      var ticks = yTicks();
-      [0, 0.25, 0.5, 0.75, 1].forEach(function (tick) {
-        chart.appendChild(svgTag("line", {
-          x1: x(tick), y1: margin.top,
-          x2: x(tick), y2: margin.top + plotHeight,
-          stroke: "#e0e5eb", "stroke-width": 1
-        }));
-        chart.appendChild(svgTag("text", {
-          x: x(tick), y: height - margin.bottom + 18,
-          "text-anchor": "middle", "font-size": 11, fill: "#687486"
-        })).textContent = tick.toFixed(2);
-      });
-      ticks.forEach(function (tick) {
-        chart.appendChild(svgTag("line", {
-          x1: x(0), y1: y(tick), x2: x(1), y2: y(tick),
-          stroke: "#e0e5eb", "stroke-width": 1
-        }));
-        chart.appendChild(svgTag("text", {
-          x: margin.left - 8, y: y(tick) + 4,
-          "text-anchor": "end", "font-size": 11, fill: "#687486"
-        })).textContent = tick.toFixed(2);
-      });
-      chart.appendChild(svgTag("text", {
-        x: x(0.5), y: height - 6, "text-anchor": "middle",
-        "font-size": 12, fill: "#445164"
-      })).textContent = data.xLabel;
-      var yLabel = svgTag("text", {
-        x: 14, y: margin.top + plotHeight / 2, "text-anchor": "middle",
-        "font-size": 12, fill: "#445164",
-        transform: "rotate(-90 14 " + (margin.top + plotHeight / 2) + ")"
-      });
-      yLabel.textContent = data.yLabel;
-      chart.appendChild(yLabel);
-
-      series.forEach(function (entry) {
-        if (!entry.points.length) {
-          return;
-        }
-        var d = entry.points.map(function (point, index) {
-          return (index === 0 ? "M" : "L") +
-            x(point[0]).toFixed(2) + " " + y(point[1]).toFixed(2);
-        }).join(" ");
-        chart.appendChild(svgTag("path", {
-          d: d, fill: "none", stroke: colorOf(entry),
-          "stroke-width": entry.width,
-          "stroke-dasharray": entry.dash || "none",
-          "stroke-linejoin": "round", "stroke-linecap": "round"
-        }));
-      });
-
-      svg = chart;
-      chartHost.textContent = "";
-      chartHost.appendChild(svg);
-      collectProgress(series);
-      buildGuide(series);
-      svg.addEventListener("mousemove", onMove);
-      svg.addEventListener("mouseleave", onLeave);
-
-      if (legendHost) {
-        legendHost.textContent = "";
-        series.forEach(function (entry) {
-          var item = document.createElement("li");
-          if (entry.tooltip) {
-            item.setAttribute("data-tip", entry.tooltip);
-            item.setAttribute("tabindex", "0");
-          }
-          if (entry.vanilla) {
-            item.className = "vanilla";
-          }
-          if (preselectedCondition &&
-              entry.condition === preselectedCondition &&
-              !entry.vanilla) {
-            item.className = (item.className ? item.className + " " : "") +
-              "preselected";
-          }
-          var swatch = document.createElement("span");
-          swatch.className = "curve-swatch";
-          swatch.style.borderTop = entry.width + "px " +
-            (entry.dash ? "dashed" : "solid") + " " + colorOf(entry);
-          item.appendChild(swatch);
-          item.appendChild(document.createTextNode(" " + entry.label));
-          legendHost.appendChild(item);
-        });
-      }
-    }
-
-    function onMove(event) {
-      if (!svg || !guide || !progressSteps.length) {
-        return;
-      }
-      var rect = svg.getBoundingClientRect();
-      if (!rect.width) {
-        return;
-      }
-      var scale = width / rect.width;
-      var localX = (event.clientX - rect.left) * scale;
-      var progress = (localX - margin.left) / plotWidth;
-      progress = Math.max(0, Math.min(1, progress));
-      var step = nearestProgress(progress);
-      var px = x(step);
-      guideLine.setAttribute("x1", px.toFixed(2));
-      guideLine.setAttribute("x2", px.toFixed(2));
-      var lines = ["Turn progress " + step.toFixed(2)];
-      var readings = [];
-      guideDots.forEach(function (item) {
-        var value = null;
-        item.entry.points.forEach(function (point) {
-          if (point[0] === step) {
-            value = point[1];
-          }
-        });
-        if (value === null) {
-          item.dot.setAttribute("display", "none");
-          return;
-        }
-        item.dot.setAttribute("cx", px.toFixed(2));
-        item.dot.setAttribute("cy", y(value).toFixed(2));
-        item.dot.removeAttribute("display");
-        readings.push({ label: item.entry.label, value: value });
-      });
-      guide.removeAttribute("display");
-      readings.sort(function (a, b) { return b.value - a.value; });
-      readings.forEach(function (reading) {
-        lines.push(reading.label + ": " + reading.value.toFixed(3));
-      });
-      if (readings.length) {
-        showChartTooltip(event.clientX, event.clientY, lines.join("\\n"));
-      }
-    }
-
-    function onLeave() {
-      if (guide) {
-        guide.setAttribute("display", "none");
-      }
-      hideTooltip();
-    }
-
-    render();
+    updateChart();
   }
 
   document.addEventListener("DOMContentLoaded", function () {

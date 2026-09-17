@@ -782,6 +782,64 @@ def test_exploratory_model_token_costs(env):
     assert "player_type" not in tbl.columns
     assert "total_cost" in tbl.columns and "games" in tbl.columns
     assert r.metadata["by_player_type"] is True
+    assert "per player per game" in r.summary
+    assert "cached tokens" in r.summary
+
+
+def test_token_costs_average_players_and_keep_complete_records(env):
+    from bench.analyses.exploratory.model_token_costs import (
+        compute_game_costs, summarize_game_costs,
+    )
+
+    tokens = pd.DataFrame([
+        {"game_id": "G", "player_id": pid, "player_type": identity,
+         "model_name": "gpt-oss-120b", "input_tokens": inputs,
+         "output_tokens": outputs, "reasoning_tokens": reasoning}
+        for pid, identity, inputs, outputs, reasoning in [
+            (0, "GPT-OSS-120B", 1000, 100, 10),
+            (0, "GPT-OSS-120B", 2000, 200, 20),
+            (1, "GPT-OSS-120B", 6000, 600, 60),
+            (2, "GPT-OSS-120B", np.nan, 100, 10),
+            (3, "Other-strategy", 9000, 900, 90),
+        ]
+    ])
+    records = compute_game_costs(tokens, env.catalog)
+    assert len(records) == 4
+    by_player = summarize_game_costs(records, ["player_type", "model"])
+    row = by_player.set_index("player_type").loc["GPT-OSS-120B"]
+    assert row["avg_input"] == 4500
+    assert row["avg_output"] == 495
+    assert row["player_games"] == 3
+    assert row["complete_player_games"] == 2
+    assert row["na_player_games"] == 1
+    assert row["games"] == row["na_games"] == 1
+    assert row["complete_games"] == 0
+    assert row["avg_cost_per_player_game"] == pytest.approx(row["total_cost"] / 2)
+
+    by_model = summarize_game_costs(records, ["model"]).iloc[0]
+    assert by_model["avg_input"] == 6000
+    assert by_model["avg_output"] == 660
+    assert by_model["complete_player_games"] == 3
+    assert by_model["avg_cost_per_player_game"] == pytest.approx(by_model["total_cost"] / 3)
+
+
+def test_token_costs_combine_models_for_one_player(env):
+    from bench.analyses.exploratory.model_token_costs import (
+        compute_game_costs, summarize_game_costs,
+    )
+
+    tokens = pd.DataFrame([
+        {"game_id": "G", "player_id": 0, "player_type": "Mixed",
+         "model_name": model, "input_tokens": 1000,
+         "output_tokens": 100, "reasoning_tokens": 20}
+        for model in ["gpt-oss-120b", "kimi-k2.5"]
+    ])
+    records = compute_game_costs(tokens, env.catalog)
+    row = summarize_game_costs(records, ["player_type"]).iloc[0]
+    assert row["complete_player_games"] == 1
+    assert row["avg_input"] == 2000
+    assert row["avg_output"] == 240
+    assert row["avg_cost_per_player_game"] == pytest.approx(records["total_cost"].sum())
 
 
 def test_compute_game_costs_accepts_missing_model_name(env):
@@ -959,6 +1017,40 @@ def test_cost_vs_rating_outputs_and_excludes_baseline(env, monkeypatch):
     table = pd.read_csv(r.table_paths["cost_vs_rating"])
     assert "Vanilla" not in set(table["player_type"])
     assert {"base_identity", "condition", "avg_cost_per_game", "elo"} <= set(table.columns)
+    assert {"avg_input", "avg_output", "avg_cost_per_player_game",
+            "relative_strength_per_cost", "complete_player_games"} <= set(table.columns)
+    expected = 10 ** ((table["elo"] - 1500) / 400) / table["avg_cost_per_player_game"]
+    np.testing.assert_allclose(table["relative_strength_per_cost"], expected)
+    best = table.loc[expected.idxmax(), "player_type"]
+    worst = table.loc[expected.idxmin(), "player_type"]
+    assert f"Most cost-efficient: **{best}**" in r.summary
+    assert f"Least cost-efficient: **{worst}**" in r.summary
+    assert "cached tokens" in r.summary
+    path = Path(r.figure_paths["cost_vs_rating"])
+    assert path.suffix == ".html"
+    html = path.read_text(encoding="utf-8")
+    assert "Plotly.newPlot" in html
+    assert "Average input tokens" in html
+    assert "Average output tokens (including reasoning)" in html
+
+
+@pytest.mark.parametrize("log_x", [False, True])
+def test_cost_vs_rating_zero_cost_has_no_efficiency_score(env, log_x):
+    tokens_path = env.cfg.data["tables"]["tokens"]
+    tokens = pd.read_csv(tokens_path)
+    tokens.loc[tokens["player_type"] == "GPT-OSS-120B",
+               ["input_tokens", "output_tokens", "reasoning_tokens"]] = 0
+    tokens.to_csv(tokens_path, index=False)
+    _write_ratings_artifact(env, [
+        {"player_type": "GPT-OSS-120B", "elo": 1900},
+        {"player_type": "Kimi-K2.5", "elo": 1500},
+    ])
+    result = env("exploratory.cost_vs_rating", {"log_x": log_x},
+                 {"tables": ["tokens"], "analyses": ["bt_main"]})
+    table = pd.read_csv(result.table_paths["cost_vs_rating"]).set_index("player_type")
+    assert pd.isna(table.loc["GPT-OSS-120B", "relative_strength_per_cost"])
+    assert "Most cost-efficient: **Kimi-K2.5**" in result.summary
+    assert "Zero-cost identities are excluded" in result.summary
 
 
 def test_cost_vs_rating_requires_analysis_dependency(env):

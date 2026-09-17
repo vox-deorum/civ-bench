@@ -686,20 +686,42 @@ catalogs or canonical tables.
 
 ```jsonc
 // model_token_costs uses tokens table + pricing from models.json. Its tables retain total cost
-// and add complete_games + avg_cost_per_game. Pairing switches its figure to average $/game;
-// uses.analyses supplies the BT row order.
+// and report average cost per player per game. uses.analyses supplies the BT row order
+// when condition pairing is enabled.
 { "module": "exploratory.model_token_costs","uses": { "tables": ["tokens"] },
   "params": { "currency": "usd", "by_player_type": true } }
 
-// cost_vs_rating joins per-identity average $/game to a fitted ratings table.
+// cost_vs_rating joins average cost per player per game to a fitted ratings table.
 { "module": "exploratory.cost_vs_rating",
   "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
-  "params": { "currency": "usd", "log_x": true, "annotate": true } }
+  "params": { "currency": "usd", "log_x": true, "annotate": false } }
 ```
 
 Set `by_player_type:false` to render only the legacy model-level aggregate. The
 older `by_strategist` boolean is still accepted as a compatibility alias, but new
 configs should use `by_player_type`.
+
+Both cost modules average complete player-game records, so multiple players using
+the same model in a game count separately. Incomplete player-game records are
+excluded from averages. Tables include `avg_cost_per_player_game`, `avg_input`,
+`avg_output`, `player_games`, `complete_player_games`, and `na_player_games`.
+`avg_cost_per_game` remains an alias for `avg_cost_per_player_game`. `games`,
+`complete_games`, and `na_games` count distinct games; a complete game has no
+incomplete player records in the group. Older tables without `player_id` use
+`player_type` to identify players. Costs use catalog input and output prices and
+do not account for cached tokens or cache discounts. Output tokens include
+reasoning tokens.
+
+Cost versus skill renders a self-contained interactive chart in HTML reports.
+Hover shows average input and output tokens, cost per player per game, Elo,
+coverage, and efficiency. Legend entries filter models, and dragging zooms the
+chart. Markdown reports link to the interactive chart. `annotate` defaults to
+`false`; when enabled, it labels only the most and least efficient identities.
+The summary names those identities using `relative_strength_per_cost`, calculated
+as `10^((elo - 1500) / 400) / avg_cost_per_player_game`. Higher values mean more
+Elo-derived relative strength per unit cost. This comparison preserves separate
+player identities and conditions. Zero-cost identities have no efficiency score
+and are excluded from the log-cost chart.
 
 **Optional `exploratory.*` (off by default, registry-reserved, shipped only in `benchmark.full.template.json`):**
 
@@ -742,7 +764,7 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `performance.turn_predicted` | Win-probability trends | Shows how each player identity's predicted chance of winning changes from the opening turns through the end of the game. |
 | `performance.controlled_seed_report` | Matched Maps | Aggregates games on shared maps by seed and final seat into the tables behind the report's Matched Maps chapter (§7.1). |
 | `exploratory.model_token_costs` | Model usage and cost | Summarizes token use and estimated US-dollar cost by model and player type. |
-| `exploratory.cost_vs_rating` | Cost versus skill | Compares each player identity's average model cost per game with its estimated skill rating. |
+| `exploratory.cost_vs_rating` | Cost versus skill | Compares average cost per player per game with each identity's estimated skill rating. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
 identity; they cannot run, so they never appear on a report.
@@ -825,7 +847,8 @@ The chapter lives in its own directory beside the family pages:
   conditions; the matched Vanilla curve stays visible as a thicker reference
   line; the vertical axis fits the visible curves; and hovering the chart
   snaps to the nearest grid progress and lists every checked condition's
-  probability at that point, highest first. Strategists that share a catalog
+  probability at that point. The chart uses the shared Plotly renderer and a
+  local JavaScript bundle, with no network access required. Strategists that share a catalog
   color (typically one model family) are spread through the shared
   `civBench.distinguishColors` util in `assets/report-common.js` so their
   curves stay distinguishable. The comparison table keeps one row per

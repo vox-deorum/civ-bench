@@ -28,6 +28,10 @@ class Figure:
     caption: str
     rel_path: str  # e.g. "assets/bt_main/ratings.png", relative to the report dir
 
+    @property
+    def interactive(self) -> bool:
+        return self.rel_path.lower().endswith(".html")
+
 
 @dataclass
 class Table:

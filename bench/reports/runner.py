@@ -12,7 +12,8 @@ in-memory results), ``civ-bench report`` re-renders the document from existing
 artifacts without re-running any analysis (invariant 3).
 
 Import-light relative to the analysis runner: it needs pandas + the stdlib only
-(figures are already PNGs on disk), so it pulls neither matplotlib nor R.
+(analysis figures are already PNG or self-contained Plotly HTML files on disk).
+Matched Maps loads Plotly when rendering its probability charts.
 """
 
 from __future__ import annotations
@@ -237,11 +238,19 @@ def _build_section(
         )
         if rel is not None:
             caption = _caption(stage_id, fig["name"])
+            figure = Figure(caption=caption, rel_path=rel)
             if fig["name"] in inline_figures:
-                section.figures.append(Figure(caption=caption, rel_path=rel))
+                section.figures.append(figure)
             else:
                 section.downloads.append(
-                    Download(label=f"Figure: {caption} (PNG)", rel_path=rel)
+                    Download(
+                        label=(
+                            f"Figure: {caption} (interactive HTML)"
+                            if figure.interactive
+                            else f"Figure: {caption} (PNG)"
+                        ),
+                        rel_path=rel,
+                    )
                 )
 
     for tbl in table_entries:

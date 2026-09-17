@@ -527,6 +527,7 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
         "controlled-seed/seed-2-player-0.html", "controlled-seed/seed-2-player-1.html",
         "assets/report.css", "assets/report-common.js",
         "assets/report-help.js",
+        "assets/plotly.min.js",
         "assets/controlled-seed-report.js",
     }
     written = {
@@ -680,8 +681,14 @@ def test_shared_color_util_and_adaptive_axis(rendered):
     assert "distinguishColors" in common
     script = _read(out, "assets/controlled-seed-report.js")
     assert "distinguishColors" in script  # same-family colors get spread
-    assert "fitYRange" in script  # the Y axis fits the visible curves
-    assert "yTicks" in script
+    assert "Plotly.restyle" in script
+    assert '"yaxis.autorange": true' in script
+    assert "svgTag" not in script
+    assert "curve-data" not in script
+    detail = _read(out, "controlled-seed/seed-1-player-0.html")
+    assert 'id="plotly-matched-map"' in detail
+    assert 'src="../assets/plotly.min.js"' in detail
+    assert '"hovermode":"x unified"' in detail
 
 
 def test_detail_page_columns_and_run_counts(rendered):
@@ -716,9 +723,11 @@ def test_strategist_checkboxes_replace_the_dropdown(rendered):
     assert 'value="GPT-OSS-120B-Simple" checked' in detail
     assert 'value="Kimi-K2.5" checked' in detail
     script = _read(out, "assets/controlled-seed-report.js")
-    # The chart compares every checked condition at the hovered progress.
-    assert "Turn progress " in script
-    assert "mousemove" in script
+    # Plotly provides the shared hover comparison while the page script updates
+    # trace visibility, colors, and the adaptive axis.
+    assert "Plotly.restyle" in script
+    assert "Plotly.relayout" in script
+    assert "mousemove" not in script
 
 
 def test_vanilla_curve_emphasized_and_missing_baseline_noted(rendered):
@@ -888,15 +897,12 @@ def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
     assert detail.count('<tr class="vanilla-row">') == 1
     assert ">VPAI</span></td><td>Every-turn</td>" in detail
     assert 'value="Vanilla" checked> VPAI</label>' in detail
-    data_text = detail.split('id="curve-data">', 1)[1].split("</script>", 1)[0]
-    series = json.loads(data_text)["series"]
-    baseline = next(entry for entry in series if entry["vanilla"])
-    mixed_curve = next(entry for entry in series if entry["condition"] == "Every-turn")
-    assert baseline["label"] == "VPAI"
-    assert "self-play" in baseline["tooltip"]
-    assert mixed_curve["label"] == "VPAI · Every-turn"
-    assert not mixed_curve["vanilla"]
-    assert "LLM players" in mixed_curve["tooltip"]
+    # Trace metadata keeps the baseline distinct from the mixed VPAI condition
+    # without embedding a second chart-data payload.
+    assert '"name":"VPAI"' in detail
+    assert '"vanilla":true' in detail
+    assert '"condition":"Every-turn"' in detail
+    assert 'id="curve-data"' not in detail
 
 
 def test_renderer_escapes_labels_and_query_parameters():

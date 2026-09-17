@@ -18,7 +18,10 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import plotly.graph_objects as go
 
+from bench.analyses.base import AnalysisResult
+from bench.analyses.runner import run_analysis
 from bench.config import load_config
 from bench.reports import (
     ReportError,
@@ -32,6 +35,7 @@ from bench.reports.runner import _analyses_dir, report_dir
 from bench.reports.templates import _summarize_family
 
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
+_FAKE_HTML = "<!doctype html><title>Interactive figure</title>"
 
 
 def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=None,
@@ -44,9 +48,19 @@ def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=N
         for name, frame in (tables or {}).items():
             frame.to_csv(d / f"{name}.csv", index=False)
             tnames.append({"name": name, "file": f"{name}.csv"})
-        for name in figures or []:
-            (d / f"{name}.png").write_bytes(_FAKE_PNG)
-            fnames.append({"name": name, "file": f"{name}.png"})
+        for figure in figures or []:
+            if isinstance(figure, str):
+                name, format_ = figure, "png"
+            else:
+                name = figure["name"]
+                format_ = figure.get("format", "png")
+            suffix = ".html" if format_ == "plotly" else ".png"
+            path = d / f"{name}{suffix}"
+            if format_ == "plotly":
+                path.write_text(_FAKE_HTML, encoding="utf-8")
+            else:
+                path.write_bytes(_FAKE_PNG)
+            fnames.append({"name": name, "file": path.name})
         for rel, content in (artifacts or {}).items():
             p = d / rel
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -260,6 +274,72 @@ def test_assets_copied_self_contained(report_env):
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "assets/pred_metrics/metrics.png" in md
     assert "Figure: pred_metrics" in md  # compact default keeps the PNG as a download
+
+
+def test_plotly_figure_persistence_is_self_contained_and_deterministic(report_env, monkeypatch):
+    class PlotlyAnalysis:
+        default_all_estimators = False
+
+        def __init__(self, stage_id, params):
+            self.stage_id = stage_id
+
+        def run(self, ctx):
+            return AnalysisResult(
+                figures={"cost_vs_rating": go.Figure(go.Scatter(x=[1, 2], y=[3, 4]))}
+            )
+
+        def report_identity(self):
+            return "Plotly test", "A test figure."
+
+    monkeypatch.setattr("bench.analyses.runner.get_analysis", lambda module: PlotlyAnalysis)
+    stage = {"id": "plotly_test", "module": "test.plotly", "params": {}}
+    first = run_analysis(report_env, stage, catalog=object())
+    path = Path(first.figure_paths["cost_vs_rating"])
+    content = path.read_bytes()
+    manifest = json.loads((path.parent / "result.json").read_text(encoding="utf-8"))
+
+    assert path.name == "cost_vs_rating.html"
+    assert manifest["figures"] == [{
+        "name": "cost_vs_rating", "file": "cost_vs_rating.html",
+    }]
+    assert b'id="plotly-cost_vs_rating"' in content
+    assert b'src="https://cdn.plot.ly' not in content
+
+    second = run_analysis(report_env, stage, catalog=object())
+    assert Path(second.figure_paths["cost_vs_rating"]).read_bytes() == content
+
+
+def test_plotly_figures_embed_in_html_and_link_in_markdown(report_env):
+    _emit(
+        report_env,
+        "pred_metrics",
+        "prediction.evaluate",
+        summary="Interactive cost and skill figure.",
+        figures=[{"name": "cost_vs_rating", "format": "plotly"}],
+    )
+    report_env.report["section_overrides"] = {
+        "pred_metrics": {"figures": ["cost_vs_rating"]}
+    }
+    run_report(report_env)
+    out = report_dir(report_env)
+    html = (out / "prediction.html").read_text(encoding="utf-8")
+    md = (out / "report.md").read_text(encoding="utf-8")
+
+    asset = out / "assets" / "pred_metrics" / "cost_vs_rating.html"
+    assert asset.read_text(encoding="utf-8") == _FAKE_HTML
+    assert (
+        '<iframe class="interactive-figure" '
+        'src="assets/pred_metrics/cost_vs_rating.html" '
+        'title="pred_metrics: cost_vs_rating" loading="lazy"></iframe>'
+    ) in html
+    assert 'href="assets/pred_metrics/cost_vs_rating.html">Open interactive figure (HTML)</a>' in html
+    assert (
+        "[Figure: pred_metrics: cost_vs_rating (interactive HTML)]"
+        "(assets/pred_metrics/cost_vs_rating.html)"
+    ) in md
+    assert "![](" not in md
+    overview = (out / "report.html").read_text(encoding="utf-8")
+    assert "interactive-figure" not in overview
 
 
 def test_report_tables_present_vpai_label_but_keep_csv_identity(report_env):
