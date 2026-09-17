@@ -107,7 +107,7 @@ class RatingsOutcomeMatchups(Analysis):
         metadata = {
             "table": table_id,
             "include_score_ratio": include_score_ratio,
-            "victory_rate_unit": "wins per player appearance",
+            "victory_rate_unit": "wins per player",
             "expected_win_rate": (
                 "Equal chance: 1 / full game player count, averaged over player appearances."
             ),
@@ -163,8 +163,8 @@ class RatingsOutcomeMatchups(Analysis):
                 ref_label=f"Expected ({common_expected:.1%})" if common_expected is not None else None,
                 annotate_col="n_label",
                 ascending=False,
-                xlabel="Observed victory rate per player appearance",
-                title="Observed per-player victory rates",
+                xlabel="Victory rate per player",
+                title="Per-player victory rates",
                 provenance_note=(
                     "Counts show wins / player appearances. Expected rate assumes each player "
                     "has an equal chance to win."
@@ -185,7 +185,7 @@ class RatingsOutcomeMatchups(Analysis):
                     annotate_col="n_label",
                     ascending=False,
                     xlabel=f"Mean score-ratio margin vs {reference}",
-                    title=f"Observed score-ratio margins vs {reference}",
+                    title=f"Score-ratio margins vs {reference}",
                 )
 
         metadata["display"] = "vs_reference" if use_vs_reference else "matrix"
@@ -320,11 +320,11 @@ class RatingsOutcomeMatchups(Analysis):
             square=True,
             linewidths=0.3,
             linecolor="lightgray",
-            cbar_kws={"label": "Observed victory rate per player appearance"},
+            cbar_kws={"label": "Victory rate per player appearance"},
             annot_kws={"fontsize": 7},
             ax=ax,
         )
-        ax.set_title("Observed per-player matchup victory rates", fontsize=12, fontweight="bold")
+        ax.set_title("Per-player matchup victory rates", fontsize=12, fontweight="bold")
         ax.set_xlabel("Opponent player type\nCounts = wins / player appearances; expected = equal chance")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
         fig.tight_layout()
@@ -349,7 +349,7 @@ class RatingsOutcomeMatchups(Analysis):
             annot_kws={"fontsize": 7},
             ax=ax,
         )
-        ax.set_title("Observed matchup score-ratio margins", fontsize=12, fontweight="bold")
+        ax.set_title("Matchup score-ratio margins", fontsize=12, fontweight="bold")
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
         fig.tight_layout()
         return fig
