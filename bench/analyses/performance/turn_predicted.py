@@ -11,6 +11,7 @@ time" curve).
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from ..base import Analysis, AnalysisContext, AnalysisResult
@@ -82,16 +83,36 @@ class PerformanceTurnPredicted(Analysis):
         )
 
         fig = self._plot(over_progress, by, estimators, ctx)
-        n_models = int(df["model"].nunique())
-        summary = (
-            f"Win-probability trends use {agg} predictions from **{n_models}** "
-            f"estimator(s) across **{by_identity['n_games'].sum()}** "
-            f"{by} identity-game(s)."
-        )
+        finite = by_identity[np.isfinite(by_identity["mean_predicted"])]
+        aggregate_label = "median" if agg == "median" else "mean"
+        if finite.empty:
+            summary = f"No finite {aggregate_label} predicted win probabilities are available."
+        else:
+            highest = finite.loc[finite["mean_predicted"].idxmax()]
+            lowest = finite.loc[finite["mean_predicted"].idxmin()]
+            if len(finite) == 1:
+                summary = (
+                    f"{aggregate_label.capitalize()} predicted win probability: **{highest[by]}** with "
+                    f"**{highest['model']}** at **{highest['mean_predicted'] * 100:.1f}%**."
+                )
+            else:
+                summary = (
+                    f"Highest observed {aggregate_label} predicted win probability: **{highest[by]}** with "
+                    f"**{highest['model']}** at **{highest['mean_predicted'] * 100:.1f}%**. "
+                    f"Observed {aggregate_label}s range from **{lowest['mean_predicted'] * 100:.1f}%** to "
+                    f"**{highest['mean_predicted'] * 100:.1f}%**."
+                )
         return AnalysisResult(
             tables={"by_identity": by_identity, "over_progress": over_progress},
             figures={"over_progress": fig} if fig is not None else {},
-            summary=summary, metadata={"estimators": estimators, "by": by, "aggregate": agg},
+            summary=summary,
+            metadata={
+                "estimators": estimators,
+                "by": by,
+                "aggregate": agg,
+                "models_with_results": int(df["model"].nunique()),
+                "identity_games": int(by_identity["n_games"].sum()),
+            },
         )
 
     def _plot(self, over_progress: pd.DataFrame, by: str, estimators: list[str], ctx: AnalysisContext):

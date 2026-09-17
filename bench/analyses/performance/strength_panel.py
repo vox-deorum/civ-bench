@@ -326,10 +326,11 @@ class PerformanceStrengthPanel(Analysis):
         # non-cell rows, so this view only appears in controlled runs. Vanilla is NOT
         # forced to 0; it is summarized like every identity so the report shows where
         # it actually lands.
-        adv_note = ""
+        n_advantage_rows = 0
         advantage_col = "cell_logit_advantage"
         if advantage_col in panel.columns and panel[advantage_col].notna().any():
             cell = panel[panel[advantage_col].notna()].copy()
+            n_advantage_rows = int(len(cell))
             adv_tbl = _summarize_by(
                 cell, by, advantage_col, min_games_prelim, boot_n, ci_level, rng
             )
@@ -341,18 +342,12 @@ class PerformanceStrengthPanel(Analysis):
             )
             if adv_fig is not None:
                 figures["logit_advantage"] = adv_fig
-            adv_note = f"logit-advantage view over **{len(cell)}** cell-baselined rows"
-            if by == "player_type":
-                vrow = adv_tbl[adv_tbl[by] == ctx.catalog.vanilla_label]
-                if not vrow.empty:
-                    adv_note += f"; Vanilla mean = **{float(vrow['mean'].iloc[0]):+.3f}**"
-
         coverage = self._load_coverage(ctx, table_id)
         if coverage is not None:
             tables["cell_coverage_summary"] = self._coverage_summary(coverage)
             tables["cell_coverage"] = coverage
         n_prelim = int(summary_tbl["preliminary"].sum())
-        report_notes = []
+        coverage_metadata = None
         if coverage is not None:
             missing = int(coverage["missing"].fillna(False).astype(bool).sum())
             no_baseline = int(
@@ -361,23 +356,36 @@ class PerformanceStrengthPanel(Analysis):
                     & (coverage["n_vanilla"].fillna(0) == 0)
                 ).sum()
             )
-            report_notes.append(
-                f"**{len(coverage)}** cells: "
-                f"**{missing}** missing, **{no_baseline}** without Vanilla baseline"
-            )
-        summary = (
-            f"{metric}: **{len(summary_tbl)}** identities, "
-            f"**{n_prelim}** preliminary with fewer than "
-            f"**{min_games_prelim}** games"
-        )
-        if report_notes:
-            summary += "; " + "; ".join(report_notes)
-        if adv_note:
-            summary += "; " + adv_note
-        summary += "."
+            coverage_metadata = {
+                "cells": int(len(coverage)),
+                "missing_cells": missing,
+                "cells_without_vanilla_baseline": no_baseline,
+            }
+        metric_label = str(metric).replace("_", " ")
+        finite = summary_tbl[np.isfinite(summary_tbl["mean"])]
+        if finite.empty:
+            summary = f"No finite mean {metric_label} values are available."
+        else:
+            high = finite.iloc[0]
+            low = finite.iloc[-1]
+            if len(finite) == 1:
+                summary = f"Mean {metric_label}: **{high[by]}** at **{high['mean']:.3f}**."
+            else:
+                summary = (
+                    f"Highest mean {metric_label}: **{high[by]}** at **{high['mean']:.3f}**. "
+                    f"Identity means range from **{low['mean']:.3f}** to **{high['mean']:.3f}**."
+                )
         return AnalysisResult(
             tables=tables, figures=figures,
-            summary=summary, metadata={"by": by, "metric": metric},
+            summary=summary,
+            metadata={
+                "by": by,
+                "metric": metric,
+                "preliminary_identities": n_prelim,
+                "preliminary_minimum_games": min_games_prelim,
+                "cell_coverage": coverage_metadata,
+                "logit_advantage_rows": n_advantage_rows,
+            },
         )
 
     def _load_coverage(self, ctx: AnalysisContext, table_id: str):

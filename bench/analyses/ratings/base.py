@@ -173,14 +173,14 @@ class RatingsAnalysis(Analysis):
         fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference, metadata)
         if ratings.empty:
             summary = (
-                f"No {'/'.join(group_by)} combination met the minimum game count."
+                "No grouped ratings have enough games for a skill estimate."
             )
         else:
             top = ratings.sort_values("elo", ascending=False).iloc[0]
             groups = ratings["strategy"].nunique() if "strategy" in ratings else len(extra_dims)
             summary = (
                 f"{top['composite_type']} leads **{len(ratings)}** "
-                f"{'/'.join(group_by)} combinations at **{top['elo']:.0f} Elo** "
+                f"player and condition combinations at **{top['elo']:.0f} Elo** "
                 f"across **{groups}** groups."
             )
         return AnalysisResult(tables={"ratings": ratings},

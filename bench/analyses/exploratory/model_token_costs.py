@@ -138,19 +138,25 @@ class ExploratoryModelTokenCosts(Analysis):
             fig = self._plot(plot_tbl, currency, catalog)
         else:
             fig, warning = self._plot_paired(plot_tbl, currency, ctx, pairing)
-        total = model_tbl["total_cost"].sum(skipna=True)
-        breakdown = " across player types" if by_player_type else ""
-        summary = (
-            f"**{len(model_tbl)}** model(s){breakdown} cost **{total:.2f} "
-            f"{currency.upper()}** (API pricing) across **{int(model_tbl['games'].sum())}** games."
-        )
+        total = model_tbl["total_cost"].sum(min_count=1)
+        costs = plot_tbl.loc[np.isfinite(plot_tbl["avg_cost_per_game"]), "avg_cost_per_game"]
+        if costs.empty:
+            summary = "No complete game costs are available."
+        else:
+            cost_group = "player and model combinations" if by_player_type else "models"
+            summary = (
+                f"Estimated spend totals **{total:.2f} {currency.upper()}** for complete usage records; "
+                f"average game costs across {cost_group} range from **{costs.min():.2f}** to "
+                f"**{costs.max():.2f} {currency.upper()}**."
+            )
+        metadata = {"currency": currency, "by_player_type": by_player_type}
         if warning:
-            summary = summary[:-1] + "; " + warning.rstrip(".") + "."
+            metadata["warning"] = warning
         return AnalysisResult(
             tables=tables,
             figures={"token_costs": fig} if fig is not None else {},
             summary=summary,
-            metadata={"currency": currency, "by_player_type": by_player_type},
+            metadata=metadata,
         )
 
     @staticmethod

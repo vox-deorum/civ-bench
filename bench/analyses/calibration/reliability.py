@@ -78,11 +78,16 @@ class CalibrationReliability(Analysis):
         ece = pd.DataFrame(ece_rows)
         fig = self._plot(per_model, ctx)
 
-        best = ece.sort_values("ece").iloc[0]
-        summary = (
-            f"{best['model']} has the lowest expected calibration error: **{best['ece']:.4f}**, across "
-            f"**{len(estimators)}** estimator(s) and **{n_bins}** bins."
-        )
+        finite_ece = ece.loc[np.isfinite(pd.to_numeric(ece["ece"], errors="coerce").to_numpy())]
+        if finite_ece.empty:
+            summary = "No estimator has a finite calibration error for the available predictions."
+        else:
+            best = finite_ece.loc[finite_ece["ece"].idxmin()]
+            summary = (
+                f"{best['model']} is best calibrated with expected error **{best['ece']:.4f}**; "
+                f"the estimator errors range from **{finite_ece['ece'].min():.4f}** to "
+                f"**{finite_ece['ece'].max():.4f}** across **{len(finite_ece)}** estimators."
+            )
         return AnalysisResult(
             tables={"reliability": reliability, "ece": ece},
             figures={"reliability": fig} if fig is not None else {},

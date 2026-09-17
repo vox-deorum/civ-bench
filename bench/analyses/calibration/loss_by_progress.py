@@ -14,7 +14,7 @@ import pandas as pd
 
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
-from ..prediction.metrics import compute_metric, filtered_prediction_rows
+from bench.analyses.prediction.metrics import LOWER_IS_BETTER, compute_metric, filtered_prediction_rows
 
 _DEFAULT_METRICS = ["brier_score", "log_loss"]
 
@@ -57,10 +57,25 @@ class CalibrationLossByProgress(Analysis):
 
         table = pd.DataFrame(rows, columns=["model", "turn_progress_bin", "n_samples", *metrics])
         fig = self._plot(table, metrics, labels, ctx)
-        summary = (
-            f"Prediction error spans **{n_bins}** game-progress bins for "
-            f"**{len(estimators)}** estimator(s) ({', '.join(metrics)})."
-        )
+        if table.empty:
+            summary = "No prediction errors could be calculated for the available game progress data."
+        else:
+            metric = metrics[0]
+            finite = table.loc[
+                np.isfinite(pd.to_numeric(table[metric], errors="coerce").to_numpy())
+            ]
+            if finite.empty:
+                summary = f"No finite {metric.replace('_', ' ')} values were available across game progress."
+            else:
+                best = finite.loc[
+                    finite[metric].idxmin() if metric in LOWER_IS_BETTER else finite[metric].idxmax()
+                ]
+                metric_label = metric.replace("_", " ")
+                summary = (
+                    f"The best {metric_label} is **{best[metric]:.4f}** for {best['model']} "
+                    f"at game progress {best['turn_progress_bin']}; values range from "
+                    f"**{finite[metric].min():.4f}** to **{finite[metric].max():.4f}**."
+                )
         return AnalysisResult(
             tables={"loss_by_progress": table},
             figures={"loss_by_progress": fig} if fig is not None else {},

@@ -40,6 +40,8 @@ class AnalysisResult:
 
     ``summary`` is concise inline Markdown. Bold key numeric results with
     ``**value**``; the report renders the formatting in overview and detail views.
+    Lead with a finding, comparison, or coverage outcome. Put stage identifiers,
+    exclusions, and method details in ``metadata`` for the report's tooltips.
 
     ``artifacts`` is the escape hatch for files that are neither a tabular CSV
     nor a figure (e.g. the generated ``seating/*.seating.json`` files): it maps a

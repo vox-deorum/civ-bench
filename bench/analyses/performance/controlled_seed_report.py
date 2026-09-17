@@ -279,15 +279,22 @@ class PerformanceControlledSeedReport(Analysis):
 
         n_seeds = int(rows["seed"].nunique())
         n_players = int(rows["player_id"].nunique())
-        n_combos = int(
-            summary.loc[summary["strategist"] != vanilla_label].shape[0]
-        )
-        summary_text = (
-            f"**{int(rows['game_id'].nunique())}** controlled games cover "
-            f"**{n_seeds}** seeds, **{n_players}** final seats, and "
-            f"**{n_combos}** strategist-condition combinations; "
-            "with a dedicated VPAI baseline."
-        )
+        n_combos = int(summary.loc[summary["strategist"] != vanilla_label].shape[0])
+        matched = summary[
+            (summary["strategist"] != vanilla_label)
+            & np.isfinite(pd.to_numeric(summary["adjusted_strength_difference"], errors="coerce"))
+        ]
+        if matched.empty:
+            summary_text = "No finite matched strength differences are available."
+        else:
+            differences = matched["adjusted_strength_difference"]
+            above = int((differences > 0).sum())
+            summary_text = (
+                f"Strategists exceed VPAI strength in **{above}/{len(matched)}** "
+                f"matched map-and-seat comparisons (**{above / len(matched):.1%}**); "
+                f"strength differences range from **{differences.min():+.3f}** "
+                f"to **{differences.max():+.3f}**."
+            )
         no_baseline = int((~index["has_matched_vanilla"].astype(bool)).sum())
         no_probability = int((~index["has_probability"].astype(bool)).sum())
         notes = []
@@ -302,9 +309,6 @@ class PerformanceControlledSeedReport(Analysis):
             notes.append(
                 f"**{no_probability}** seed-player pair(s) have no usable prediction rows"
             )
-        if notes:
-            summary_text += " Note: " + "; ".join(notes) + "."
-
         metadata = {
             "strategist_order": strategist_order,
             "condition_order": condition_order,
@@ -319,6 +323,15 @@ class PerformanceControlledSeedReport(Analysis):
             "has_baseline": has_baseline,
             "seeds": sorted(int(s) for s in rows["seed"].unique()),
             "player_ids": sorted(int(p) for p in rows["player_id"].unique()),
+            "coverage": {
+                "controlled_games": int(rows["game_id"].nunique()),
+                "seeds": n_seeds,
+                "final_seats": n_players,
+                "strategist_condition_combinations": n_combos,
+                "unmatched_seed_player_pairs": no_baseline,
+                "seed_player_pairs_without_predictions": no_probability,
+                "notes": notes,
+            },
         }
         return AnalysisResult(
             tables={

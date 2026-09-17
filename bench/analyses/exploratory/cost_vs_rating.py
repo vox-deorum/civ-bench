@@ -79,11 +79,18 @@ class ExploratoryCostVsRating(Analysis):
         log_x = bool(self.params.get("log_x", True))
         annotate = bool(self.params.get("annotate", True))
         fig = self._plot(table, ctx, plot_spec, currency, log_x, annotate)
-        summary = (
-            f"Cost-versus-skill covers **{len(table)}** identities from rating stage "
-            f"'{rating_stage}'; excludes **{dropped_baselines}** baseline, "
-            f"**{dropped_unpriced}** unpriced, and **{dropped_unrated}** unrated identities."
-        )
+        comparable = table[np.isfinite(table["elo"]) & np.isfinite(table["avg_cost_per_game"])]
+        if comparable.empty:
+            summary = "No identities have both a skill rating and a known game cost."
+        else:
+            top = comparable.sort_values("elo", ascending=False, kind="stable").iloc[0]
+            costs = comparable["avg_cost_per_game"]
+            summary = (
+                f"{top['player_type']} has the highest estimated skill at **{top['elo']:.0f} Elo** "
+                f"and averages **{top['avg_cost_per_game']:.2f} {currency.upper()}** per game; "
+                f"costs across rated identities range from **{costs.min():.2f}** to "
+                f"**{costs.max():.2f} {currency.upper()}** per game."
+            )
         metadata = {
             "currency": currency,
             "log_x": log_x,

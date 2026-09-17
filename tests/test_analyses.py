@@ -1079,8 +1079,9 @@ def test_matchups_vs_reference_falls_back_when_vanilla_absent(env):
     env.cfg.presentation = {"matchup_display": "vs_reference"}
     r = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
     assert "vs_reference" not in r.table_paths
-    assert "pairwise matrix" in r.summary
-    assert "reference 'Vanilla' is absent" in r.summary
+    assert r.metadata["display"] == "matrix"
+    assert r.metadata["warning"] == "reference 'Vanilla' is absent"
+    assert "reference 'Vanilla' is absent" not in r.summary
 
 
 def test_outcome_matchups_outputs(env):

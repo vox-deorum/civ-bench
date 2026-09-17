@@ -223,14 +223,31 @@ class RatingsMatchups(Analysis):
                     provenance_note=note,
                 )
 
-        summary = (
-            f"Adjusted strength: **{panel['player_type'].nunique()}** player "
-            f"types across **{panel['game_id'].nunique()}** games, "
-            f"{'reference view' if use_vs_reference else 'pairwise matrix'} ({mode})"
-        )
+        metadata["display"] = "vs_reference" if use_vs_reference else "matrix"
         if display == "vs_reference" and not reference_available:
-            summary += f"; reference '{reference}' is absent"
-        summary += "."
+            metadata["warning"] = f"reference '{reference}' is absent"
+        matrix = winrate if winrate is not None else mean
+        values = matrix.where(np.isfinite(matrix)).copy()
+        np.fill_diagonal(values.values, np.nan)
+        if use_vs_reference:
+            values = values[[reference]]
+        pairs = values.stack().sort_values(ascending=False, kind="stable")
+        if pairs.empty:
+            summary = "No shared games are available to compare adjusted strength."
+        else:
+            identity, opponent = pairs.index[0]
+            value = pairs.iloc[0]
+            n = int(count_for_summary.loc[identity, opponent])
+            if winrate is not None:
+                summary = (
+                    f"{identity} has the highest observed strength win rate: **{value:.1%}** "
+                    f"against {opponent}, across **{n}** player comparisons."
+                )
+            else:
+                summary = (
+                    f"{identity} has the largest mean adjusted-strength advantage: "
+                    f"**{value:+.3f}** against {opponent}, across **{n}** player comparisons."
+                )
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
     @staticmethod

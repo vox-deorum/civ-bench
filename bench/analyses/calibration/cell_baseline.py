@@ -78,16 +78,25 @@ class CalibrationCellBaseline(Analysis):
         # Implicit conditions actually rendered: the explicit condition's implicit row is
         # dropped (it duplicates the explicit reference), so don't count it here either.
         implicit_exps = set(cb.loc[cb["pathway"] == "implicit", "experiment"].unique()) - explicit_exps
+        baseline_values = pd.to_numeric(cb["cell_baseline"], errors="coerce").to_numpy()
+        finite_baselines = baseline_values[np.isfinite(baseline_values)]
+        condition_count = len(explicit_exps | implicit_exps)
         summary = (
-            f"Starting-position baselines cover **{cb['seed'].nunique()}** map seed(s) "
-            f"and **{len(implicit_exps)}** inferred condition(s), "
-            f"{'with' if explicit_exps else 'without'} an explicit reference."
+            f"Starting-position baselines range from **{finite_baselines.min():+.3f}** to "
+            f"**{finite_baselines.max():+.3f}** log-odds across **{cb['seed'].nunique()}** "
+            f"map seed(s) and **{condition_count}** conditions."
+            if finite_baselines.size
+            else f"No finite starting-position baselines were available across **{cb['seed'].nunique()}** map seed(s)."
         )
         return AnalysisResult(
             tables={"cell_baseline": cb},
             figures=figures,
             summary=summary,
-            metadata={"n_seeds": int(cb["seed"].nunique()), "has_explicit": bool(explicit_exps)},
+            metadata={
+                "n_seeds": int(cb["seed"].nunique()),
+                "n_conditions": condition_count,
+                "has_explicit": bool(explicit_exps),
+            },
         )
 
     def _load_coverage(self, adjust_dir: Path) -> Optional[pd.DataFrame]:

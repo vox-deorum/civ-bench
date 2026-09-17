@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..base import Analysis, AnalysisContext, AnalysisResult
@@ -42,11 +43,20 @@ class CalibrationCivEffects(Analysis):
             )
 
         df = df.sort_values("civ_effect").reset_index(drop=True)
-        fig = self._plot(df)
+        finite = df[np.isfinite(df["civ_effect"])]
+        if finite.empty:
+            return AnalysisResult(
+                tables={"civ_effects": df},
+                summary="No finite civilization effects were available."
+            )
+        fig = self._plot(finite)
+        weakest = finite.iloc[0]
+        strongest = finite.iloc[-1]
         summary = (
-            f"Civilization effects span **{df['civ_effect'].min():+.3f}** to "
-            f"**{df['civ_effect'].max():+.3f}** across **{len(df)}** civilizations "
-            f"(log-odds scale)."
+            f"{strongest['civilization']} has the strongest civilization effect "
+            f"(**{strongest['civ_effect']:+.3f}**) and {weakest['civilization']} the weakest "
+            f"(**{weakest['civ_effect']:+.3f}**) on the log-odds scale, across "
+            f"**{len(finite)}** civilizations."
         )
         return AnalysisResult(
             tables={"civ_effects": df},

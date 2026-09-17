@@ -10,6 +10,7 @@ target defaults to ``score_ratio``.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from ...plotting.coefficients import deviation_coefficients
@@ -63,14 +64,40 @@ class PerformanceScoreRatio(Analysis):
         })
         tables["coefficients"] = coef
 
-        summary = (
-            f"The {' + '.join(predictors)} model explains **{result.rsquared * 100:.1f}%** "
-            f"of variation in {target} across **{int(result.nobs):,}** observations "
-            "(ordinary least squares regression)."
-        )
+        effects = tables.get("player_type_effects")
+        target_label = str(target).replace("_", " ")
+        if effects is None:
+            summary = (
+                f"The model explains **{result.rsquared * 100:.1f}%** of variation in "
+                f"{target_label}."
+            )
+        else:
+            effect_values = pd.to_numeric(effects["Effect"], errors="coerce")
+            finite = effects[np.isfinite(effect_values)]
+            if finite.empty:
+                summary = f"No finite player-identity effects were estimated for {target_label}."
+            else:
+                low = finite.loc[finite["Effect"].idxmin()]
+                high = finite.loc[finite["Effect"].idxmax()]
+                if len(finite) == 1:
+                    summary = (
+                        f"Estimated {target_label} effect: **{high['Name']}** at "
+                        f"**{high['Effect']:+.3f}** from the grand mean."
+                    )
+                else:
+                    summary = (
+                        f"Estimated {target_label} effects range from **{low['Name']}** "
+                        f"(**{low['Effect']:+.3f}**) to **{high['Name']}** "
+                        f"(**{high['Effect']:+.3f}**) from the grand mean."
+                    )
         return AnalysisResult(
             tables=tables, figures=figures, summary=summary,
-            metadata={"formula": formula, "n": result.nobs, "r2": result.rsquared},
+            metadata={
+                "formula": formula,
+                "n": result.nobs,
+                "r2": result.rsquared,
+                "predictors": predictors,
+            },
         )
 
     def _forest(self, effects: pd.DataFrame, target: str, ctx: AnalysisContext):

@@ -77,11 +77,20 @@ class PredictionCompare(Analysis):
         pairs = pd.DataFrame(pair_rows)
         fig = self._plot(rank_corr)
 
-        summary = (
-            f"**{len(estimators)}** estimators average **{pairs['rank_spearman'].mean():.3f}** "
-            f"within-decision rank agreement across **{len(merged):,}** shared predictions "
-            f"(Spearman rho)."
-        )
+        finite_pairs = pairs.loc[
+            np.isfinite(pd.to_numeric(pairs["rank_spearman"], errors="coerce").to_numpy())
+        ]
+        if finite_pairs.empty:
+            summary = "No finite estimator rank agreement could be calculated."
+        else:
+            closest = finite_pairs.loc[finite_pairs["rank_spearman"].idxmax()]
+            summary = (
+                f"{closest['model_a']} and {closest['model_b']} agree most on player rank "
+                f"(Spearman **{closest['rank_spearman']:.3f}**); agreement ranges from "
+                f"**{finite_pairs['rank_spearman'].min():.3f}** to "
+                f"**{finite_pairs['rank_spearman'].max():.3f}** across "
+                f"**{len(merged):,}** shared predictions."
+            )
         return AnalysisResult(
             tables={
                 "pairs": pairs,

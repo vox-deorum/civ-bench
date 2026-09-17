@@ -9,6 +9,7 @@ model; columns are the metrics plus ``n_rows`` / ``n_games``.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from ..base import Analysis, AnalysisContext, AnalysisResult
@@ -51,15 +52,22 @@ class PredictionEvaluate(Analysis):
         table = pd.DataFrame(rows, columns=["model", "n_rows", "n_games", *metrics])
         fig = self._plot(table, metrics, ctx)
 
-        # Headline: best model on the first metric.
         first = metrics[0]
         ascending = first in LOWER_IS_BETTER
-        ranked = table.sort_values(first, ascending=ascending)
-        best = ranked.iloc[0]
-        summary = (
-            f"{best['model']} leads on {first} at **{best[first]:.4f}**, across "
-            f"**{len(estimators)}** estimator(s) and **{len(metrics)}** quality metric(s)."
-        )
+        finite = table.loc[
+            np.isfinite(pd.to_numeric(table[first], errors="coerce").to_numpy())
+        ]
+        if finite.empty:
+            summary = f"No finite {first.replace('_', ' ')} score was available for the estimators."
+        else:
+            ranked = finite.sort_values(first, ascending=ascending)
+            best = ranked.iloc[0]
+            metric_label = first.replace("_", " ")
+            summary = (
+                f"{best['model']} performs best on {metric_label} at **{best[first]:.4f}** "
+                f"using **{int(best['n_games'])}** games; scores range from "
+                f"**{finite[first].min():.4f}** to **{finite[first].max():.4f}**."
+            )
         return AnalysisResult(
             tables={"metrics": table},
             figures={"metrics": fig} if fig is not None else {},

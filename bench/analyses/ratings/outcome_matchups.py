@@ -154,16 +154,22 @@ class RatingsOutcomeMatchups(Analysis):
                     title=f"Observed score-ratio margins vs {reference}",
                 )
 
-        summary = (
-            f"Observed wins: **{len(win_rate)}** player types across "
-            f"**{panel['game_id'].nunique()}** games, "
-            f"{'reference view' if use_vs_reference else 'pairwise matrix'}"
-        )
+        metadata["display"] = "vs_reference" if use_vs_reference else "matrix"
         if include_score_ratio:
-            summary += "; score-ratio margins are row minus column"
+            metadata["score_ratio_margin"] = "row minus column"
         if display == "vs_reference" and not reference_available:
-            summary += f"; reference '{reference}' is absent"
-        summary += "."
+            metadata["warning"] = f"reference '{reference}' is absent"
+        values = win_rate[[reference]] if use_vs_reference else win_rate
+        pairs = values.where(np.isfinite(values)).stack().sort_values(ascending=False, kind="stable")
+        if pairs.empty:
+            summary = "No shared games are available to compare victory rates."
+        else:
+            identity, opponent = pairs.index[0]
+            n = int(counts.loc[identity, opponent])
+            summary = (
+                f"{identity} has the highest observed matchup victory rate: **{pairs.iloc[0]:.1%}** "
+                f"in games featuring {opponent}, across **{n}** player appearances."
+            )
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
     @staticmethod

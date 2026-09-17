@@ -144,7 +144,8 @@ class PerformanceExperimentCompleteness(Analysis):
         tables = build_experiment_completeness(panel, games, baseline_experiment)
         if not tables:
             return AnalysisResult(
-                summary="Experiment coverage unavailable: the run has no controlled experiment rows.",
+                summary="No controlled experiment coverage is available.",
+                metadata={"controlled_rows_available": False},
             )
 
         tokens = self._load_tokens(ctx)
@@ -167,11 +168,13 @@ class PerformanceExperimentCompleteness(Analysis):
         repeated_slots = int(comp["repeated_slots"].sum())
         warning_experiments = int((comp["warning"].fillna("ok").astype(str) != "ok").sum())
         failed_turns = int(comp["failed_turn_count"].fillna(0).sum())
+        complete_experiments = int((comp["missing_games"].fillna(0) == 0).sum())
+        n_experiments = int(len(comp))
+        coverage_pct = (100.0 * present_games / required_games) if required_games else 0.0
         summary = (
-            f"**{present_games}/{required_games}** planned games are present: "
-            f"**{missing_games}** missing slot(s), **{repeated_slots}** repeated slot(s), "
-            f"**{failed_turns}** failed decision turn(s), and "
-            f"**{warning_experiments}** experiment(s) with warnings"
+            f"Controlled experiment coverage: **{present_games}/{required_games}** planned games "
+            f"(**{coverage_pct:.1f}%**) are present across **{n_experiments}** experiment(s). "
+            f"**{complete_experiments}/{n_experiments}** experiment(s) have every planned game."
         )
 
         artifacts: dict[str, str] = {}
@@ -182,23 +185,32 @@ class PerformanceExperimentCompleteness(Analysis):
             if index_rows:
                 out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)
                 open_total = int(sum(r["open_cells"] for r in index_rows))
-                summary += (
-                    f"; generated **{len(index_rows)}** seating.json file(s) with "
-                    f"**{open_total}** open cell(s)"
-                )
-            if warnings:
-                notes = "; ".join(
-                    note.rstrip(".").replace(f" {chr(8212)} ", ", ").replace(". ", ", ")
-                    for note in warnings
-                )
-                summary += "; seating notes: " + notes
-        summary += "."
+            else:
+                index_rows = []
+                open_total = 0
+        else:
+            warnings = []
+            index_rows = []
+            open_total = 0
 
         return AnalysisResult(
             tables=out,
             artifacts=artifacts,
             summary=summary,
-            metadata={"strength_table": table_id},
+            metadata={
+                "strength_table": table_id,
+                "coverage": {
+                    "missing_slots": missing_games,
+                    "repeated_slots": repeated_slots,
+                    "failed_decision_turns": failed_turns,
+                    "experiments_with_warnings": warning_experiments,
+                },
+                "seating": {
+                    "files_generated": int(len(index_rows)),
+                    "open_cells": int(open_total),
+                    "warnings": warnings,
+                },
+            },
         )
 
     def _load_games(self, ctx: AnalysisContext):

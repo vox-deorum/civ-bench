@@ -435,7 +435,11 @@ def test_pair_without_predictions_keeps_scalar_summary(env):
     assert not bool(pair["has_probability"])
     probability = tables["seed_player_probability"]
     assert probability[(probability["seed"] == 2)].empty
-    assert "no usable prediction rows" in result.summary.lower()
+    assert any(
+        "no usable prediction rows" in note
+        for note in result.metadata["coverage"]["notes"]
+    )
+    assert "no usable prediction rows" not in result.summary.lower()
 
 
 # ── config validation ──────────────────────────────────────────────────────────
