@@ -16,8 +16,8 @@ import html as _html
 
 from bench.reports.assets import REPORT_HELP_JS
 from bench.reports.content import (
-    CITATION_MARKDOWN,
     render_citation_html,
+    render_citation_markdown,
     render_footer_html,
     render_summary_html,
     render_help_html,
@@ -153,7 +153,7 @@ def render_markdown(doc: ReportDocument) -> str:
         for section in group.sections:
             lines.append(f'<a id="{anchors[id(section)]}"></a>')
             _render_section_md(section, lines)
-    lines.extend([CITATION_MARKDOWN, ""])
+    lines.extend([render_citation_markdown(doc.benchmark_citation), ""])
     if doc.footer.strip():
         lines.extend(["---", "", doc.footer.strip(), ""])
     return "\n".join(lines).rstrip() + "\n"
@@ -465,7 +465,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append(f'<p><a href="{_html.escape(target)}">View details</a></p>')
         parts.append("</article>")
     parts.append("</div></section>")
-    parts.append(render_citation_html())
+    parts.append(render_citation_html(doc.benchmark_citation))
     parts.append(render_footer_html(doc.footer))
     parts.append("</main></body></html>")
     pages["report.html"] = "\n".join(parts) + "\n"

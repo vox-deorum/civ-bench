@@ -222,8 +222,10 @@ REPORT_KEYS = {
     "section_overrides",
     "title",
     "footer",
+    "benchmark_citation",
     "include_disabled",
 }
+REPORT_BENCHMARK_CITATION_KEYS = {"title", "url"}
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}
 # Formats the report renders; also the default when `report.formats` is omitted.

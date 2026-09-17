@@ -594,7 +594,8 @@ def test_two_heatmaps_per_seed_and_blank_cells(rendered):
 def test_vanilla_is_separate_condition_row(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
-    assert '<tr class="vanilla-row"><th scope="row" class="row-label">VPAI</th>' in index
+    assert '<tr class="vanilla-row"><th scope="row" class="row-label">' in index
+    assert 'data-tip="VPAI self-play: all players use VPAI.">VPAI</span>' in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<tr class="vanilla-row">' in detail
     # The strength cell is colored like the overview heatmap: the baseline 0.40 sits
@@ -861,6 +862,41 @@ def _tiny_doc() -> ControlledSeedDocument:
         summary_table=summary, probability_table=probability, index_table=index,
         downloads=[],
     )
+
+
+def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
+    doc = _tiny_doc()
+    mixed = doc.summary_table.iloc[-1].copy()
+    mixed["condition"] = "Every-turn"
+    mixed["experiment"] = "mixed"
+    mixed["mean_adjusted_strength"] = 0.3
+    doc.summary_table = pd.concat([doc.summary_table, mixed.to_frame().T], ignore_index=True)
+    curve = doc.probability_table.iloc[-1].copy()
+    curve["condition"] = "Every-turn"
+    doc.probability_table = pd.concat([doc.probability_table, curve.to_frame().T], ignore_index=True)
+
+    pages = render_controlled_seed_site(doc)
+    overview = pages["controlled-seed/index.html"]
+    assert ">VPAI | Every-turn</span>" in overview
+    assert "Vanilla | Every-turn" not in overview
+    assert "VPAI self-play: all players use VPAI." in overview
+    assert "VPAI in games with LLM players." in overview
+    assert "LLMs can counter VPAI&#x27;s playstyle." in overview
+    assert "strategist=Vanilla&amp;condition=Every-turn" in overview
+
+    detail = pages["controlled-seed/seed-1-player-0.html"]
+    assert detail.count('<tr class="vanilla-row">') == 1
+    assert ">VPAI</span></td><td>Every-turn</td>" in detail
+    assert 'value="Vanilla" checked> VPAI</label>' in detail
+    data_text = detail.split('id="curve-data">', 1)[1].split("</script>", 1)[0]
+    series = json.loads(data_text)["series"]
+    baseline = next(entry for entry in series if entry["vanilla"])
+    mixed_curve = next(entry for entry in series if entry["condition"] == "Every-turn")
+    assert baseline["label"] == "VPAI"
+    assert "self-play" in baseline["tooltip"]
+    assert mixed_curve["label"] == "VPAI · Every-turn"
+    assert not mixed_curve["vanilla"]
+    assert "LLM players" in mixed_curve["tooltip"]
 
 
 def test_renderer_escapes_labels_and_query_parameters():

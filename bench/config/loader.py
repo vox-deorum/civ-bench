@@ -577,6 +577,16 @@ def _validate_report(report: dict) -> None:
         _check_type(report["title"], (str,), "report.title")
     if "footer" in report and report["footer"] is not None:
         _check_type(report["footer"], (str,), "report.footer")
+    citation = report.get("benchmark_citation")
+    if citation is not None:
+        where = "report.benchmark_citation"
+        _require_mapping(citation, where)
+        _check_keys(citation, S.REPORT_BENCHMARK_CITATION_KEYS, where,
+                    required=S.REPORT_BENCHMARK_CITATION_KEYS)
+        for key in sorted(S.REPORT_BENCHMARK_CITATION_KEYS):
+            _check_type(citation[key], (str,), f"{where}.{key}")
+            if not citation[key].strip():
+                raise ConfigError(f"{where}.{key}: expected a non-empty string.")
     if "include_disabled" in report:
         report["include_disabled"] = coerce_bool(
             report["include_disabled"], "report.include_disabled"

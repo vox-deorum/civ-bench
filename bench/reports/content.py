@@ -72,7 +72,34 @@ def render_footer_html(footer: str) -> str:
     return f'<footer class="report-footer">\n{content}</footer>'
 
 
-def render_citation_html() -> str:
-    """Render the paper citation as a copyable BibTeX code block."""
-    content = MarkdownIt("commonmark", {"html": False}).render(CITATION_MARKDOWN)
+def render_citation_markdown(benchmark_citation: dict[str, str] | None = None) -> str:
+    """Render the paper and optional benchmark results as BibTeX entries."""
+    if benchmark_citation is None:
+        return CITATION_MARKDOWN
+    title = _bibtex_text(benchmark_citation["title"])
+    url = _bibtex_text(benchmark_citation["url"])
+    benchmark_bibtex = (
+        "@misc{civbench_results,\n"
+        f"  title={{{title}}},\n"
+        f"  url={{{url}}}\n"
+        "}"
+    )
+    return (
+        f"## Citation\n\n### Paper\n\n```bibtex\n{CITATION_BIBTEX}\n```\n\n"
+        f"### Benchmark results\n\n```bibtex\n{benchmark_bibtex}\n```"
+    )
+
+
+def _bibtex_text(value: str) -> str:
+    """Keep configured text within its BibTeX field and Markdown fence."""
+    value = " ".join(value.split())
+    escapes = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}"}
+    return "".join(escapes.get(char, char) for char in value)
+
+
+def render_citation_html(benchmark_citation: dict[str, str] | None = None) -> str:
+    """Render the citations as copyable BibTeX code blocks."""
+    content = MarkdownIt("commonmark", {"html": False}).render(
+        render_citation_markdown(benchmark_citation)
+    )
     return f'<section aria-label="Citation">\n{content}</section>'

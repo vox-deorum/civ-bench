@@ -413,6 +413,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "output_root": cfg.output.resolved_root,
         "description": cfg.description,
         "footer": report_cfg.get("footer"),
+        "benchmark_citation": report_cfg.get("benchmark_citation"),
         "overview_section_ids": overview_ids,
         "formats": formats,
     }

@@ -106,6 +106,7 @@ class ReportDocument:
     overview_sections: list[Section] = field(default_factory=list)
     controlled_seed: Optional["ControlledSeedDocument"] = None
     footer: str = REPORT_DEFAULT_FOOTER
+    benchmark_citation: dict[str, str] | None = None
 
     @property
     def n_sections(self) -> int:

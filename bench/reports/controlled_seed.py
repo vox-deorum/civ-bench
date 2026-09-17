@@ -146,6 +146,27 @@ def _esc(text) -> str:
     return _html.escape(str(text))
 
 
+def _strategist_label(doc: ControlledSeedDocument, strategist: str) -> str:
+    return "VPAI" if strategist == doc.vanilla_label else strategist
+
+
+def _vpai_tooltip(doc: ControlledSeedDocument, strategist: str, condition: str) -> str:
+    if strategist != doc.vanilla_label:
+        return ""
+    if condition == doc.vanilla_label:
+        return "VPAI self-play: all players use VPAI."
+    return (
+        "VPAI in games with LLM players. Performance may differ from self-play "
+        "because LLMs can counter VPAI's playstyle."
+    )
+
+
+def _label_html(label: str, tooltip: str) -> str:
+    if tooltip:
+        return f'<span tabindex="0" data-tip="{_esc(tooltip)}">{_esc(label)}</span>'
+    return _esc(label)
+
+
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     value = value.lstrip("#")
     return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
@@ -393,7 +414,7 @@ def _heatmap(
         parts.append('<tbody class="vanilla-body">')
         parts.append(
             f'<tr class="vanilla-row"><th scope="row" class="row-label">'
-            "VPAI</th>"
+            f'{_label_html("VPAI", _vpai_tooltip(doc, vanilla, vanilla))}</th>'
         )
         if kind == "strength":
             parts.append(avg_cell(vanilla, vanilla))
@@ -402,9 +423,10 @@ def _heatmap(
 
     parts.append("<tbody>")
     for strategist, condition in combos:
-        row_label = f"{strategist} | {condition}"
+        row_label = f"{_strategist_label(doc, strategist)} | {condition}"
+        tooltip = _vpai_tooltip(doc, strategist, condition)
         parts.append(
-            f'<tr><th scope="row" class="row-label">{_esc(row_label)}</th>'
+            f'<tr><th scope="row" class="row-label">{_label_html(row_label, tooltip)}</th>'
         )
         if kind == "strength":
             parts.append(avg_cell(strategist, condition))
@@ -543,7 +565,8 @@ def _page_series(
             series[key] = {
                 "strategist": key[0],
                 "condition": key[1],
-                "label": "VPAI" if is_vanilla else f"{key[0]} · {key[1]}",
+                "label": "VPAI" if is_vanilla else f"{_strategist_label(doc, key[0])} · {key[1]}",
+                "tooltip": _vpai_tooltip(doc, *key),
                 "vanilla": is_vanilla,
                 "color": color,
                 "dash": _DASH_PATTERNS[condition_rank.get(key[1], 0) % len(_DASH_PATTERNS)],
@@ -658,10 +681,12 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
         parts.append(f'<th scope="col"{title_attr}>{_esc(header)}</th>')
     parts.append("</tr></thead><tbody>")
     for row in _comparison_rows(doc, seed, player_id):
-        is_vanilla = str(row["strategist"]) == vanilla
+        strategist, condition = str(row["strategist"]), str(row["condition"])
+        is_vanilla = (strategist, condition) == (vanilla, vanilla)
+        tooltip = _vpai_tooltip(doc, strategist, condition)
         row_open = '<tr class="vanilla-row">' if is_vanilla else "<tr>"
         parts.append(row_open)
-        parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['strategist'])}</td>")
+        parts.append(f"<td>{_label_html(_strategist_label(doc, strategist), tooltip)}</td>")
         parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['condition'])}</td>")
         parts.append(f"<td>{int(row['run_count'])}</td>")
         parts.append(f"<td>{_esc(_fmt_probability(row['mean_weighted_victory_probability']))}</td>")
@@ -759,10 +784,12 @@ def _render_detail(
         )
         parts.append('<span class="controls-label">Strategists</span>')
         for name in strategists:
+            tooltip = _vpai_tooltip(doc, name, "")
+            tip_attr = f' data-tip="{_esc(tooltip)}"' if tooltip else ""
             parts.append(
-                '<label class="strategist-check">'
+                f'<label class="strategist-check"{tip_attr}>'
                 f'<input type="checkbox" value="{_esc(name)}" checked> '
-                f"{_esc(name)}</label>"
+                f"{_esc(_strategist_label(doc, name))}</label>"
             )
         parts.append("</div>")
     parts.append(
@@ -1181,6 +1208,10 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
         legendHost.textContent = "";
         series.forEach(function (entry) {
           var item = document.createElement("li");
+          if (entry.tooltip) {
+            item.setAttribute("data-tip", entry.tooltip);
+            item.setAttribute("tabindex", "0");
+          }
           if (entry.vanilla) {
             item.className = "vanilla";
           }

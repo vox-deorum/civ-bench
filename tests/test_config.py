@@ -305,6 +305,39 @@ def test_report_footer_rejects_non_text(dev_spec, write_spec, footer):
         load_config(write_spec(dev_spec))
 
 
+@pytest.mark.parametrize("citation", [None, {"title": "CivBench VP 5.2.7", "url": "https://example.com/benchmark"}])
+def test_report_benchmark_citation_loads(dev_spec, write_spec, citation):
+    dev_spec["report"]["benchmark_citation"] = citation
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["benchmark_citation"] == citation
+
+
+def test_report_benchmark_citation_may_be_omitted(dev_spec, write_spec):
+    dev_spec["report"].pop("benchmark_citation", None)
+    cfg = load_config(write_spec(dev_spec))
+    assert "benchmark_citation" not in cfg.report
+
+
+@pytest.mark.parametrize(
+    "citation",
+    [
+        "CivBench VP 5.2.7",
+        [],
+        {"title": "CivBench VP 5.2.7", "url": "https://example.com", "extra": "bad"},
+        {"title": "CivBench VP 5.2.7"},
+        {"url": "https://example.com"},
+        {"title": 7, "url": "https://example.com"},
+        {"title": "CivBench VP 5.2.7", "url": False},
+        {"title": "  ", "url": "https://example.com"},
+        {"title": "CivBench VP 5.2.7", "url": " \n "},
+    ],
+)
+def test_report_benchmark_citation_rejects_invalid_values(dev_spec, write_spec, citation):
+    dev_spec["report"]["benchmark_citation"] = citation
+    with pytest.raises(ConfigError, match=r"report\.benchmark_citation"):
+        load_config(write_spec(dev_spec))
+
+
 def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
     """data.extract.auto_fix is an accepted bool (coerced from a string like the siblings)."""
     dev_spec["data"]["extract"]["auto_fix"] = "FALSE"
