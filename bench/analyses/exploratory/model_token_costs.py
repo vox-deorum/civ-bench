@@ -145,7 +145,7 @@ class ExploratoryModelTokenCosts(Analysis):
         else:
             cost_group = "player and model combinations" if by_player_type else "models"
             summary = (
-                f"Estimated spend totals **{total:.2f} {currency.upper()}** for complete usage records; "
+                f"Estimated spend totals **{total:.2f} {currency.upper()}**; "
                 f"average game costs across {cost_group} range from **{costs.min():.2f}** to "
                 f"**{costs.max():.2f} {currency.upper()}**."
             )

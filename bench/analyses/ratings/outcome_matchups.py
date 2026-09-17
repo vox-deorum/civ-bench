@@ -212,10 +212,9 @@ class RatingsOutcomeMatchups(Analysis):
                 else "averaged over these player appearances"
             )
             summary = (
-                f"{identity} has the highest observed per-player matchup victory rate: "
-                f"**{pairs.iloc[0]:.1%}** (**{wins}/{n}** wins per player appearance). "
-                f"The expected per-player victory rate with equal chances is "
-                f"**{expected:.1%}** {baseline_context}."
+                f"{identity} has the highest per-player matchup victory rate: "
+                f"**{pairs.iloc[0]:.1%}** (**{wins}/{n}**; expected "
+                f"**{expected:.1%}** {baseline_context}.)"
             )
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 

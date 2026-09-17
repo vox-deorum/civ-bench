@@ -172,7 +172,7 @@ class PerformanceExperimentCompleteness(Analysis):
         n_experiments = int(len(comp))
         coverage_pct = (100.0 * present_games / required_games) if required_games else 0.0
         summary = (
-            f"Controlled experiment coverage: **{present_games}/{required_games}** planned games "
+            f"**{present_games}/{required_games}** planned games "
             f"(**{coverage_pct:.1f}%**) are present across **{n_experiments}** experiment(s). "
             f"**{complete_experiments}/{n_experiments}** experiment(s) have every planned game."
         )
