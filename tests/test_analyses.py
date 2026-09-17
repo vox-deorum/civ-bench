@@ -1058,6 +1058,24 @@ def test_usage_efficiency_summary_ranks_residuals_and_uses_actual_baseline(env):
     assert table["efficiency_elo_output"].isna().all()
 
 
+@pytest.mark.parametrize("null_rating", [1100, np.nan, np.inf, None])
+def test_usage_efficiency_reads_null_baseline_without_null_tokens(env, null_rating):
+    _write_ratings_artifact(env, [
+        {"player_type": "Vanilla", "elo": 1450},
+        {"player_type": "GPT-OSS-120B", "elo": 1600},
+        {"player_type": "Kimi-K2.5", "elo": 1700},
+    ] + ([{"player_type": "Null", "elo": null_rating}] if null_rating is not None else []))
+
+    result = env(
+        "performance.usage_efficiency", {},
+        {"tables": ["tokens"], "analyses": ["bt_main"]},
+    )
+
+    expected = null_rating if null_rating is not None and np.isfinite(null_rating) else None
+    assert result.metadata["null_baseline_elo"] == expected
+    assert "Null" not in set(pd.read_csv(result.table_paths["usage"])["player_type"])
+
+
 @pytest.mark.parametrize("metric,column", [
     ("cost", "avg_cost_per_player_game"), ("input", "avg_input"), ("output", "avg_output"),
 ])
@@ -1097,7 +1115,8 @@ def test_usage_efficiency_does_not_rank_underdetermined_fit(costs):
 
 
 @pytest.mark.parametrize("log_x", [False, True])
-def test_usage_chart_switches_points_fits_and_tooltips(env, log_x):
+@pytest.mark.parametrize("null_baseline_elo", [None, 1100])
+def test_usage_chart_switches_points_fits_and_tooltips(env, log_x, null_baseline_elo):
     from bench.analyses.base import AnalysisContext
     from bench.analyses.performance.usage_efficiency import PerformanceUsageEfficiency, fit_usage_skill
     from bench.plotting.pairing import PairingSpec
@@ -1118,8 +1137,14 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x):
                           out_dir=Path(env.cfg.output.root))
     figure = PerformanceUsageEfficiency._plot(
         table, ctx, PairingSpec((), "base", "Base"), "usd", log_x, True, fits, 1450, "Vanilla",
+        null_baseline_elo,
     )
     assert figure.layout.shapes[0].y0 == 1450
+    if null_baseline_elo is None:
+        assert len(figure.layout.shapes) == 1
+    else:
+        assert len(figure.layout.shapes) == 2
+        assert figure.layout.shapes[1].y0 == null_baseline_elo
     assert figure.layout.xaxis.type == ("log" if log_x else "linear")
     buttons = figure.layout.updatemenus[0].buttons
     assert [button.label for button in buttons] == ["Cost", "Input tokens", "Output tokens"]
@@ -1139,6 +1164,14 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x):
         assert good.customdata[0][3] == "1,450 (VPAI)"
         assert all(trace.hoverinfo == "none" and trace.error_y.array is None for trace in markers)
         assert any("VPAI baseline: 1,450 Elo" in annotation["text"] for annotation in button.args[1]["annotations"])
+        null_annotations = [
+            annotation["text"] for annotation in button.args[1]["annotations"]
+            if "Null baseline" in annotation["text"]
+        ]
+        if null_baseline_elo is None:
+            assert not null_annotations
+        else:
+            assert null_annotations == ["<b>Null baseline: 1,100 Elo (lower bound)</b>"]
         assert any(trace.name == "Free" for trace in markers) == (not log_x or metric == "input")
     assert fits["cost"]["slope"] != fits["input"]["slope"]
 

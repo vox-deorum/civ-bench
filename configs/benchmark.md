@@ -718,7 +718,11 @@ over the observations used in each fit, and is saved as `r_squared` in that fit'
 metadata. Constant Elo has no defined R² and displays `N/A`. A neutral table
 tooltip highlights Elo, baseline Elo, and Elo above the selected fit. The baseline
 line uses Vanilla's rating, labeled VPAI, when available, otherwise the 1500 Elo
-reference. `annotate:true` labels
+reference. When the ratings table contains a finite rating for the configured
+Null identity, a second line labeled `Null baseline` marks the lower-bound
+reference in all three resource views. Its rating is saved as `null_baseline_elo`
+in metadata, or null when unavailable. The line does not clip lower-rated points
+or contribute an observation to the fitted curve. `annotate:true` labels
 the identities with the highest and lowest residuals for the selected metric.
 The summary names the cost-efficiency extremes. Fits are descriptive comparisons
 within the displayed cohort, not predictions of gains from spending more.

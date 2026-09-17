@@ -103,11 +103,18 @@ class PerformanceUsageEfficiency(Analysis):
         ]
         baseline_elo = float(baseline_rows.iloc[0]["elo"]) if not baseline_rows.empty else 1500.0
         baseline_name = ctx.catalog.vanilla_label if not baseline_rows.empty else "Elo reference"
+        null_rows = ratings[
+            (ratings["player_type"] == ctx.catalog.null_label) & np.isfinite(ratings["elo"])
+        ]
+        null_baseline_elo = float(null_rows.iloc[0]["elo"]) if not null_rows.empty else None
         currency = str(self.params.get("currency", "usd"))
         log_x = bool(self.params.get("log_x", True))
         annotate = bool(self.params.get("annotate", False))
         figures = plot_usage_figures(nonbaseline, ctx, ratings, currency=currency)
-        fig = self._plot(table, ctx, spec, currency, log_x, annotate, fits, baseline_elo, baseline_name)
+        fig = self._plot(
+            table, ctx, spec, currency, log_x, annotate, fits,
+            baseline_elo, baseline_name, null_baseline_elo,
+        )
         if fig is not None:
             figures["usage_vs_rating"] = fig
 
@@ -137,6 +144,7 @@ class PerformanceUsageEfficiency(Analysis):
             "efficiency_metric": "elo - expected_elo",
             "usage_skill_equation": "expected_elo = intercept + slope * log10(average_usage)",
             "usage_skill_fits": fits, "baseline_elo": baseline_elo, "baseline_name": baseline_name,
+            "null_baseline_elo": null_baseline_elo,
         }
         return AnalysisResult(
             tables={"usage": usage, "usage_vs_rating": table}, figures=figures,
@@ -144,13 +152,17 @@ class PerformanceUsageEfficiency(Analysis):
         )
 
     @staticmethod
-    def _plot(table, ctx, spec, currency, log_x, annotate, fits, baseline_elo, baseline_name):
+    def _plot(
+        table, ctx, spec, currency, log_x, annotate, fits,
+        baseline_elo, baseline_name, null_baseline_elo=None,
+    ):
         import plotly.graph_objects as go
 
         from bench.plotting.styles import get_player_color
 
         if table.empty:
             return None
+        has_null_baseline = null_baseline_elo is not None and np.isfinite(null_baseline_elo)
         baseline_label = "VPAI" if baseline_name == ctx.catalog.vanilla_label else baseline_name
         fig = go.Figure()
         symbols = ["circle", "diamond-open", "square-open", "triangle-up-open", "cross"]
@@ -177,6 +189,13 @@ class PerformanceUsageEfficiency(Analysis):
                 "yanchor": "top", "text": f"<b>{escape(baseline_label)} baseline: {baseline_elo:,.0f} Elo</b>",
                 "showarrow": False, "bgcolor": "white", "font": {"color": "#334155"},
             }]
+            if has_null_baseline:
+                annotations.append({
+                    "x": 1, "y": null_baseline_elo, "xref": "paper", "yref": "y", "xanchor": "right",
+                    "yanchor": "bottom",
+                    "text": f"<b>Null baseline: {null_baseline_elo:,.0f} Elo (lower bound)</b>",
+                    "showarrow": False, "bgcolor": "white", "font": {"color": "#64748b"},
+                })
             fit = fits[metric]
             equation = "Fit needs 3 rated identities with positive values and 2 distinct values."
             if fit is not None:
@@ -247,6 +266,10 @@ class PerformanceUsageEfficiency(Analysis):
         # A paper-width reference is retained even when the default cost view is empty.
         fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=baseline_elo, y1=baseline_elo,
                       line={"dash": "dash", "color": "#334155", "width": 2})
+        if has_null_baseline:
+            fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                          y0=null_baseline_elo, y1=null_baseline_elo,
+                          line={"dash": "dashdot", "color": "#64748b", "width": 2})
         buttons = [{
             "label": label, "method": "update",
             "args": [{"visible": [value == metric for value in trace_metrics]}, {
