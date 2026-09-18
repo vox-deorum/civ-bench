@@ -27,6 +27,8 @@ from typing import Optional
 
 import pandas as pd
 
+from bench.config.filters import resolve_filter_spec
+
 from ..config import RunConfig
 from ..config import schema as S
 from ..config.analysis_metadata import analysis_report_defaults
@@ -384,6 +386,40 @@ def _copy_asset(
 
 
 # ── entry point ────────────────────────────────────────────────────────────────
+def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> dict:
+    """Resolve model and condition labels from the configured catalogs."""
+    if not any(context.has_table(s.id, "condition_progress") for s in context.sections):
+        return {}
+    rating_sections = [s for s in context.sections if context.has_table(s.id, "ratings")]
+    if not rating_sections:
+        return {}
+    from bench.catalog import Catalog
+
+    catalog = Catalog.from_run_config(cfg)
+    stages = {stage.id: stage for stage in cfg.analyses}
+    labels = {}
+    for section in rating_sections:
+        presentation = dict(cfg.presentation.get("condition_pairing") or {})
+        override = (stages[section.id].raw.get("params") or {}).get("condition_pairing")
+        if isinstance(override, dict):
+            presentation.update(override)
+        suffixes = presentation.get("suffixes")
+        base_label = presentation.get("base_label", "Base")
+        ratings = context.load_table(section.id, "ratings")
+        if "player_type" not in ratings:
+            continue
+        labels[section.id] = {}
+        for identity in ratings["player_type"].dropna().astype(str).unique():
+            model, suffix = catalog.split_condition_suffix(identity, suffixes)
+            labels[section.id][identity] = {
+                "model": model,
+                "condition": suffix,
+                "label": suffix.lstrip("-") if suffix else base_label,
+                "baseline": identity in {catalog.vanilla_label, catalog.null_label},
+            }
+    return labels
+
+
 def run_report(cfg: RunConfig) -> ReportRunResult:
     """Render the report for ``cfg`` from the produced analysis artifacts."""
     report_cfg = cfg.report or {}
@@ -428,6 +464,9 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "benchmark_citation": report_cfg.get("benchmark_citation"),
         "overview_section_ids": overview_ids,
         "formats": formats,
+        "condition_completeness_filter": resolve_filter_spec(
+            cfg.data.get("filter"), cfg.filters, "data.filter",
+        ).get("min_condition_completeness") is not None,
     }
     context = ReportBuildContext(meta=meta)
     try:
@@ -443,6 +482,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
             for sid in section_ids
         ]
         context.sections = sections
+        context.meta["rating_labels"] = _announcement_rating_labels(cfg, context)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

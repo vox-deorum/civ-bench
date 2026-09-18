@@ -28,7 +28,7 @@
 
 ## Done
 
-`civ-bench run --config configs/benchmark.dev.json` (a local load-only config copied from `benchmark.pretrained.template.json`) produces the report under the resolved output root: `reports-dev/civbench-dev/` (`report.md` + `report.html` + `assets/`) end-to-end from the copied pre-trained estimators, **no training invoked**. This is the milestone: the whole pipeline works on pre-trained estimators. Verified on real data (15 sections across the five families).
+`civ-bench run --config configs/benchmark.dev.json` (a local load-only config copied from `benchmark.pretrained.template.json`) produces the report under the resolved output root: `reports-dev/civbench-dev/` (`report.md` + `index.html` + `assets/`) end-to-end from the copied pre-trained estimators, **no training invoked**. This is the milestone: the whole pipeline works on pre-trained estimators. Verified on real data (15 sections across the five families).
 
 ## Verification
 

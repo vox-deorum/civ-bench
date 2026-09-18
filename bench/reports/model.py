@@ -89,6 +89,16 @@ class FamilyGroup:
 
 
 @dataclass
+class Announcement:
+    """A compact front-page update with inline Markdown and an optional ISO date."""
+
+    kind: str
+    title: str
+    text: str
+    date: str | None = None
+
+
+@dataclass
 class ReportDocument:
     """The full report: a title, run provenance, and grouped sections.
 
@@ -111,6 +121,7 @@ class ReportDocument:
     controlled_seed: Optional["ControlledSeedDocument"] = None
     footer: str = REPORT_DEFAULT_FOOTER
     benchmark_citation: dict[str, str] | None = None
+    announcements: list[Announcement] = field(default_factory=list)
 
     @property
     def n_sections(self) -> int:

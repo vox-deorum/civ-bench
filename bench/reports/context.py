@@ -51,6 +51,10 @@ class ReportBuildContext:
             f"{[s.id for s in self.sections]}."
         )
 
+    def has_table(self, stage_id: str, name: str) -> bool:
+        """Whether this build has a saved table available for a section."""
+        return (stage_id, name) in self._table_sources
+
     def load_table(self, stage_id: str, name: str) -> pd.DataFrame:
         """Load the full named CSV artifact of one selected analysis section.
 

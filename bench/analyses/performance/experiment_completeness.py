@@ -9,16 +9,122 @@ from __future__ import annotations
 
 import pandas as pd
 
+from bench.data.loading import drop_problem_games
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .seating import SEATING_INDEX_COLUMNS, generate_seating_files
-from .strength_panel import build_experiment_completeness
+from .strength_panel import (
+    _controlled_panel,
+    _reference_slots,
+    build_experiment_completeness,
+)
 
 
 DECISION_TURN_FAILURE_COLUMNS = [
     "experiment", "game_id", "player_id", "player_type", "valid_turn_count",
     "failed_turn_count", "failure_pct", "failed_turns",
 ]
+CONDITION_PROGRESS_COLUMNS = [
+    "experiment", "player_type", "completed_games", "required_games",
+    "completed_at",
+]
+
+
+def build_condition_progress(
+    panel: pd.DataFrame,
+    games: pd.DataFrame | None,
+    completeness: pd.DataFrame,
+    baseline_experiment: str | None,
+    excluded_game_ids,
+    vanilla_label: str,
+    null_label: str,
+) -> pd.DataFrame:
+    """Return controlled condition progress and completion timestamps.
+
+    Game counts deliberately come from the experiment completeness table. A
+    repeated game can occupy only one reference slot, so ``present_games`` is
+    not a completion count. Completion time is experiment-wide: it uses the
+    earliest valid accepted game in each reference slot, which keeps later
+    reruns from moving it when player identities vary by slot.
+    """
+    controlled = _controlled_panel(panel)
+    required_columns = {"experiment", "player_type"}
+    if controlled.empty or not required_columns <= set(controlled.columns):
+        return pd.DataFrame(columns=CONDITION_PROGRESS_COLUMNS)
+    if completeness.empty or not {
+        "experiment", "required_games", "missing_games",
+    } <= set(completeness.columns):
+        return pd.DataFrame(columns=CONDITION_PROGRESS_COLUMNS)
+
+    reference_slots = _reference_slots(controlled, baseline_experiment)
+    if not reference_slots:
+        return pd.DataFrame(columns=CONDITION_PROGRESS_COLUMNS)
+
+    timestamps: dict[str, pd.Timestamp] = {}
+    if games is not None and {"game_id", "timestamp"} <= set(games.columns):
+        time_rows = games[["game_id", "timestamp"]].copy()
+        time_rows["game_id"] = time_rows["game_id"].astype(str)
+        timestamp_ms = pd.to_numeric(time_rows["timestamp"], errors="coerce")
+        timestamp_ms = timestamp_ms.where(
+            timestamp_ms.between(-9_223_372_036_854, 9_223_372_036_854)
+        )
+        time_rows["timestamp"] = pd.to_datetime(
+            timestamp_ms,
+            unit="ms",
+            utc=True,
+            errors="coerce",
+        )
+        timestamps = (
+            time_rows.dropna(subset=["timestamp"])
+            .groupby("game_id", sort=False)["timestamp"]
+            .min()
+            .to_dict()
+        )
+
+    comp_by_experiment = completeness.set_index("experiment")
+    excluded = {str(game_id) for game_id in (excluded_game_ids or ())}
+    baseline_labels = {str(vanilla_label), str(null_label)}
+    rows: list[dict] = []
+    condition_rows = controlled[
+        ~controlled["player_type"].astype(str).isin(baseline_labels)
+    ].copy()
+
+    for (experiment, player_type), _condition in condition_rows.groupby(
+        ["experiment", "player_type"], sort=True
+    ):
+        if experiment not in comp_by_experiment.index:
+            continue
+        comp = comp_by_experiment.loc[experiment]
+        required_games = int(comp["required_games"])
+        completed_games = required_games - int(comp["missing_games"])
+        completed_at = ""
+
+        if completed_games == required_games:
+            experiment_rows = controlled[controlled["experiment"] == experiment]
+            accepted = drop_problem_games(experiment_rows, excluded)
+            slot_times: list[pd.Timestamp] = []
+            for seed, rotation in reference_slots:
+                slot_ids = accepted.loc[
+                    (accepted["seed"] == seed)
+                    & (accepted["seating_rotation"] == rotation),
+                    "game_id",
+                ].astype(str).unique()
+                valid_times = [timestamps[game_id] for game_id in slot_ids if game_id in timestamps]
+                if not valid_times:
+                    break
+                slot_times.append(min(valid_times))
+            if len(slot_times) == len(reference_slots):
+                completed_at = max(slot_times).isoformat().replace("+00:00", "Z")
+
+        rows.append({
+            "experiment": experiment,
+            "player_type": player_type,
+            "completed_games": int(completed_games),
+            "required_games": int(required_games),
+            "completed_at": completed_at,
+        })
+
+    return pd.DataFrame(rows, columns=CONDITION_PROGRESS_COLUMNS)
 
 
 def _failed_turn_list(values: pd.Series) -> str:
@@ -164,6 +270,15 @@ class PerformanceExperimentCompleteness(Analysis):
                 summary="No controlled experiment coverage is available.",
                 metadata={"controlled_rows_available": False},
             )
+        tables["condition_progress"] = build_condition_progress(
+            panel,
+            games,
+            tables["experiment_completeness"],
+            baseline_experiment,
+            excluded_ids,
+            ctx.catalog.vanilla_label,
+            ctx.catalog.null_label,
+        )
 
         tokens = self._load_tokens(ctx)
         if tokens is not None:
@@ -177,7 +292,8 @@ class PerformanceExperimentCompleteness(Analysis):
         out = {}
         for name, table in tables.items():
             if name in {
-                "experiment_completeness", "repeated_games", "decision_turn_failures"
+                "experiment_completeness", "repeated_games", "decision_turn_failures",
+                "condition_progress",
             } or not table.empty:
                 out[name] = table
 

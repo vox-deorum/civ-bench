@@ -6,13 +6,14 @@ a ``<table>`` in HTML from the *same* DataFrame, never two hand-written variants
 Every cell is formatted to a display string once (:func:`_display_frame`) before
 either renderer touches it, so the two formats show byte-identical content;
 tabulate and pandas otherwise diverge on float precision and missing-value text.
-Output is deterministic (no timestamps), so a re-render of unchanged artifacts is
+Output uses only saved dates, so a re-render of unchanged artifacts is
 byte-stable (AGENTS.md determinism invariant).
 """
 
 from __future__ import annotations
 
 import html as _html
+from datetime import date
 
 from bench.reports.assets import REPORT_HELP_JS
 from bench.reports.content import (
@@ -105,6 +106,26 @@ def _section_details(section: Section) -> str:
     )))
 
 
+def _announcement_date(value: str) -> str:
+    recorded = date.fromisoformat(value)
+    return f"{recorded:%b} {recorded.day}, {recorded.year}"
+
+
+def _render_announcements(doc: ReportDocument) -> list[str]:
+    parts = []
+    for announcement in doc.announcements:
+        kind = _html.escape(announcement.kind, quote=True)
+        parts.append(f'<aside class="announcement" data-announcement="{kind}">')
+        parts.append(f'<p class="eyebrow">{_html.escape(announcement.title)}')
+        if announcement.date:
+            parts.append(
+                f' &middot; <time datetime="{_html.escape(announcement.date, quote=True)}">'
+                f'{_announcement_date(announcement.date)}</time>'
+            )
+        parts.append(f'</p><p>{_md_inline_to_html(announcement.text)}</p></aside>')
+    return parts
+
+
 # ── markdown ──────────────────────────────────────────────────────────────────
 def render_markdown(doc: ReportDocument) -> str:
     anchors = _build_anchors(doc)
@@ -117,6 +138,12 @@ def render_markdown(doc: ReportDocument) -> str:
     if doc.intro:
         lines.append(doc.intro)
         lines.append("")
+
+    for announcement in doc.announcements:
+        heading = announcement.title
+        if announcement.date:
+            heading += f" · {_announcement_date(announcement.date)}"
+        lines.extend([f"> **{heading}**", ">", f"> {announcement.text}", ""])
 
     if doc.overview_sections:
         family_for = {
@@ -293,6 +320,9 @@ h3 { margin-top: 1.75rem; }
 .overview-card { border: 1px solid #d9e0e8; border-radius: .55rem; padding: 1rem; background: white; box-shadow: 0 1px 2px rgb(0 0 0 / 6%); }
 .overview-card h2 { margin: 0 0 .25rem; border: 0; padding: 0; font-size: 1.1rem; }
 .overview-card p { margin: .45rem 0; }
+.announcement { margin-top: 1rem; border-left: 4px solid #377ca8; border-radius: .3rem; padding: .65rem 1rem; background: #eef5fa; overflow-wrap: anywhere; }
+.announcement[data-announcement="testing"] { border-left-color: #b08732; background: #faf6eb; }
+.announcement p { margin: .25rem 0; }
 .module { color: #445164; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .meta, .caption { color: #687486; font-size: .88rem; }
 .report-help { display: inline-block; position: relative; margin-left: .35rem; vertical-align: middle; font-size: .85rem; font-weight: 400; line-height: 1.5; }
@@ -386,12 +416,12 @@ def _render_navigation(
     annex = _annex_group(doc)
     parts = ['<aside class="sidebar">']
     parts.append(
-        f'<a class="site-title" href="{_html.escape(prefix)}report.html">'
+        f'<a class="site-title" href="{_html.escape(prefix)}index.html">'
         f"{_html.escape(doc.title)}</a>"
     )
     parts.append('<nav aria-label="Report navigation"><ul>')
     current = ' aria-current="page"' if active == "report" else ""
-    parts.append(f'<li><a href="{_html.escape(prefix)}report.html"{current}>Overview</a></li>')
+    parts.append(f'<li><a href="{_html.escape(prefix)}index.html"{current}>Overview</a></li>')
     for group in doc.groups:
         filename = filenames[id(group)]
         current = ' aria-current="page"' if active == group.key else ""
@@ -452,6 +482,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append(f'<p class="caption">{_html.escape(doc.description)}</p>')
     if doc.intro:
         parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
+    parts.extend(_render_announcements(doc))
     parts.append('<section aria-labelledby="overview-heading">')
     parts.append('<h2 id="overview-heading">Overview</h2>')
     parts.append('<div class="overview-grid">')
@@ -473,7 +504,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     parts.append(render_citation_html(doc.benchmark_citation))
     parts.append(render_footer_html(doc.footer))
     parts.append("</main></body></html>")
-    pages["report.html"] = "\n".join(parts) + "\n"
+    pages["index.html"] = "\n".join(parts) + "\n"
 
     for group in doc.groups:
         if group is annex:
@@ -502,7 +533,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
 
 def render_html(doc: ReportDocument) -> str:
     """Compatibility wrapper returning the generated overview page."""
-    return render_html_site(doc)["report.html"]
+    return render_html_site(doc)["index.html"]
 
 
 def _render_section_html(section: Section, parts: list[str], anchor: str) -> None:

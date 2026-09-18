@@ -531,7 +531,7 @@ def test_footer_on_controlled_seed_pages(env, footer):
 def test_controlled_chapter_rides_along_with_the_family_report(rendered):
     env, result, out = rendered
     expected = {
-        "report.md", "report.html",
+        "report.md", "index.html",
         "controlled-seed/index.html",
         "controlled-seed/seed-1-player-0.html", "controlled-seed/seed-1-player-1.html",
         "controlled-seed/seed-2-player-0.html", "controlled-seed/seed-2-player-1.html",
@@ -557,7 +557,7 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
     markdown = _read(out, "report.md")
     assert "## " in markdown
     assert "## Overview" in markdown
-    overview_page = _read(out, "report.html")
+    overview_page = _read(out, "index.html")
     assert '<a href="controlled-seed/index.html">' in overview_page
 
 
@@ -565,12 +565,12 @@ def test_chapter_pages_carry_the_site_sidebar(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
     # Sidebar links are rebased for pages inside the chapter folder.
-    assert '<a href="../report.html">Overview</a>' in index
+    assert '<a href="../index.html">Overview</a>' in index
     assert 'href="../controlled-seed/index.html#seed-1"' in index
     assert 'aria-current="page">' in index
     assert "<h1>" in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
-    assert '<a href="../report.html">Overview</a>' in detail
+    assert '<a href="../index.html">Overview</a>' in detail
     assert '<link rel="stylesheet" href="../assets/report.css">' in detail
     # The shared util loads before the page script on every chapter page.
     assert '<script src="../assets/report-common.js" defer></script>' in detail
@@ -582,7 +582,7 @@ def test_chapter_pages_carry_the_site_sidebar(rendered):
     assert 'class="help-text" role="tooltip" id="chapter-help">' in index
     assert "Synthetic dev spec for the test suite" in index
     # The family report's sidebar points into the chapter folder.
-    overview_page = _read(out, "report.html")
+    overview_page = _read(out, "index.html")
     assert 'href="controlled-seed/index.html#seed-1"' in overview_page
     assert 'href="controlled-seed/index.html#seed-2"' in overview_page
 
@@ -795,7 +795,7 @@ def test_omitted_formats_default_to_md_and_html(env):
     out = report_dir(env.cfg)
     assert result.formats == ["md", "html"]
     assert (out / "report.md").exists()
-    assert (out / "report.html").exists()
+    assert (out / "index.html").exists()
     assert (out / "controlled-seed" / "index.html").exists()
 
 
@@ -829,7 +829,7 @@ def test_controlled_chapter_replaces_the_performance_section(
     assert not (out / "performance.html").exists()
     prediction = _read(out, "prediction.html")
     assert "controlled_seed" not in prediction
-    for page in ("report.html", "prediction.html", "controlled-seed/index.html"):
+    for page in ("index.html", "prediction.html", "controlled-seed/index.html"):
         html = _read(out, page)
         assert (html.index(">Matched Maps</a>") < html.index(">Prediction</a>")) == matched_first
     markdown = _read(out, "report.md")

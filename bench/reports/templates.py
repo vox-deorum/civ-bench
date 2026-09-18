@@ -19,6 +19,7 @@ heatmap pages under ``controlled-seed/``.
 
 from __future__ import annotations
 
+from bench.reports.announcements import build_announcements
 from .context import ReportBuildContext
 from bench.reports.content import resolve_footer
 from .controlled_seed import (
@@ -182,4 +183,5 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         groups=groups,
         overview_sections=overview_sections,
         controlled_seed=controlled,
+        announcements=build_announcements(ctx),
     )

@@ -384,7 +384,7 @@ Example: put Matched Maps first and show two selected overview cards. This assum
 | Artifact name not emitted by the analysis | Warn and skip that artifact |
 | Analysis `name` | Override the section's display heading |
 | Analysis `description` | Override the description in its heading tooltip |
-| Top-level `description` | Display under the title in `report.html` and `report.md` |
+| Top-level `description` | Display under the title in `index.html` and `report.md` |
 
 Artifact names come from the analysis's saved `result.json`. Hidden inline artifacts remain downloadable.
 
@@ -392,7 +392,7 @@ Artifact names come from the analysis's saved `result.json`. Hidden inline artif
 
 | Output | Contents |
 | --- | --- |
-| `report.html` | Overview cards and navigation |
+| `index.html` | Overview cards and navigation |
 | `report.md` | Combined Markdown report |
 | `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html` | One page per represented family |
 | `controlled-seed/index.html` | Matched Maps heatmaps by seed |
