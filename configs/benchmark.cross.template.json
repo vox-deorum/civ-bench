@@ -231,6 +231,13 @@
       "params": { "aggregate": "mean", "by": "player_type" }
     },
     {
+      "id": "game_log",
+      "module": "performance.game_log",
+      "enabled": true,
+      "uses": {},
+      "params": {}
+    },
+    {
       "id": "perf_usage_efficiency",
       "module": "performance.usage_efficiency",
       "enabled": true,
@@ -247,6 +254,7 @@
     "section_overrides": {},
     "title": null,
     "footer": null,
-    "include_disabled": false
+    "include_disabled": false,
+    "replay": null
   }
 }

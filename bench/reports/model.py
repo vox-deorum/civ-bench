@@ -122,6 +122,7 @@ class ReportDocument:
     footer: str = REPORT_DEFAULT_FOOTER
     benchmark_citation: dict[str, str] | None = None
     announcements: list[Announcement] = field(default_factory=list)
+    game_log: Optional["GameLogDocument"] = None
 
     @property
     def n_sections(self) -> int:
@@ -154,6 +155,7 @@ class ControlledSeedDocument:
     index_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     downloads: list[Download] = field(default_factory=list)
     footer: str = REPORT_DEFAULT_FOOTER
+    game_log: Optional["GameLogDocument"] = None
 
     @property
     def vanilla_label(self) -> str:
@@ -174,3 +176,27 @@ class ControlledSeedDocument:
     @property
     def strategist_colors(self) -> dict[str, str]:
         return dict(self.metadata.get("strategist_colors") or {})
+
+
+@dataclass
+class ReplayOptions:
+    """Published save locations and the viewer used to open them."""
+
+    viewer_url: str
+    base_url: str | None = None
+    save_paths: dict[str, str] = field(default_factory=dict)
+    latest_game: bool = True
+
+
+@dataclass
+class GameLogDocument:
+    """Full saved game tables used by the log and its report links."""
+
+    title: str = ""
+    section_id: str = ""
+    games: pd.DataFrame = field(default_factory=pd.DataFrame)
+    game_players: pd.DataFrame = field(default_factory=pd.DataFrame)
+    metadata: dict = field(default_factory=dict)
+    downloads: list[Download] = field(default_factory=list)
+    replay: ReplayOptions | None = None
+    footer: str = REPORT_DEFAULT_FOOTER

@@ -10,6 +10,7 @@ root, and the strength params available before the stage implementation lands.
 from __future__ import annotations
 
 import json
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -589,6 +590,28 @@ def _validate_report(report: dict) -> None:
         report["include_disabled"] = coerce_bool(
             report["include_disabled"], "report.include_disabled"
         )
+    replay = report.get("replay")
+    if replay is not None:
+        where = "report.replay"
+        _require_mapping(replay, where)
+        _check_keys(replay, S.REPORT_REPLAY_KEYS, where)
+        replay.setdefault("enabled", True)
+        replay.setdefault("viewer_url", S.REPORT_DEFAULT_VIEWER_URL)
+        replay.setdefault("saves", "all")
+        replay.setdefault("base_url", None)
+        replay.setdefault("latest_game", True)
+        if "enabled" in replay:
+            replay["enabled"] = coerce_bool(replay["enabled"], f"{where}.enabled")
+        if "latest_game" in replay:
+            replay["latest_game"] = coerce_bool(
+                replay["latest_game"], f"{where}.latest_game"
+            )
+        if "saves" in replay:
+            _check_domain(replay["saves"], S.REPORT_REPLAY_SAVES, f"{where}.saves")
+        _validate_absolute_http_url(replay["viewer_url"], f"{where}.viewer_url")
+        _validate_absolute_http_url(
+            replay["base_url"], f"{where}.base_url", allow_none=True
+        )
     sections = report.get("sections")
     if sections is not None:
         _check_string_list(sections, "report.sections")
@@ -618,6 +641,27 @@ def _validate_report(report: dict) -> None:
                 f"report.formats: unknown format(s) {bad}. "
                 f"Allowed: {sorted(S.REPORT_FORMATS)}."
             )
+
+
+def _validate_absolute_http_url(value: Any, where: str, *, allow_none: bool = False) -> None:
+    """Require a parseable absolute HTTP(S) URL with a hostname.
+
+    ``urllib.parse`` defers some malformed authority checks until ``hostname``
+    or ``port`` is accessed, so resolve both inside the error boundary.
+    """
+    if value is None:
+        if allow_none:
+            return
+        raise ConfigError(f"{where}: must be an absolute http(s) URL.")
+    _check_type(value, (str,), where)
+    try:
+        parsed = urlparse(value)
+        host = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise ConfigError(f"{where}: must be an absolute http(s) URL.") from exc
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise ConfigError(f"{where}: must be an absolute http(s) URL.")
 
 
 # ── top-level entry point ───────────────────────────────────────────────────

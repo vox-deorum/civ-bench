@@ -15,7 +15,8 @@ from __future__ import annotations
 import html as _html
 from datetime import date
 
-from bench.reports.assets import REPORT_HELP_JS
+from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
+from bench.reports.game_log import GAME_LOG_JS, game_log_markdown, latest_game_card_html, render_game_log_page
 from bench.reports.content import (
     render_citation_html,
     render_citation_markdown,
@@ -180,6 +181,8 @@ def render_markdown(doc: ReportDocument) -> str:
         for section in group.sections:
             lines.append(f'<a id="{anchors[id(section)]}"></a>')
             _render_section_md(section, lines)
+    if doc.game_log is not None:
+        lines.extend(game_log_markdown(doc.game_log))
     lines.extend([render_citation_markdown(doc.benchmark_citation), ""])
     if doc.footer.strip():
         lines.extend(["---", "", doc.footer.strip(), ""])
@@ -372,6 +375,15 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .chart-controls .controls-label { color: #445164; font-weight: 650; }
 .chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
 table.comparison td.vanilla-value { font-weight: 700; }
+.game-log-filters { display: flex; flex-wrap: wrap; gap: .7rem 1rem; align-items: center; margin: 1.2rem 0; }
+.game-log-filters label { display: inline-flex; align-items: center; gap: .3rem; }
+.game-log-filters select, .game-log-filters button { font: inherit; padding: .25rem; }
+.game-log th button { font: inherit; font-weight: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.game-log [aria-sort="descending"] button::after { content: " ▾"; }
+.game-log [aria-sort="ascending"] button::after { content: " ▴"; }
+.replay-link { white-space: nowrap; }
+.muted { color: #64748b; }
+.latest-game p:last-child { margin-bottom: 0; }
 @media (max-width: 820px) {
   .sidebar { position: static; width: auto; max-height: none; }
   .sidebar ul ul { display: none; }
@@ -455,6 +467,7 @@ def _page_start(doc: ReportDocument, page_title: str) -> list[str]:
         f"<title>{_html.escape(page_title)}</title>",
         '<link rel="stylesheet" href="assets/report.css">',
         '<script src="assets/report-help.js" defer></script>',
+        *(['<script src="assets/report-common.js" defer></script>'] if doc.game_log is not None else []),
         "</head><body>",
         '<a class="skip-link" href="#main-content">Skip to content</a>',
     ]
@@ -483,6 +496,9 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
     if doc.intro:
         parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
     parts.extend(_render_announcements(doc))
+    if doc.game_log is not None:
+        card = latest_game_card_html(doc.game_log)
+        parts.append(card or '<p><a href="games.html">Browse recent games</a></p>')
     parts.append('<section aria-labelledby="overview-heading">')
     parts.append('<h2 id="overview-heading">Overview</h2>')
     parts.append('<div class="overview-grid">')
@@ -523,6 +539,12 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         parts.append(render_footer_html(doc.footer))
         parts.append("</main></body></html>")
         pages[filenames[id(group)]] = "\n".join(parts) + "\n"
+    if doc.game_log is not None:
+        pages["assets/report-common.js"] = REPORT_COMMON_JS
+        pages["assets/game-log.js"] = GAME_LOG_JS
+        pages["games.html"] = render_game_log_page(
+            doc.game_log, _render_navigation(doc, anchors, filenames, "games")
+        )
     if doc.controlled_seed is not None:
         navigation = _render_navigation(
             doc, anchors, filenames, CONTROLLED_SEED_DIR, prefix="../"

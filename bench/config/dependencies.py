@@ -79,6 +79,8 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_controlled_seed_strength_ref(stage, strength_table_ids)
 
     _check_single_controlled_seed_report(cfg)
+    _check_single_game_log(cfg)
+    _check_replay_game_log(cfg)
 
     nodes = _build_enabled_nodes(cfg, table_keys)
     order = _topo_sort(nodes)
@@ -101,6 +103,33 @@ def _check_single_controlled_seed_report(cfg: RunConfig) -> None:
             "at most one enabled performance.controlled_seed_report analysis is "
             f"allowed per run (found {ids}); the report renders its heatmap "
             "pages from that single section."
+        )
+
+
+def _check_single_game_log(cfg: RunConfig) -> None:
+    ids = [
+        stage.id for stage in cfg.analyses
+        if stage.enabled and stage.module == "performance.game_log"
+    ]
+    if len(ids) > 1:
+        raise ConfigError(
+            "at most one enabled performance.game_log analysis is allowed per run "
+            f"(found {ids}); replay pages use its single result section."
+        )
+
+
+def _check_replay_game_log(cfg: RunConfig) -> None:
+    replay = cfg.report.get("replay")
+    if not replay or not replay.get("enabled", False):
+        return
+    if not any(
+        stage.enabled and stage.module == "performance.game_log"
+        for stage in cfg.analyses
+    ):
+        raise ConfigError(
+            "report.replay.enabled requires one enabled performance.game_log analysis. "
+            "Add {\"id\": \"game_log\", \"module\": \"performance.game_log\", "
+            "\"enabled\": true, \"uses\": {}, \"params\": {}} to analyses."
         )
 
 

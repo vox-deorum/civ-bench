@@ -20,6 +20,7 @@ heatmap pages under ``controlled-seed/``.
 from __future__ import annotations
 
 from bench.reports.announcements import build_announcements
+from bench.reports.game_log import game_log_document
 from .context import ReportBuildContext
 from bench.reports.content import resolve_footer
 from .controlled_seed import (
@@ -143,6 +144,16 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
     else:
         family_sections = sections
 
+    game_log = game_log_document(ctx)
+    if game_log is not None:
+        family_sections = [s for s in family_sections if s.id != game_log.section_id]
+        if controlled is not None:
+            controlled.game_log = game_log
+        if "html" in (meta.get("formats") or []):
+            download = Download(label="Game Log (HTML)", rel_path="games.html")
+            ctx.section(game_log.section_id).downloads.append(download)
+            game_log.downloads.append(download)
+
     groups = _group_by_family(family_sections)
     for group in groups:
         group.summary = _summarize_family(group)
@@ -170,6 +181,7 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         section_by_id[section_id]
         for section_id in meta.get("overview_section_ids", [])
         if section_id in section_by_id
+        and (game_log is None or section_id != game_log.section_id)
     ]
     return ReportDocument(
         title=meta["title"],
@@ -183,5 +195,6 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         groups=groups,
         overview_sections=overview_sections,
         controlled_seed=controlled,
+        game_log=game_log,
         announcements=build_announcements(ctx),
     )

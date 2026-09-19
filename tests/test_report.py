@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, urlsplit
 
 import pandas as pd
 import pytest
@@ -36,6 +38,21 @@ from bench.reports.templates import _summarize_family
 
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
 _FAKE_HTML = "<!doctype html><title>Interactive figure</title>"
+
+
+class _PageText(HTMLParser):
+    def __init__(self, source):
+        super().__init__()
+        self.text = []
+        self.links = []
+        self.feed(source)
+
+    def handle_data(self, data):
+        self.text.append(data)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self.links.append(dict(attrs))
 
 
 def _emit(cfg, sid, module, *, summary="", metadata=None, tables=None, figures=None,
@@ -125,6 +142,149 @@ def report_env(tmp_path, write_spec, dev_spec):
 
 
 # ── end-to-end render ──────────────────────────────────────────────────────────
+@pytest.fixture
+def replay_env(tmp_path, write_spec, dev_spec):
+    spec = dev_spec
+    root = str(tmp_path / "out")
+    runs = tmp_path / "source"
+    spec["output"] = {"root": root, "suffix": ""}
+    spec["data"]["extract"].update(enabled=False, runs_dir=str(runs))
+    spec["estimators"] = []
+    spec["adjust"] = []
+    spec["analyses"] = [{"id": "game_log", "module": "performance.game_log", "params": {}}]
+    spec["report"] = {"out_dir": root, "formats": ["html", "md"], "replay": {"enabled": True}}
+    cfg = load_config(write_spec(spec))
+    games = pd.DataFrame([
+        {"game_id": gid, "timestamp": timestamp, "date_utc": "2026-09-18",
+         "experiment": "private-experiment-name", "label": label,
+         "seed": seed, "seating_rotation": 1, "controlled": seed != -1,
+         "turns": 312, "victory_type": "Science", "winner_player_id": winner,
+         "winner_civilization": "Rome" if winner == 0 else "Persia",
+         "winner_is_vanilla": winner == 0}
+        for gid, timestamp, seed, winner, label in [
+            ("game-new", 3000, 2, 5, "Strategist | Every-turn"),
+            ("game-missing", 2000, 2, 0, "Strategist | Every-turn"),
+            ("game-free", 1000, -1, 0, "VPAI"),
+        ]
+    ])
+    players = pd.DataFrame([
+        {"game_id": game.game_id, "player_id": pid,
+         "strategist": "Vanilla" if vanilla else "Strategist", "condition": "Every-turn",
+         "player_type": "Vanilla" if vanilla else "Strategist", "is_vanilla": vanilla,
+         "civilization": "Rome" if pid == 0 else "Persia", "is_winner": pid == game.winner_player_id}
+        for game in games.itertuples() for pid in [0, 5]
+        for vanilla in [pid == 0 or game.seed == -1]
+    ])
+    _emit(cfg, "game_log", "performance.game_log", tables={"games": games, "game_players": players},
+          metadata={"latest_game_id": "game-new", "vanilla_label": "Vanilla"})
+    experiment = runs / "private-experiment-name"
+    experiment.mkdir(parents=True)
+    for filename, content in [("game-new_111.Civ5Save", b"earlier"),
+                              ("game-new_222.Civ5Save", b"latest save"),
+                              ("game-free_111.Civ5Save", b"free save")]:
+        (experiment / filename).write_bytes(content)
+    return cfg
+
+
+def test_replay_report_copies_saves_and_renders_game_links(replay_env):
+    result = run_report(replay_env)
+    out = report_dir(replay_env)
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
+    assert (out / "saves/private-experiment-name/game-free.Civ5Save").is_file()
+    assert any("1 of 3 saves not found" in warning and "game-missing" in warning for warning in result.warnings)
+    games = (out / "games.html").read_text(encoding="utf-8")
+    page = _PageText(games)
+    assert "private-experiment-name" not in "".join(page.text)
+    links = [link for link in page.links if link.get("class") == "replay-link"]
+    assert parse_qs(links[0]["data-query"]) == {"player5": ["Strategist | Every-turn"], "winner": ["5"]}
+    assert parse_qs(links[1]["data-query"]) == {"winner": ["0"]}
+    assert "no replay" in games
+    assert "Player 5 (Persia, Won)" in games
+    assert "Winner: Player 0 (Rome, VPAI)" in games
+    assert "Player 0 (Rome)" not in games
+    assert 'data-seed="2"' in games and 'data-seed="-"' in games
+    assert 'data-timestamp="3000"' in games and 'data-player="' in games
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert "Latest game" in index and "Player 5 (Persia, Won)" in index
+    assert "Player 0" not in index
+    assert "games.html" not in index.split("</aside>")[0]
+    assert 'src="assets/report-common.js"' in index
+    markdown = (out / "report.md").read_text(encoding="utf-8")
+    assert "## Game Log" in markdown and "game_players (CSV)" in markdown
+    assert "vox-deorum-replay/?file=" not in markdown
+
+
+def test_replay_report_is_byte_stable_with_cached_saves(replay_env):
+    run_report(replay_env)
+    out = report_dir(replay_env)
+    before = {path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()}
+    run_report(replay_env)
+    after = {path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()}
+    assert before == after
+
+
+def test_replay_scope_and_absolute_base_url(replay_env):
+    replay_env.report["replay"].update(saves="controlled", base_url="https://example.org/report dir/")
+    run_report(replay_env)
+    out = report_dir(replay_env)
+    assert not (out / "saves/private-experiment-name/game-free.Civ5Save").exists()
+    page = _PageText((out / "games.html").read_text(encoding="utf-8"))
+    link = next(link for link in page.links if link.get("class") == "replay-link")
+    query = parse_qs(urlsplit(link["href"]).query)
+    assert query["file"] == ["https://example.org/report dir/saves/private-experiment-name/game-new.Civ5Save"]
+    assert query["player5"] == ["Strategist | Every-turn"]
+    assert link["target"] == "_blank" and link["data-direct"] == "true"
+    assert "[Watch replay](https://vox-deorum.github.io/vox-deorum-replay/?file=" in (out / "report.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("runs_dir", [None, "nonexistent-runs"])
+def test_replay_missing_runs_dir_warns(replay_env, runs_dir):
+    replay_env.data["extract"]["runs_dir"] = runs_dir
+    result = run_report(replay_env)
+    assert any("runs_dir" in warning and "missing" in warning for warning in result.warnings)
+    assert "no replay" in (report_dir(replay_env) / "games.html").read_text(encoding="utf-8")
+
+
+def test_replay_without_latest_card_and_disabled(replay_env):
+    replay_env.report["replay"]["latest_game"] = False
+    run_report(replay_env)
+    out = report_dir(replay_env)
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert "Latest game" not in index and "Browse recent games" in index
+    replay_env.report["replay"]["enabled"] = False
+    run_report(replay_env)
+    assert not (out / "saves").exists()
+    assert "no replay" in (out / "games.html").read_text(encoding="utf-8")
+
+
+def test_replay_copy_rejects_unsafe_paths(replay_env):
+    artifact = _analyses_dir(replay_env, "game_log") / "games.csv"
+    games = pd.read_csv(artifact)
+    games.loc[0, "experiment"] = "../outside"
+    games.loc[2, "game_id"] = "../outside"
+    games.to_csv(artifact, index=False)
+    result = run_report(replay_env)
+    assert sum("unsafe save path" in warning for warning in result.warnings) == 2
+    assert not (report_dir(replay_env) / "saves").exists()
+
+
+def test_replay_cached_hardlinks_allow_in_place_publish(replay_env, monkeypatch):
+    run_report(replay_env)
+    out = report_dir(replay_env)
+    original = Path.replace
+
+    def deny_report_rename(path, target):
+        if path == out:
+            raise PermissionError("directory is open")
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "replace", deny_report_rename)
+    result = run_report(replay_env)
+    assert any("updated its files in place" in warning for warning in result.warnings)
+    assert not any("could not update report file" in warning for warning in result.warnings)
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
+
+
 def test_run_report_writes_md_and_html(report_env):
     result = run_report(report_env)
     out = report_dir(report_env)

@@ -37,6 +37,7 @@ from urllib.parse import urlencode
 import numpy as np
 
 from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
+from bench.reports.game_log import games_url, render_seat_games
 from bench.plotting.interactive import figure_html, plotly_javascript
 from .context import ReportBuildContext
 from bench.reports.content import (
@@ -501,6 +502,11 @@ def _render_overview(
     for seed in seeds:
         parts.append(f'<section aria-labelledby="seed-{seed}">')
         parts.append(f'<h2 id="seed-{seed}">Seed {seed}</h2>')
+        if doc.game_log is not None:
+            parts.append(
+                f'<p><a href="{_esc(games_url("../", seed=seed))}">'
+                f'Game Log for seed {seed} →</a></p>'
+            )
         parts.append('<figure class="heat-figure">')
         tip = render_help_html("Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row.", f"strength-{seed}-help")
         parts.append(f"<figcaption>Mean adjusted strength{tip}</figcaption>")
@@ -684,7 +690,16 @@ def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
         parts.append(row_open)
         parts.append(f"<td>{_label_html(_strategist_label(doc, strategist), tooltip)}</td>")
         parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['condition'])}</td>")
-        parts.append(f"<td>{int(row['run_count'])}</td>")
+        runs = int(row["run_count"])
+        if doc.game_log is not None:
+            filters = {"seed": seed, "player": player_id}
+            filters["strategist"] = doc.vanilla_label if is_vanilla else strategist
+            if not is_vanilla:
+                filters["condition"] = condition
+            runs_html = f'<a href="{_esc(games_url("../", **filters))}">{runs}</a>'
+        else:
+            runs_html = str(runs)
+        parts.append(f"<td>{runs_html}</td>")
         parts.append(f"<td>{_esc(_fmt_probability(row['mean_weighted_victory_probability']))}</td>")
         parts.append(_strength_cell(row, is_vanilla))
         parts.append(_focus_cell(row))
@@ -774,6 +789,11 @@ def _render_detail(
         f'<p>Civilization: {_esc(index_row["civilization"])} · '
         f"<strong>{int(index_row['run_count'])}</strong> runs</p>"
     )
+    if doc.game_log is not None:
+        parts.append(
+            f'<p><a href="{_esc(games_url("../", seed=seed, player=player_id))}">'
+            'Browse these games in the Game Log →</a></p>'
+        )
     if int(index_row["n_civilizations"]) > 1:
         parts.append(
             '<p class="warning">Multiple civilizations occupy this seed-player pair '
@@ -828,6 +848,9 @@ def _render_detail(
     parts.append(f'<h2 id="comparison-heading">Comparison table{tip}</h2>')
     parts.append(_comparison_table(doc, seed, player_id))
     parts.append("</section>")
+
+    if doc.game_log is not None:
+        parts.append(render_seat_games(doc.game_log, seed, player_id, prefix="../"))
 
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
@@ -988,6 +1011,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
       boxes.forEach(function (box) {
         box.addEventListener("change", function () {
           updateChart();
+          updateGames();
         });
       });
     }
@@ -1021,7 +1045,19 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
         });
     }
 
+    function updateGames() {
+      var gameRows = document.querySelectorAll(".seat-games .game-row");
+      if (!gameRows.length) { return; }
+      var checked = {};
+      boxes.forEach(function (box) { checked[box.value] = box.checked; });
+      gameRows.forEach(function (row) {
+        row.hidden = row.dataset.vanilla !== "true" && boxes.length &&
+          checked[row.dataset.strategist] !== true;
+      });
+    }
+
     updateChart();
+    updateGames();
   }
 
   document.addEventListener("DOMContentLoaded", function () {

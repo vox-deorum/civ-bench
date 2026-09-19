@@ -192,6 +192,21 @@ REPORT_COMMON_JS = """/* civ-bench shared report utilities.
   window.civBench = {
     distinguishColors: distinguishColors
   };
+  document.querySelectorAll("a.replay-link").forEach(function (link) {
+    if (link.dataset.direct === "true") { return; }
+    if (window.location.protocol !== "http:" && window.location.protocol !== "https:") {
+      link.title = "Open this report from a web server to launch the viewer, or drop the downloaded save onto it";
+      return;
+    }
+    var viewer = new URL(link.dataset.viewer);
+    viewer.searchParams.set("file", new URL(link.getAttribute("href"), window.location.href).href);
+    new URLSearchParams(link.dataset.query).forEach(function (value, key) {
+      viewer.searchParams.set(key, value);
+    });
+    link.href = viewer.href;
+    link.target = "_blank";
+    link.rel = "noopener";
+  });
 })();
 """
 

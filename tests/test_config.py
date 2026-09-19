@@ -291,6 +291,70 @@ def test_report_page_fields_load(dev_spec, write_spec):
     assert cfg.report["section_overrides"]["bt_main"]["tables"] == ["ratings"]
 
 
+def _game_log_stage() -> dict:
+    return {
+        "id": "game_log", "module": "performance.game_log", "enabled": True,
+        "uses": {}, "params": {},
+    }
+
+
+def test_report_replay_loads_when_game_log_is_enabled(dev_spec, write_spec):
+    dev_spec["analyses"].append(_game_log_stage())
+    dev_spec["report"]["replay"] = {
+        "enabled": True,
+        "viewer_url": "https://vox-deorum.github.io/vox-deorum-replay/",
+        "saves": "controlled",
+        "base_url": "https://example.com/reports/civbench/",
+        "latest_game": True,
+    }
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["replay"]["saves"] == "controlled"
+
+
+def test_report_replay_defaults_when_game_log_is_enabled(dev_spec, write_spec):
+    dev_spec["analyses"].append(_game_log_stage())
+    dev_spec["report"]["replay"] = {}
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["replay"] == {
+        "enabled": True,
+        "viewer_url": "https://vox-deorum.github.io/vox-deorum-replay/",
+        "saves": "all",
+        "base_url": None,
+        "latest_game": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "replay",
+    [
+        {"enabled": True, "unexpected": True},
+        {"enabled": True, "saves": "some"},
+        {"enabled": True, "viewer_url": "relative/viewer"},
+        {"enabled": True, "viewer_url": None},
+        {"enabled": True, "viewer_url": "https://:80"},
+        {"enabled": True, "base_url": "/reports/"},
+        {"enabled": True, "base_url": "https://[not-a-host/"},
+    ],
+)
+def test_report_replay_rejects_invalid_values(dev_spec, write_spec, replay):
+    dev_spec["analyses"].append(_game_log_stage())
+    dev_spec["report"]["replay"] = replay
+    with pytest.raises(ConfigError, match="report.replay"):
+        load_config(write_spec(dev_spec))
+
+
+def test_report_replay_requires_game_log(dev_spec, write_spec):
+    dev_spec["report"]["replay"] = {"enabled": True}
+    with pytest.raises(ConfigError, match="requires one enabled performance.game_log"):
+        load_config(write_spec(dev_spec))
+
+
+def test_config_rejects_multiple_enabled_game_logs(dev_spec, write_spec):
+    dev_spec["analyses"].extend([_game_log_stage(), {**_game_log_stage(), "id": "game_log_two"}])
+    with pytest.raises(ConfigError, match="at most one enabled performance.game_log"):
+        load_config(write_spec(dev_spec))
+
+
 @pytest.mark.parametrize("footer", [None, "", "Copyright **Example**\n\n[Site](https://example.com)"])
 def test_report_footer_loads(dev_spec, write_spec, footer):
     dev_spec["report"]["footer"] = footer

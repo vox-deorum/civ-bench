@@ -26,7 +26,7 @@ from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.reports import run_report
 from bench.reports.controlled_seed import render_controlled_seed_site
-from bench.reports.model import ControlledSeedDocument
+from bench.reports.model import ControlledSeedDocument, GameLogDocument
 from bench.reports.runner import report_dir
 
 BASELINE_EXP = "vanilla-standard-fixed"
@@ -925,6 +925,41 @@ def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
     assert '"vanilla":true' in detail
     assert '"condition":"Every-turn"' in detail
     assert 'id="curve-data"' not in detail
+
+
+def test_game_log_links_and_seat_rows_follow_detail_filters():
+    doc = _tiny_doc()
+    doc.game_log = GameLogDocument(
+        title=doc.title,
+        section_id="game_log",
+        games=pd.DataFrame([{
+            "game_id": "g-treatment", "seed": 1, "seating_rotation": 0,
+            "date_utc": "2026-09-18", "victory_type": "Science",
+            "winner_player_id": 0, "winner_civilization": "Rome",
+            "winner_is_vanilla": False,
+        }]),
+        game_players=pd.DataFrame([
+            {"game_id": "g-treatment", "player_id": 0,
+             "strategist": "Weird & <Model>", "condition": "Per 5",
+             "is_vanilla": False, "civilization": "Rome", "is_winner": True},
+            {"game_id": "g-treatment", "player_id": 1,
+             "strategist": "Vanilla", "condition": "Base",
+             "is_vanilla": True, "civilization": "Greece", "is_winner": False},
+        ]),
+        metadata={"vanilla_label": "Vanilla"},
+    )
+    pages = render_controlled_seed_site(doc)
+    overview = pages["controlled-seed/index.html"]
+    detail = pages["controlled-seed/seed-1-player-0.html"]
+    assert 'games.html?seed=1' in overview
+    assert 'Browse these games in the Game Log' in detail
+    assert 'games.html?seed=1&amp;player=0&amp;strategist=Weird%20%26%20%3CModel%3E&amp;condition=Per%205' in detail
+    assert 'games.html?seed=1&amp;player=0&amp;strategist=Vanilla' in detail
+    assert 'class="seat-games"' in detail
+    assert 'data-strategist="Weird &amp; &lt;Model&gt;"' in detail
+    assert 'data-vanilla="false"' in detail
+    assert '<tr class="game-row"' in detail
+    assert '<tr hidden class="game-row"' not in detail
 
 
 def test_renderer_escapes_labels_and_query_parameters():

@@ -24,6 +24,7 @@ from .errors import AnalysisError
 from .performance import (
     PerformanceControlledSeedReport,
     PerformanceExperimentCompleteness,
+    PerformanceGameLog,
     PerformanceScoreRatio,
     PerformanceStrengthPanel,
     PerformanceTurnPredicted,
@@ -57,6 +58,7 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "performance.strength_panel": PerformanceStrengthPanel,
     "performance.turn_predicted": PerformanceTurnPredicted,
     "performance.controlled_seed_report": PerformanceControlledSeedReport,
+    "performance.game_log": PerformanceGameLog,
     "performance.usage_efficiency": PerformanceUsageEfficiency,
 }
 

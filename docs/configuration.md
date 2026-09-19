@@ -264,7 +264,7 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 | `ratings` | Compare skill and outcomes | `bradley_terry`, `plackett_luce`, `matchups`, `outcome_matchups` |
 | `prediction` | Evaluate predictors | `evaluate`, `compare` |
 | `calibration` | Check prediction reliability and adjustment effects | `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline` |
-| `performance` | Compare strength, coverage, progress, and cost | `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, `usage_efficiency` |
+| `performance` | Compare strength, coverage, progress, cost, and games | `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, `game_log`, `usage_efficiency` |
 
 - `prediction` analyses use all enabled estimators by default; `uses.estimators` narrows the selection.
 - `name` and `description` override a module's display text for that stage.
@@ -321,6 +321,7 @@ These IDs come from the [full template](../configs/benchmark.full.template.json)
 | Performance | `perf_strength` | Gameplay strength |
 | Performance | `perf_experiment_completeness` | Experiment coverage |
 | Performance | `perf_turn_predicted` | Win-probability trends |
+| Performance | `game_log` | Game Log |
 | Performance | `perf_usage_efficiency` | Usage, cost, and skill |
 
 - `controlled_seed`, `pl_main`, and `pl_strategy` are disabled in the full template; enable them before including them in a report.
@@ -340,7 +341,8 @@ Example: put Matched Maps first and show two selected overview cards. This assum
   "overview_sections": ["bt_main", "perf_usage_efficiency"],
   "section_overrides": {},
   "title": null,
-  "include_disabled": false
+  "include_disabled": false,
+  "replay": null
 }
 ```
 
@@ -355,6 +357,24 @@ Example: put Matched Maps first and show two selected overview cards. This assum
 | `include_disabled` | Defaults to `false`; `true` allows explicitly listed disabled stages with saved results. Automatic fill still includes only enabled analyses |
 | `footer` | Markdown footer; `null` uses the default CivBench citation, `""` hides it |
 | `benchmark_citation` | Optional benchmark citation with `title` and `url`; see [schema section 7](../configs/benchmark.md#7-report-rendering) |
+| `replay` | Optional replay saves and viewer links; requires an enabled `performance.game_log` stage |
+
+Set `report.replay` to enable the Game Log and copied `.Civ5Save` files:
+
+```jsonc
+"replay": {
+  "enabled": true,
+  "viewer_url": "https://vox-deorum.github.io/vox-deorum-replay/",
+  "saves": "all",       // "all" or "controlled"
+  "base_url": null,      // optional absolute published report URL
+  "latest_game": true
+}
+```
+
+The Game Log filters games and links to the hosted viewer. `saves: "controlled"`
+limits copied saves to games with a controlled seed. Reports served from
+`file://` cannot launch the viewer; serve the report over HTTP(S) with CORS
+enabled for the viewer origin.
 
 ### Ordering and overview cards
 
@@ -397,6 +417,8 @@ Artifact names come from the analysis's saved `result.json`. Hidden inline artif
 | `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html` | One page per represented family |
 | `controlled-seed/index.html` | Matched Maps heatmaps by seed |
 | `controlled-seed/seed-<seed>-player-<position>.html` | Probability curves and condition comparisons for one seed and player position |
+| `games.html` | Filterable per-game log and replay links, when `report.replay.enabled` |
+| `saves/<experiment>/<game_id>.Civ5Save` | Copied replay saves, when available and in scope |
 | `assets/` | Styles, scripts, figures, and downloadable tables |
 
 - Only requested formats and represented chapters are written.
@@ -404,6 +426,7 @@ Artifact names come from the analysis's saved `result.json`. Hidden inline artif
 - Matched Maps shows adjusted strength and dominant victory focus, with a separate VPAI baseline row.
 - `civ-bench report --config <file>` rebuilds reports from saved analysis results without rerunning analyses. Rendering is deterministic and byte-stable.
 - See [schema section 7.1](../configs/benchmark.md#71-the-matched-maps-chapter) for Matched Maps details.
+- See [schema section 7.2](../configs/benchmark.md#72-game-log-and-replay-links) for Game Log and replay details.
 
 ---
 

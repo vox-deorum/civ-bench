@@ -625,6 +625,25 @@ Two single-purpose views of how well estimator probabilities are calibrated: one
   "params": {} }
 ```
 
+#### `performance.game_log`: per-game report data
+
+```jsonc
+{ "id": "game_log", "module": "performance.game_log", "enabled": true,
+  "uses": {}, "params": {} }
+```
+
+The Game Log reads the canonical `games` and `panel` tables and emits one
+`games` table plus one `game_players` table. It records the game date, map
+identity, outcome, controlled seed and rotation, strategist condition label,
+and the player seats. Rows are ordered newest first. With condition pairing
+enabled, labels use the same `<strategist> | <condition>` wording as the rest
+of the report; VPAI seats are marked so report pages can hide them. The stage
+also records ordering metadata and the latest game for the report renderer.
+
+The stage is required when `report.replay.enabled` is true. It has no figures
+or default inline tables. Set `params.condition_pairing` to override the
+shared presentation pairing for this stage.
+
 **`performance.controlled_seed_report` in detail.** The module aggregates the
 controlled design by `(seed, player_id)` cell so the report can expose
 game-to-game variation per seed. It consumes the canonical `games` table
@@ -781,6 +800,7 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `performance.strength_panel` | Gameplay strength | Summarizes model-adjusted strength, uncertainty, and experiment coverage for each player identity (bootstrap confidence intervals). |
 | `performance.turn_predicted` | Win-probability trends | Shows how each player identity's predicted chance of winning changes from the opening turns through the end of the game. |
 | `performance.controlled_seed_report` | Matched Maps | Aggregates games on shared maps by seed and final seat into the tables behind the report's Matched Maps chapter (§7.1). |
+| `performance.game_log` | Game Log | Lists completed games and player seats for filtering, provenance, and optional replay links. |
 | `performance.usage_efficiency` | Usage, cost, and skill | Compares cost and token use per player per game with skill, and measures Elo above or below the fitted usage-skill curve. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
@@ -805,7 +825,27 @@ identity; they cannot run, so they never appear on a report.
   "title": null,                         // null = derive from `friendly_name`, else `name`
   "footer": null,                        // optional markdown footer; null uses the default, empty hides it
   "benchmark_citation": null,             // optional object with required `title` and `url` strings
-  "include_disabled": false              // never render skipped/disabled stages
+  "include_disabled": false,             // never render skipped/disabled stages
+  "replay": null                          // optional replay saves and viewer links
+}
+```
+
+`replay` is omitted or `null` by default. When enabled, it requires an
+enabled `performance.game_log` stage and copies matching `.Civ5Save` files
+into the report when HTML is rendered. `saves` is `"all"` by default; set it
+to `"controlled"` to include only games with a controlled seed. `viewer_url`
+must be an absolute HTTP(S) URL for the hosted Vox Deorum replayer. Set
+`base_url` to the absolute published report directory when links must work
+without JavaScript. `latest_game` controls the latest-game card on the
+overview page.
+
+```jsonc
+"replay": {
+  "enabled": true,
+  "viewer_url": "https://vox-deorum.github.io/vox-deorum-replay/",
+  "saves": "all",       // "all" or "controlled"
+  "base_url": null,      // optional absolute URL of the published report dir
+  "latest_game": true
 }
 ```
 
@@ -819,7 +859,7 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 
 `overview_sections` controls the compact cards in `index.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact seven-section list shown above. Every card shows the analysis's one-sentence result summary, and the same sentence appears in its detailed section. A legacy or custom analysis without a summary receives an explicit fallback sentence in both views. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
-**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
 The overview shows a compact announcement for the most recently completed rated condition, using the first overall Bradley-Terry or Plackett-Luce section in report order. A second announcement lists incomplete conditions as `Model (20/24)` when the global `min_condition_completeness` filter is configured. It disappears when all conditions are complete. Both use the coverage analysis's saved `condition_progress` table; rerun that analysis to add announcements to older artifacts. Completion dates use game timestamps in UTC, taking the earliest accepted game in each required slot and then the latest slot date. Missing dates or ratings omit the score announcement; missing coverage artifacts omit both announcements.
 
@@ -881,6 +921,28 @@ The chapter lives in its own directory beside the family pages:
   heatmaps (RdYlBu for strength, per-strategy colors for focus shares), and
   the Vanilla row and its adjusted-strength value are highlighted. Missing
   baselines and missing prediction rows are visible page notes, never fatal.
+
+### 7.2 Game Log and replay links
+
+When `report.replay.enabled` is true, the report includes a `games.html` Game
+Log page. It lists every game from `performance.game_log`, with filters for
+strategist, condition, seed, seat, victory, and controlled games. Matched Maps
+links to relevant Game Log rows, and the overview can show a latest-game card
+when `latest_game` is true. The Game Log is linked from those pages and is not
+added to the sidebar chapters.
+
+Each game with a matching save gets one replay link. The link resolves the
+relative save path under `saves/<experiment>/<game_id>.Civ5Save` against the
+report location, then opens the configured viewer with `file`, `player<i>`,
+and `winner` query parameters. Only strategist-controlled seats receive
+`player<i>` labels; VPAI seats retain the viewer's civilization names. A
+missing save is shown as `no replay` and does not fail report generation.
+
+The viewer loads saves with an HTTP request. Serve the report from an HTTP(S)
+host with CORS enabled for the viewer origin, such as GitHub Pages. A
+`file://` report cannot launch the viewer, but its save link remains available
+for manual drag and drop. `base_url` emits absolute viewer links for static
+publishing without relying on JavaScript.
 
 **The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module instance's resolved friendly identity, including the grouped BT or PL identity selected from `group_by`, so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 

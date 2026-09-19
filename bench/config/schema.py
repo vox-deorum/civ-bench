@@ -168,6 +168,7 @@ ANALYSIS_MODULES = {
     "performance.turn_predicted",
     "performance.permutation_importance",
     "performance.controlled_seed_report",
+    "performance.game_log",
     "performance.usage_efficiency",
     # exploratory.*
     "exploratory.panel",
@@ -203,6 +204,7 @@ ANALYSIS_PARAM_KEYS = {
     },
     "performance.turn_predicted": {"aggregate", "by"},
     "performance.controlled_seed_report": {"condition_pairing"},
+    "performance.game_log": {"condition_pairing"},
     "performance.usage_efficiency": {
         "currency", "log_x", "annotate", "condition_pairing",
     },
@@ -223,7 +225,11 @@ REPORT_KEYS = {
     "footer",
     "benchmark_citation",
     "include_disabled",
+    "replay",
 }
+REPORT_REPLAY_KEYS = {"enabled", "viewer_url", "saves", "base_url", "latest_game"}
+REPORT_REPLAY_SAVES = {"all", "controlled"}
+REPORT_DEFAULT_VIEWER_URL = "https://vox-deorum.github.io/vox-deorum-replay/"
 REPORT_BENCHMARK_CITATION_KEYS = {"title", "url"}
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}

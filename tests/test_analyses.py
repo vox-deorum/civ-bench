@@ -1477,7 +1477,7 @@ def test_outcome_matchups_reports_per_appearance_expected_rate_for_eight_players
     assert counts.loc["A", "Vanilla"] == 2
     assert counts.loc["Vanilla", "A"] == 1
     assert "per-player" in result.summary
-    assert "**50.0%** (**1/2** wins per player appearance)" in result.summary
+    assert "**50.0%** (**1/2**; expected **12.5%** in 8-player games.)" in result.summary
     assert "12.5%" in result.summary
     assert "8-player games" in result.summary
     assert "featuring" not in result.summary
@@ -1533,7 +1533,7 @@ def test_outcome_matchups_vs_reference_uses_expected_rate_and_binomial_validity(
     assert "Expected (12.5%)" in [text.get_text() for text in axis.get_legend().get_texts()]
     reference = next(line for line in axis.lines if line.get_linestyle() == "--")
     assert list(reference.get_xdata()) == [0.125, 0.125]
-    assert "per player appearance" in axis.get_xlabel()
+    assert axis.get_xlabel() == "Victory rate per player"
     assert "1/2" in _figure_text(result.figures["win_rate"])
     assert "0/2" in _figure_text(result.figures["win_rate"])
     assert "Counts show wins / player appearances" in " ".join(

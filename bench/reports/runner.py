@@ -19,6 +19,8 @@ Matched Maps loads Plotly when rendering its probability charts.
 from __future__ import annotations
 
 import json
+import os
+from glob import escape as glob_escape
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -35,7 +37,7 @@ from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .context import ReportBuildContext
 from .errors import ReportError
-from .model import Download, Figure, Section, Table
+from .model import Download, Figure, GameLogDocument, Section, Table
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
 
@@ -420,6 +422,62 @@ def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> 
     return labels
 
 
+def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: list[str]) -> None:
+    """Publish the available saves before rendering links to them."""
+    if doc.replay is None or doc.games.empty:
+        return
+    runs_dir = (cfg.data.get("extract") or {}).get("runs_dir")
+    if not runs_dir:
+        warnings.append("report.replay: data.extract.runs_dir is missing; saves were skipped.")
+        return
+    root = Path(cfg.output.resolve(runs_dir)).resolve()
+    if not root.is_dir():
+        warnings.append(f"report.replay: runs_dir '{root}' is missing; saves were skipped.")
+        return
+    scope = (cfg.report.get("replay") or {}).get("saves", "all")
+    games = doc.games
+    if scope == "controlled":
+        games = games.loc[pd.to_numeric(games["seed"], errors="coerce").fillna(-1) != -1]
+    missing: list[str] = []
+    previous = report_dir(cfg).resolve()
+    destination_root = staging.resolve()
+    for game in games.to_dict("records"):
+        game_id, experiment = str(game["game_id"]), str(game["experiment"])
+        # Both components originate in saved tables and must be single names.
+        if any(not name or name in {".", ".."} or ".." in name
+               or any(ch in name for ch in '/\\:<>"|?*') for name in (experiment, game_id)):
+            warnings.append(f"report.replay: unsafe save path for game '{game_id}'; skipped.")
+            continue
+        directory = (root / experiment).resolve()
+        rel = Path("saves") / experiment / f"{game_id}.Civ5Save"
+        destination = staging / rel
+        if root not in directory.parents or destination_root not in destination.resolve().parents:
+            warnings.append(f"report.replay: save path for game '{game_id}' escapes its root; skipped.")
+            continue
+        try:
+            matches = sorted(path for path in directory.glob(f"{glob_escape(game_id)}_*.Civ5Save")
+                             if path.is_file() and root in path.resolve().parents)
+            if not matches:
+                missing.append(game_id)
+                continue
+            source = matches[-1]
+            cached = previous / rel
+            if (cached.is_file() and previous in cached.resolve().parents
+                    and cached.stat().st_size == source.stat().st_size):
+                source = cached
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(source, destination)
+            except OSError:
+                shutil.copyfile(source, destination)
+            doc.replay.save_paths[game_id] = rel.as_posix()
+        except OSError as exc:
+            warnings.append(f"report.replay: could not copy save for game '{game_id}': {exc}")
+    if missing:
+        warnings.append(f"report.replay: {len(missing)} of {len(games)} saves not found under "
+                        f"runs_dir '{root}': {', '.join(missing[:5])}.")
+
+
 def run_report(cfg: RunConfig) -> ReportRunResult:
     """Render the report for ``cfg`` from the produced analysis artifacts."""
     report_cfg = cfg.report or {}
@@ -464,6 +522,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "benchmark_citation": report_cfg.get("benchmark_citation"),
         "overview_section_ids": overview_ids,
         "formats": formats,
+        "replay": report_cfg.get("replay"),
         "condition_completeness_filter": resolve_filter_spec(
             cfg.data.get("filter"), cfg.filters, "data.filter",
         ).get("min_condition_completeness") is not None,
@@ -490,6 +549,11 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     written_rel: list[Path] = []
     try:
         document = default_template(context)
+        if (report_cfg.get("replay") or {}).get("enabled"):
+            if document.game_log is None:
+                raise ReportError("report.replay requires a resolved performance.game_log section.")
+            if "html" in formats:
+                _copy_saves(cfg, document.game_log, staging, warnings)
 
         if "md" in formats:
             path = staging / "report.md"
@@ -578,7 +642,8 @@ def _publish_in_place(staging: Path, out_dir: Path, reason: str) -> list[str]:
         dst = out_dir / rel
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
+            if not dst.exists() or not os.path.samefile(src, dst):
+                shutil.copyfile(src, dst)
         except OSError as exc:
             warnings.append(f"could not update report file '{dst}': {exc}")
     for existing in sorted(p for p in out_dir.rglob("*") if p.is_file()):
