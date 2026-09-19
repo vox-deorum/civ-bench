@@ -106,7 +106,7 @@ def replay_link_html(doc: GameLogDocument, game: dict, players: list[dict],
             f'{direct}>{_esc(label)}</a>')
 
 
-def seats_text(game: dict, players: list[dict]) -> str:
+def seats_text(game: dict, players: list[dict], *, include_winner: bool = True) -> str:
     seats = []
     listed_winner = False
     for player in players:
@@ -119,7 +119,7 @@ def seats_text(game: dict, players: list[dict]) -> str:
             detail += ", Won"
         seats.append(f"Player {_number(player['player_id'])} ({detail})")
     result = " | ".join(seats)
-    if not listed_winner and _text(game.get("winner_player_id")):
+    if include_winner and not listed_winner and _text(game.get("winner_player_id")):
         winner = winner_text(game)
         result += (" · " if result else "") + winner
     return result or "-"
@@ -235,8 +235,15 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
                  "label": game["label"], "victory": game.get("victory_type", "")}
         parts.append('<tr ' + ' '.join(f'data-{k}="{_esc(v)}"' for k, v in attrs.items()) + '>')
         cells = [game.get("date_utc"), game["label"], attrs["seed"], attrs["rotation"],
-                 attrs["turns"], seats_text(game, players), game.get("victory_type")]
+                 attrs["turns"], seats_text(game, players, include_winner=False)]
         parts.extend(f'<td>{_esc(cell) or "-"}</td>' for cell in cells)
+        victory = _esc(game.get("victory_type")) or "-"
+        if _text(game.get("winner_player_id")) and not any(
+            _flag(player.get("is_winner")) and not _flag(player.get("is_vanilla"))
+            for player in players
+        ):
+            victory += f'<span class="game-winner">{_esc(winner_text(game))}</span>'
+        parts.append(f'<td>{victory}</td>')
         parts.append(f'<td>{replay_link_html(doc, game, players)}</td></tr>')
     parts.append('</tbody></table></div>')
     links = [f'<a href="{_esc(d.rel_path)}">{_esc(d.label)}</a>' for d in doc.downloads if d.rel_path != "games.html"]

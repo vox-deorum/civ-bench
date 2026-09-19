@@ -375,6 +375,15 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .chart-controls .controls-label { color: #445164; font-weight: 650; }
 .chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
 table.comparison td.vanilla-value { font-weight: 700; }
+.content.game-log { max-width: none; }
+#game-log-table { width: 100%; }
+#game-log-table th, #game-log-table td { vertical-align: top; }
+#game-log-table th:nth-child(2), #game-log-table td:nth-child(2),
+#game-log-table th:nth-child(6), #game-log-table td:nth-child(6),
+#game-log-table th:nth-child(7), #game-log-table td:nth-child(7) {
+  text-align: left; white-space: normal; overflow-wrap: anywhere;
+}
+.game-winner { display: block; color: #687486; font-size: .88em; }
 .game-log-filters { display: flex; flex-wrap: wrap; gap: .7rem 1rem; align-items: center; margin: 1.2rem 0; }
 .game-log-filters label { display: inline-flex; align-items: center; gap: .3rem; }
 .game-log-filters select, .game-log-filters button { font: inherit; padding: .25rem; }

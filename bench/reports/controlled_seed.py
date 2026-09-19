@@ -1051,8 +1051,7 @@ CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
       var checked = {};
       boxes.forEach(function (box) { checked[box.value] = box.checked; });
       gameRows.forEach(function (row) {
-        row.hidden = row.dataset.vanilla !== "true" && boxes.length &&
-          checked[row.dataset.strategist] !== true;
+        row.hidden = boxes.length > 0 && checked[row.dataset.strategist] !== true;
       });
     }
 
