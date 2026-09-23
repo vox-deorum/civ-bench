@@ -41,6 +41,12 @@ class Catalog:
         self._labels = dict(experiments.get("player_type_labels", {}))
         self._strategist_model_lookup = self._build_strategist_model_lookup()
         self._model_alias_candidates = self._build_model_alias_candidates()
+        self._model_acronyms = {
+            part
+            for model in self._strategist_models
+            for part in model["id"].split("-")
+            if len(part) > 1 and part.isalpha() and part.isupper()
+        }
         self._variant_suffix_order = sorted(
             self._strategist_variants.items(),
             key=lambda item: len(item[1].get("suffix", "")),
@@ -245,7 +251,11 @@ class Catalog:
         for candidate, model_id in self._model_alias_candidates:
             if candidate and candidate in lowered:
                 return model_id
-        return normalized
+        name = normalized.rsplit("/", 1)[-1]
+        return "-".join(
+            part.upper() if part.upper() in self._model_acronyms else part.capitalize()
+            for part in name.split("-")
+        )
 
     def get_strategist_model(self, name: Optional[str]) -> Optional[dict]:
         if not name:

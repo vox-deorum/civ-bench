@@ -36,6 +36,47 @@ def test_canonicalize_longer_alias_not_shadowed(catalog):
     assert catalog.canonicalize_model_name("minimax-m2.5") == "MiniMax-M2.5"
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("openai-compatible/new-model-4.2", "New-Model-4.2"),
+        ("vendor/new-model-4.2@high", "New-Model-4.2"),
+        ("vendor/mIxEd-Name-120b", "Mixed-Name-120b"),
+        ("vendor/GPT-7-luna", "GPT-7-Luna"),
+        ("vendor/glm-99.1-alpha", "GLM-99.1-Alpha"),
+        ("vendor/oss-experimental-9b", "OSS-Experimental-9b"),
+        ("vendor/API-Model", "Api-Model"),
+        ("", "N/A"),
+        (None, "N/A"),
+    ],
+)
+def test_canonicalize_unknown_model_name(catalog, raw, expected):
+    assert catalog.canonicalize_model_name(raw) == expected
+
+
+def test_registered_alias_precedes_unknown_name_formatting():
+    cat = Catalog(
+        {"strategist_models": [{"id": "Canonical-Name", "aliases": ["provider/raw-name"]}]},
+        {},
+    )
+    assert cat.canonicalize_model_name("provider/raw-name") == "Canonical-Name"
+
+
+def test_unknown_model_composes_with_variant_and_experiment_label():
+    cat = Catalog(
+        {
+            "player_type_template": "{model}-{variant}{suffix}",
+            "strategist_variant_map": {"simple-strategist": "Simple"},
+            "strategist_variants": {"Simple": {"suffix": "-Simple"}},
+            "strategist_models": [{"id": "GPT-6-Luna", "aliases": []}],
+        },
+        {"player_type_labels": {"new-condition": "-Per-5"}},
+    )
+    assert cat.compose_player_type(
+        "codex/gpt-7-luna@high", "simple-strategist", "new-condition", 0
+    ) == "GPT-7-Luna-Simple-Per-5"
+
+
 def test_label_suffix_and_override():
     cat = Catalog(
         {

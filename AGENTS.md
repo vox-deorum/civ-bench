@@ -1,18 +1,22 @@
-# Agents Guide
+# AGENTS.md
 
-This file is for AI coding agents working on the CivBench repository. It captures the writing style we want and gives a quick orientation to the project. NEVER STAGE YOUR CHANGES UNLESS EXPLICITLY ASKED! However, if a change gets externally staged, it is from the human reviewer.
+NEVER STAGE YOUR CHANGES UNLESS EXPLICITLY ASKED! However, if a change gets externally staged, it is from the human reviewer. 
 
-`civ-bench` is a modular, JSON-configurable Python **benchmark harness** for LLM strategists in *Civilization V: Vox Populi* (via the Vox Deorum platform). Point it at raw game-run data, hand it a config, and it produces a report: extraction, analysis, and rendering are all driven by JSON.
+When asking questions, come with a clear, plain description with an example. Do not assume the owner knows every detail in your context. DO NOT ASK asynchronous questions.
 
-## Use Subagents Whenever Appropriate
+## Use Subagents When Appropriate
 
-ALWAYS delegate less critical/lower-level BATCH work to subagents with less capabilities, e.g., from Claude Fable to Sonnet/Haiku, or from GPT Sol to Terra (reviewing/implementing)/Luna (exploring/batch editing). Report which model you used to spawn that agent in response text. Such work may involve exploring repo structure, finding references, summarizing information, or conducting less sophisticated edits in batches.
+Delegate less critical/lower-level BATCH work to subagents with less capabilities for exploring/batch editing. Always designate a model for subagents and report which model (or tool) you used in response text. Such work may involve exploring repo structure, finding references, summarizing information, or conducting less sophisticated edits in batches.
+
+Use OpenCode delegation if such a skill exists, with clear, bounded instructions. If OpenCode does not work, switch back to native subagents.
+
+DO NOT use weak models for complex diagnosis. For independent review, use OpenCode. For exploration and simple implementation task:
+- Claude Code: always delegate to OpenCode. Never use Sonnet or Haiku.
+- Codex: always delegate to OpenCode or GPT-6-Luna. Never use Sol.
 
 ## Writing Style
 
-Write everything in natural language: docs, code comments, commit messages, release notes, console output, and the AGENTS.md files themselves. Keep the prose plain and easy to follow. Bullets, subbullets, and tables are encouraged wherever they make the content easier to scan. Do not use em-dashes anywhere. Reach for a colon, a comma, parentheses, or two separate sentences instead. Every agent working in this repo must follow this rule.
-
-Do not produce layered writings (e.g., instead of X we chose to do Y) that document revision histories, unless explicitly instructed to do so. A reader needs the rule, not the case for it. State what is true and stop there, maximize the language efficiency. **Readability is the top priority.**
+Use plain, natural language in documentation, comments, commit messages, release notes, and responses. Use lists, tables, or diagrams to improve clarity. Do not use em-dashes. These rules also apply to delegates. Rewrite documentation and plans for a coherent final result. Include revision history only when requested, and comparisons only when they help the reader make a decision.
 
 ## Core rules
 
@@ -81,11 +85,3 @@ pytest
 Use `--only <stage-id>` to run one stage with its dependencies. Use `--skip <stage-id>` to omit a stage. After `civ-bench fix`, run extraction with `--force-rebuild` to refresh the canonical tables.
 
 All dependencies are installed up front. Use `scripts/install.sh` on Linux or macOS. `Rscript` must be on `PATH` or set through `CIV_BENCH_RSCRIPT`.
-
-## Tool use
-
-- Use dedicated read, edit, search, and file-listing tools when available.
-- Pass the working directory to shell tools. Do not change directories inside a command.
-- Use repository-relative paths in shell commands.
-- Prefer PowerShell syntax on Windows.
-- Do not stage changes unless the user explicitly asks.

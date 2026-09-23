@@ -235,6 +235,15 @@
       "pricing": { "input_per_million": 0.25, "output_per_million": 2.2 }
     },
     {
+      "id": "Qwen-3.8-Flash-Next",
+      "aliases": [
+        "qwen-3.8-flash-next",
+        "openai-compatible/qwen-3.8-flash-next"
+      ],
+      "color": "#CB181D",
+      "pricing": { "input_per_million": 0.15, "output_per_million": 0.47 }
+    },
+    {
       "id": "Mistral-Small-4",
       "aliases": [
         "mistrial-small-4",
@@ -293,6 +302,14 @@
       ],
       "color": "#FF6347",
       "pricing": { "input_per_million": 4, "output_per_million": 20 }
+    },
+    {
+      "id": "GPT-6-Luna",
+      "aliases": [
+        "gpt-6-luna"
+      ],
+      "color": "#FF6347",
+      "pricing": { "input_per_million": 0.1, "output_per_million": 0.5 }
     },
     {
       "id": "GPT-6-Astra",
