@@ -39,6 +39,7 @@ _FAMILY_TITLES = {
     "prediction": "Prediction",
     "calibration": "Calibration",
     "performance": "Performance",
+    "behavior": "Behavior",
     "exploratory": "Exploratory",
 }
 
@@ -61,6 +62,11 @@ _FAMILY_PURPOSES = {
         "Compare strategists' strength, progress, cost, and token use, with "
         "coverage checks to show which experiments support the results."
     ),
+    "behavior": (
+        "Describe how strategists play (military, diplomatic, strategic, and "
+        "policy choices), against the in-game AI on the same map and seat and "
+        "in absolute terms."
+    ),
     "exploratory": (
         "Explore game patterns and strategy profiles across the dataset."
     ),
@@ -68,7 +74,7 @@ _FAMILY_PURPOSES = {
 
 # Stable display order for the families; unknown families sort after these, in the
 # order they first appear among the sections.
-_FAMILY_ORDER = ["ratings", "prediction", "calibration", "performance", "exploratory"]
+_FAMILY_ORDER = ["ratings", "prediction", "calibration", "performance", "behavior", "exploratory"]
 
 
 def family_of(module: str) -> str:

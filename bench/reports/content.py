@@ -41,10 +41,16 @@ def report_summary(summary: str, metadata: dict) -> str:
     return summary
 
 
+# Metadata keys that steer rendering rather than describe provenance.
+LAYOUT_METADATA_KEYS = {"views"}
+
+
 def metadata_text(metadata: dict) -> str:
     """Format analysis provenance for a tooltip or Markdown disclosure."""
     parts = []
     for key, value in metadata.items():
+        if key in LAYOUT_METADATA_KEYS:
+            continue
         if isinstance(value, (list, tuple)):
             value = ", ".join(str(v) for v in value)
         parts.append(f"{key}: {value}")

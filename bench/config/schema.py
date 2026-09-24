@@ -81,13 +81,38 @@ BEHAVIOR_POLICIES = (
     "industry", "imperialism", "rationalism",
     "freedom", "autocracy", "order",
 )
+# Relationship column → kind. Counts are 0 when the player set nothing; the
+# averages and shares are blank without any pair-turn to weigh. The distinct-
+# target count is a `level`, because a per-turn rate of it means nothing.
+BEHAVIOR_RELATIONSHIP_KINDS = {
+    "relationship_changes": "count",
+    "relationship_targets": "level",
+    "stance_public_avg": "level",
+    "stance_private_avg": "level",
+    "stance_net_avg": "level",
+    "stance_masked_hostility_share": "share",
+    "stance_masked_goodwill_share": "share",
+}
+BEHAVIOR_RELATIONSHIPS = tuple(BEHAVIOR_RELATIONSHIP_KINDS)
+# Policy branches that are ideologies; the rest compete for the opening branch.
+BEHAVIOR_IDEOLOGIES = ("freedom", "autocracy", "order")
+# Persona traits `behavior.diplomacy` reads (as `persona_<trait>_avg`) by default.
+BEHAVIOR_DIPLOMACY_TRAITS = (
+    "DiplomaticBalance", "Friendliness", "WorkWithWillingness",
+    "WorkAgainstWillingness", "Loyalty", "DenounceWillingness", "Forgiveness",
+    "Meanness", "Neediness", "Chattiness", "DeceptiveBias",
+)
 BEHAVIOR_STATS = ("min", "avg", "max")
+# Column kinds tell analyses how to treat a behavior column: `count` is
+# normalized by turns alive, `turn` is a first-adoption turn with "N/A" for never.
+BEHAVIOR_COLUMN_KINDS = ("count", "level", "share", "turn")
 # Family key → allowed selections. `stats` is the only non-family key.
 BEHAVIOR_FAMILIES = {
     "flavor": FLAVOR_NAMES,
     "persona": PERSONA_NAMES,
     "events": BEHAVIOR_EVENTS,
     "policies": BEHAVIOR_POLICIES,
+    "relationships": BEHAVIOR_RELATIONSHIPS,
 }
 BEHAVIOR_DEFAULTS = {
     "stats": ["min", "avg", "max"],
@@ -95,9 +120,12 @@ BEHAVIOR_DEFAULTS = {
                "Expansion", "Diplomacy", "Spaceship"],
     "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness",
                 "DeceptiveBias", "Forgiveness", "DenounceWillingness",
-                "MinorCivWarBias", "VictoryCompetitiveness"],
+                "MinorCivWarBias", "VictoryCompetitiveness",
+                "DiplomaticBalance", "Friendliness", "WorkWithWillingness",
+                "WorkAgainstWillingness", "Loyalty", "Neediness", "Chattiness"],
     "events": list(BEHAVIOR_EVENTS),
     "policies": list(BEHAVIOR_POLICIES),
+    "relationships": list(BEHAVIOR_RELATIONSHIPS),
 }
 
 # ── filters (§3.1) ─────────────────────────────────────────────────────────
@@ -218,6 +246,11 @@ ANALYSIS_MODULES = {
     "performance.controlled_seed_report",
     "performance.game_log",
     "performance.usage_efficiency",
+    # behavior.*
+    "behavior.profiles",
+    "behavior.diplomacy",
+    "behavior.commitment",
+    "behavior.policies",
     # exploratory.*
     "exploratory.panel",
     "exploratory.turn",
@@ -229,6 +262,10 @@ STRENGTH_RATING_MODULES = {
     "ratings.plackett_luce",
     "ratings.matchups",
 }
+
+# Params every behavior.* module accepts (§6.2).
+BEHAVIOR_COMMON_PARAMS = {"baseline_experiment", "rate", "by", "bootstrap_n", "ci_level"}
+BEHAVIOR_RATES = ("per_100_turns", "per_game")
 
 # ── per-module analysis param schemas (§6, validated in loader._validate_analysis) ──
 # Allowed param keys per core module. Cross-cutting `group_by`/`bootstrap` (ratings)
@@ -256,6 +293,10 @@ ANALYSIS_PARAM_KEYS = {
     "performance.usage_efficiency": {
         "currency", "log_x", "annotate", "condition_pairing",
     },
+    "behavior.profiles": {"metrics", *BEHAVIOR_COMMON_PARAMS},
+    "behavior.diplomacy": {"traits", *BEHAVIOR_COMMON_PARAMS},
+    "behavior.commitment": set(BEHAVIOR_COMMON_PARAMS),
+    "behavior.policies": {"branches", *(BEHAVIOR_COMMON_PARAMS - {"rate"})},
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}

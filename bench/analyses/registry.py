@@ -14,6 +14,12 @@ from __future__ import annotations
 from typing import Dict, Type
 
 from .base import Analysis
+from .behavior import (
+    BehaviorCommitment,
+    BehaviorDiplomacy,
+    BehaviorPolicies,
+    BehaviorProfiles,
+)
 from .calibration import (
     CalibrationCellBaseline,
     CalibrationCivEffects,
@@ -60,6 +66,11 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "performance.controlled_seed_report": PerformanceControlledSeedReport,
     "performance.game_log": PerformanceGameLog,
     "performance.usage_efficiency": PerformanceUsageEfficiency,
+    # behavior.*
+    "behavior.profiles": BehaviorProfiles,
+    "behavior.diplomacy": BehaviorDiplomacy,
+    "behavior.commitment": BehaviorCommitment,
+    "behavior.policies": BehaviorPolicies,
 }
 
 

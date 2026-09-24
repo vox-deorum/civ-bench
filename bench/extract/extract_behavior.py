@@ -11,7 +11,7 @@ import sqlite3
 from typing import Optional
 
 from ..catalog import Catalog
-from ..config.behavior import resolve_behavior_spec
+from ..config.behavior import family_columns, resolve_behavior_spec
 from .behavior import FAMILIES, build_game_context
 from .errors import ExtractError
 from .export_common import run_table_export
@@ -31,8 +31,8 @@ BEHAVIOR_KEY_FIELDS = [
 def behavior_fieldnames(spec: Optional[dict] = None) -> list[str]:
     spec = resolve_behavior_spec(spec)
     columns = list(BEHAVIOR_KEY_FIELDS)
-    for name, family in FAMILIES.items():
-        columns.extend(family.columns(spec[name], spec["stats"]))
+    for name in FAMILIES:
+        columns.extend(column for column, _kind in family_columns(name, spec[name], spec["stats"]))
     return columns
 
 
@@ -75,9 +75,9 @@ def extract_game_behavior_data(db_path, spec: dict, catalog: Optional[Catalog] =
                 "civilization": player_info_cache[pid]["civilization"],
                 "survival_turn": ctx.survival_turn.get(pid, ""),
             }
-            for name, family in FAMILIES.items():
+            for name in FAMILIES:
                 values = values_by_family[name].get(pid, {})
-                for column in family.columns(spec[name], spec["stats"]):
+                for column, _kind in family_columns(name, spec[name], spec["stats"]):
                     row[column] = values.get(column, "")
             rows.append(row)
         return rows

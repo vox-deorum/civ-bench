@@ -2,14 +2,44 @@
 
 Kept free of the extract layer so the config loader can validate it cheaply, and
 idempotent so the extract runner can resolve a config that skipped the loader.
+It is also the single source of the table's column names and their kinds, which
+the extract families write and the ``behavior.*`` analyses read.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import schema as S
 from .errors import ConfigError
+
+
+def snake_case(name: str) -> str:
+    """``UseNuke`` → ``use_nuke``; the column-name convention of the CSV tables."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def family_columns(family: str, selection, stats) -> list[tuple[str, str]]:
+    """``(column, kind)`` pairs one behavior family writes for its selection."""
+    if family in ("flavor", "persona"):
+        return [(f"{family}_{snake_case(name)}_{stat}", "level") for name in selection for stat in stats]
+    if family == "events":
+        return [(name, "count") for name in selection]
+    if family == "policies":
+        return [(name, "count" if name == "policy_changes" else "turn") for name in selection]
+    if family == "relationships":
+        return [(name, S.BEHAVIOR_RELATIONSHIP_KINDS[name]) for name in selection]
+    raise ValueError(f"unknown behavior family '{family}'")
+
+
+def behavior_columns(raw: Any) -> dict[str, str]:
+    """Every value column of the ``behavior`` table in header order, mapped to its kind."""
+    spec = resolve_behavior_spec(raw)
+    columns: dict[str, str] = {}
+    for family in S.BEHAVIOR_FAMILIES:
+        columns.update(family_columns(family, spec[family], spec["stats"]))
+    return columns
 
 
 def resolve_behavior_spec(raw: Any, where: str = "data.extract.behavior") -> dict:

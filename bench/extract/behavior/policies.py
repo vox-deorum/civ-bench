@@ -15,9 +15,6 @@ _ADOPTION_EVENTS = ("PlayerAdoptPolicyBranch", "IdeologyAdopted")
 
 
 class PolicyFamily:
-    def columns(self, selection, stats) -> list[str]:
-        return list(selection)
-
     def extract(self, cursor, ctx: GameContext, selection, stats) -> dict:
         if not selection:
             return {}

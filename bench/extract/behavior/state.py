@@ -18,9 +18,6 @@ class StateFamily:
         self.table = table
         self.prefix = prefix
 
-    def columns(self, selection, stats) -> list[str]:
-        return [f"{self.prefix}_{snake_case(name)}_{stat}" for name in selection for stat in stats]
-
     def extract(self, cursor, ctx: GameContext, selection, stats) -> dict:
         if not selection:
             return {}
@@ -53,7 +50,7 @@ class StateFamily:
         for pid, by_turn in states.items():
             turns = sorted(by_turn)
             end = max(ctx.survival_turn.get(pid, turns[-1]), turns[-1])
-            weights = [nxt - cur for cur, nxt in zip(turns, turns[1:])] + [end - turns[-1] + 1]
+            weights = turn_weights(turns, end)
             record = {}
             for idx, name in enumerate(selected):
                 series = [(by_turn[t][idx], w) for t, w in zip(turns, weights) if by_turn[t][idx] is not None]
@@ -61,6 +58,16 @@ class StateFamily:
                     record[f"{self.prefix}_{snake_case(name)}_{stat}"] = _summarize(series, stat)
             result[pid] = record
         return result
+
+
+def turn_weights(turns, end) -> list[int]:
+    """Turns each state holds: until the next state's turn, the last one through ``end``.
+
+    ``turns`` is sorted. A state is clipped at ``end`` (inclusive), so a state that
+    starts after ``end`` weighs 0.
+    """
+    bounds = list(turns[1:]) + [end + 1]
+    return [max(0, min(nxt, end + 1) - cur) for cur, nxt in zip(turns, bounds)]
 
 
 def _summarize(series, stat):

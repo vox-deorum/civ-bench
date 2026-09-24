@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from dataclasses import dataclass, field
 
+from ...config.behavior import snake_case
 from ..utilities import is_schema_mismatch
 
-
-def snake_case(name: str) -> str:
-    """``UseNuke`` → ``use_nuke``; the column-name convention of the CSV tables."""
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+__all__ = ["GameContext", "build_game_context", "snake_case"]
 
 
 @dataclass

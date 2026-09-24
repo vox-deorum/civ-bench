@@ -15,9 +15,38 @@ series stay distinguishable.
 
 from __future__ import annotations
 
-REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Escape. */
+REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Escape.
+   Also switches section views: the first view of each group is shown, and a
+   choice applies to every group on the page that offers the same view. */
 (function () {
   "use strict";
+  var groups = document.querySelectorAll(".view-group");
+  function showView(group, name) {
+    var panels = group.querySelectorAll(".view-panel");
+    var known = Array.prototype.some.call(panels, function (panel) {
+      return panel.getAttribute("data-view") === name;
+    });
+    if (!known) { return; }
+    panels.forEach(function (panel) {
+      panel.hidden = panel.getAttribute("data-view") !== name;
+    });
+    group.querySelectorAll(".view-button").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.getAttribute("data-view") === name));
+    });
+  }
+  if (groups.length) {
+    document.documentElement.classList.add("views-ready");
+    groups.forEach(function (group) {
+      var first = group.querySelector(".view-panel");
+      if (first) { showView(group, first.getAttribute("data-view")); }
+      group.querySelectorAll(".view-button").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var name = button.getAttribute("data-view");
+          groups.forEach(function (other) { showView(other, name); });
+        });
+      });
+    });
+  }
   document.querySelectorAll(".report-help").forEach(function (help) {
     var button = help.querySelector(".help-toggle");
     function dismiss() {

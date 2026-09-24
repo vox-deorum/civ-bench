@@ -37,7 +37,7 @@ from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .context import ReportBuildContext
 from .errors import ReportError
-from .model import Download, Figure, GameLogDocument, Section, Table
+from .model import Download, Figure, GameLogDocument, Section, Table, View
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
 
@@ -234,6 +234,7 @@ def _build_section(
         return section
 
     asset_dir = assets_root / stage_id
+    inline_by_name: dict[tuple[str, str], object] = {}
     for fig in figure_entries:
         rel = _copy_asset(
             src_dir / fig["file"],
@@ -248,6 +249,7 @@ def _build_section(
             figure = Figure(caption=caption, rel_path=rel)
             if fig["name"] in inline_figures:
                 section.figures.append(figure)
+                inline_by_name[("figures", fig["name"])] = figure
             else:
                 section.downloads.append(
                     Download(
@@ -280,15 +282,15 @@ def _build_section(
         if tbl["name"] in inline_tables:
             frame = pd.read_csv(src)
             shown = frame.head(MAX_TABLE_ROWS)
-            section.tables.append(
-                Table(
-                    name=tbl["name"],
-                    frame=shown,
-                    rel_csv=rel_csv,
-                    n_total_rows=int(len(frame)),
-                    n_shown_rows=int(len(shown)),
-                )
+            table = Table(
+                name=tbl["name"],
+                frame=shown,
+                rel_csv=rel_csv,
+                n_total_rows=int(len(frame)),
+                n_shown_rows=int(len(shown)),
             )
+            section.tables.append(table)
+            inline_by_name[("tables", tbl["name"])] = table
         else:
             section.downloads.append(
                 Download(label=f"Table: {tbl['name']} (CSV)", rel_path=rel_csv)
@@ -306,7 +308,34 @@ def _build_section(
         )
         if copied is not None:
             section.downloads.append(Download(label=Path(copied).name, rel_path=copied))
+    _assign_views(section, inline_by_name)
     return section
+
+
+def _assign_views(section: Section, inline_by_name: dict) -> None:
+    """Move inline artifacts named by ``metadata["views"]`` into their views.
+
+    Artifacts no view claims stay on the section and render above the views. A
+    malformed declaration is ignored, so the section renders as a single view.
+    """
+    declared = section.metadata.get("views")
+    if not isinstance(declared, dict):
+        return
+    claimed: set[int] = set()
+    for name, spec in declared.items():
+        if not isinstance(spec, dict):
+            continue
+        view = View(name=str(name), label=str(spec.get("label") or name))
+        for kind, target in (("figures", view.figures), ("tables", view.tables)):
+            for artifact in spec.get(kind) or []:
+                item = inline_by_name.get((kind, str(artifact)))
+                if item is not None and id(item) not in claimed:
+                    target.append(item)
+                    claimed.add(id(item))
+        if view.figures or view.tables:
+            section.views.append(view)
+    section.figures = [f for f in section.figures if id(f) not in claimed]
+    section.tables = [t for t in section.tables if id(t) not in claimed]
 
 
 def _inline_artifact_names(

@@ -212,7 +212,21 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         )
         lines.append("")
         return
-    for figure in section.figures:
+    _render_artifacts_md(section.figures, section.tables, lines)
+    for view in section.views:
+        lines.append(f"**{view.label}**")
+        lines.append("")
+        _render_artifacts_md(view.figures, view.tables, lines)
+    if section.downloads:
+        lines.append("**Downloads and supporting files**")
+        lines.append("")
+        for dl in section.downloads:
+            lines.append(f"- [{dl.label}]({dl.rel_path})")
+        lines.append("")
+
+
+def _render_artifacts_md(figures, tables, lines: list[str]) -> None:
+    for figure in figures:
         if figure.interactive:
             caption = figure.caption.replace("[", "(").replace("]", ")")
             lines.append(
@@ -227,14 +241,8 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         lines.append("")
         lines.append(f"*Figure: {figure.caption}*")
         lines.append("")
-    for table in section.tables:
+    for table in tables:
         _render_table_md(table, lines)
-    if section.downloads:
-        lines.append("**Downloads and supporting files**")
-        lines.append("")
-        for dl in section.downloads:
-            lines.append(f"- [{dl.label}]({dl.rel_path})")
-        lines.append("")
 
 
 def _escape_md_cells(frame):
@@ -346,6 +354,13 @@ table { width: max-content; min-width: 100%; border-collapse: collapse; font-siz
 th, td { border-bottom: 1px solid #e0e5eb; padding: .4rem .65rem; text-align: right; white-space: nowrap; }
 th { background: #f0f3f7; }
 td:first-child, th:first-child { text-align: left; }
+.view-switch { display: none; gap: 0; margin: .75rem 0 .25rem; border: 1px solid #a8b3c2; border-radius: .4rem; overflow: hidden; }
+.views-ready .view-switch { display: inline-flex; }
+.view-button { border: 0; border-right: 1px solid #a8b3c2; padding: .35rem .8rem; color: #29384b; background: white; font: inherit; cursor: pointer; }
+.view-button:last-child { border-right: 0; }
+.view-button[aria-pressed="true"] { color: white; background: #29507a; }
+.view-button:focus-visible { outline: 2px solid #175ca8; outline-offset: -2px; }
+.views-ready .view-heading { display: none; }
 details.downloads { margin: 1.25rem 0 2rem; border: 1px solid #d8dee6; border-radius: .4rem; padding: .65rem .8rem; background: #fbfcfd; }
 details.downloads summary { cursor: pointer; font-weight: 650; }
 details.downloads ul { margin-bottom: .25rem; }
@@ -579,7 +594,26 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         )
         parts.append("</section>")
         return
-    for figure in section.figures:
+    _render_artifacts_html(section.figures, section.tables, parts)
+    if section.views:
+        _render_views_html(section, parts, anchor)
+    if section.downloads:
+        parts.append('<details class="downloads">')
+        parts.append(
+            f"<summary>Downloads and supporting files ({len(section.downloads)})</summary>"
+        )
+        parts.append("<ul>")
+        for dl in section.downloads:
+            parts.append(
+                f'<li><a href="{_html.escape(dl.rel_path)}">{_html.escape(dl.label)}</a></li>'
+            )
+        parts.append("</ul>")
+        parts.append("</details>")
+    parts.append("</section>")
+
+
+def _render_artifacts_html(figures, tables, parts: list[str]) -> None:
+    for figure in figures:
         if figure.interactive:
             escaped_path = _html.escape(figure.rel_path)
             escaped_caption = _html.escape(figure.caption)
@@ -596,21 +630,37 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
             f'alt="{_html.escape(figure.caption)}">'
             f'<figcaption class="caption">{_html.escape(figure.caption)}</figcaption></figure>'
         )
-    for table in section.tables:
+    for table in tables:
         _render_table_html(table, parts)
-    if section.downloads:
-        parts.append('<details class="downloads">')
-        parts.append(
-            f"<summary>Downloads and supporting files ({len(section.downloads)})</summary>"
-        )
-        parts.append("<ul>")
-        for dl in section.downloads:
+
+
+def _render_views_html(section: Section, parts: list[str], anchor: str) -> None:
+    """Render a section's views; the shared script turns them into a toggle.
+
+    Without JavaScript every view stays visible under its own heading. With it,
+    the first view is shown, and choosing a view switches every section on the
+    page that offers a view of the same name.
+    """
+    parts.append('<div class="view-group">')
+    if len(section.views) > 1:
+        parts.append('<div class="view-switch" role="group" aria-label="Choose a view">')
+        for index, view in enumerate(section.views):
+            pressed = "true" if index == 0 else "false"
             parts.append(
-                f'<li><a href="{_html.escape(dl.rel_path)}">{_html.escape(dl.label)}</a></li>'
+                f'<button type="button" class="view-button" data-view="{_html.escape(view.name)}" '
+                f'aria-controls="{anchor}-view-{_slug(view.name)}" aria-pressed="{pressed}">'
+                f"{_html.escape(view.label)}</button>"
             )
-        parts.append("</ul>")
-        parts.append("</details>")
-    parts.append("</section>")
+        parts.append("</div>")
+    for view in section.views:
+        parts.append(
+            f'<div class="view-panel" id="{anchor}-view-{_slug(view.name)}" '
+            f'data-view="{_html.escape(view.name)}">'
+        )
+        parts.append(f'<p class="view-heading"><strong>{_html.escape(view.label)}</strong></p>')
+        _render_artifacts_html(view.figures, view.tables, parts)
+        parts.append("</div>")
+    parts.append("</div>")
 
 
 def _render_table_html(table: Table, parts: list[str]) -> None:

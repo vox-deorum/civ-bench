@@ -1057,3 +1057,75 @@ def test_config_friendly_name_and_description_show_on_report_page(report_env):
     md = (out / "report.md").read_text(encoding="utf-8")
     assert md.startswith("# Staff benchmark 2026")
     assert "*Staff line-up, standard 8-seat map.*" in md
+
+
+# ── section views (relative / absolute toggle) ───────────────────────────────
+@pytest.fixture
+def views_env(tmp_path, write_spec, dev_spec):
+    root = str(tmp_path / "out")
+    spec = dev_spec
+    spec["output"] = {"root": root, "suffix": ""}
+    spec["data"]["extract"]["enabled"] = False
+    spec["adjust"] = []
+    spec["analyses"] = [
+        {"id": "perf_usage_efficiency", "module": "performance.usage_efficiency",
+         "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
+        {"id": "beh_two", "module": "behavior.profiles", "enabled": True,
+         "params": {"metrics": ["wars_declared"]}},
+        {"id": "beh_one", "module": "behavior.profiles", "enabled": True,
+         "params": {"metrics": ["wars_declared"]}},
+    ]
+    spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
+                      "overview_sections": None, "section_overrides": {}, "title": None,
+                      "include_disabled": False}
+    cfg = load_config(write_spec(spec))
+    _emit(cfg, "perf_usage_efficiency", "performance.usage_efficiency", summary="Usage.",
+          figures=[{"name": "usage_efficiency", "format": "plotly"}])
+    frame = pd.DataFrame({"player_type": ["Kimi"], "metric": ["wars_declared"], "mean": [1.5]})
+    views = {
+        "relative": {"label": "Relative to matched in-game AI",
+                     "tables": [], "figures": ["profile_relative"]},
+        "absolute": {"label": "Absolute", "tables": [], "figures": ["profile_absolute"]},
+    }
+    _emit(cfg, "beh_two", "behavior.profiles", summary="Two views.",
+          metadata={"baseline_experiment": "vanilla", "views": views},
+          tables={"profile_relative": frame, "profile_absolute": frame},
+          figures=["profile_relative", "profile_absolute"])
+    _emit(cfg, "beh_one", "behavior.profiles", summary="One view.",
+          metadata={"views": {"absolute": views["absolute"]}},
+          tables={"profile_absolute": frame}, figures=["profile_absolute"])
+    return cfg
+
+
+def test_views_render_a_toggle_with_the_first_view_selected(views_env):
+    run_report(views_env)
+    out = report_dir(views_env)
+    page = (out / "behavior.html").read_text(encoding="utf-8")
+    assert page.count('<div class="view-switch"') == 1          # only the two-view section
+    relative_button = page.index('data-view="relative" aria-controls=')
+    absolute_button = page.index('data-view="absolute" aria-controls=')
+    assert relative_button < absolute_button
+    assert 'data-view="relative" aria-controls="section-beh-two-view-relative" aria-pressed="true"' in page
+    assert 'aria-pressed="false">Absolute</button>' in page
+    assert page.count('class="view-panel"') == 3
+    assert page.index('src="assets/beh_two/profile_relative.png"') < page.index(
+        'src="assets/beh_two/profile_absolute.png"')
+    assert "views:" not in page                                # layout keys stay out of tooltips
+    assert ".views-ready .view-switch" in (out / "assets/report.css").read_text(encoding="utf-8")
+    assert "views-ready" in (out / "assets/report-help.js").read_text(encoding="utf-8")
+
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert md.index("## Performance") < md.index("## Behavior")
+    assert md.index("**Relative to matched in-game AI**") < md.index("**Absolute**")
+    assert "views:" not in md
+    # Tables stay downloads (module defaults inline figures only).
+    assert "assets/beh_two/profile_relative.csv" in md
+
+
+def test_malformed_views_fall_back_to_a_single_view(views_env):
+    _emit(views_env, "beh_two", "behavior.profiles", summary="Broken.",
+          metadata={"views": ["relative"]}, figures=["profile_relative"])
+    run_report(views_env)
+    page = (report_dir(views_env) / "behavior.html").read_text(encoding="utf-8")
+    assert page.count('<div class="view-switch"') == 0
+    assert 'src="assets/beh_two/profile_relative.png"' in page

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterable
 
-from .behavior import resolve_behavior_spec
+from .behavior import behavior_columns, resolve_behavior_spec, snake_case
 from .dependencies import resolve_stage_graph
 from .errors import ConfigError
 from .filters import (
@@ -453,7 +453,9 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
         return  # not a core module with a param schema yet (reserved/optional)
     _check_keys(params, allowed, f"{where}.params")
     # Enum / type checks for the params with a constrained domain.
-    if "metrics" in params:
+    if module.startswith("behavior."):
+        _validate_behavior_param_types(params, where)
+    elif "metrics" in params:
         metrics = _check_string_list(params["metrics"], f"{where}.params.metrics")
         bad = [m for m in metrics if m not in S.PREDICTION_METRICS]
         if bad:
@@ -500,6 +502,64 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
     ):
         if key in params:
             params[key] = coerce_bool(params[key], f"{where}.params.{key}")
+
+
+def _validate_behavior_param_types(params: dict, where: str) -> None:
+    """Types of the shared ``behavior.*`` params; columns are checked in a later pass."""
+    for key in ("metrics", "traits", "branches"):
+        if key in params:
+            _check_string_list(params[key], f"{where}.params.{key}", allow_empty=False)
+    if "rate" in params:
+        _check_domain(params["rate"], set(S.BEHAVIOR_RATES), f"{where}.params.rate")
+    if "by" in params:
+        _check_type(params["by"], (str,), f"{where}.params.by")
+    if params.get("baseline_experiment") is not None:
+        _check_type(params["baseline_experiment"], (str,), f"{where}.params.baseline_experiment")
+
+
+def _validate_behavior_columns(analyses: list[Stage], data: dict) -> None:
+    """``behavior.*`` metrics must be columns the configured behavior extract writes."""
+    stages = [s for s in analyses if str(s.raw.get("module", "")).startswith("behavior.")]
+    if not stages:
+        return
+    extract = data.get("extract") or {}
+    kinds = behavior_columns(extract.get("behavior"))
+    for stage in stages:
+        where = f"analyses (id={stage.id!r})"
+        module = stage.raw["module"]
+        params = stage.raw.get("params") or {}
+        if module == "behavior.profiles":
+            metrics = params.get("metrics")
+            if not metrics:
+                raise ConfigError(f"{where}.params.metrics: required for behavior.profiles.")
+            bad = [m for m in metrics if m not in kinds]
+            if bad:
+                raise ConfigError(
+                    f"{where}.params.metrics: {bad} are not columns of the behavior table as "
+                    f"configured by data.extract.behavior. Allowed: {list(kinds)}."
+                )
+        elif module == "behavior.diplomacy":
+            traits = params.get("traits") or list(S.BEHAVIOR_DIPLOMACY_TRAITS)
+            unknown = [t for t in traits if t not in S.PERSONA_NAMES]
+            if unknown:
+                raise ConfigError(
+                    f"{where}.params.traits: unknown persona trait(s) {unknown}. "
+                    f"Allowed: {list(S.PERSONA_NAMES)}."
+                )
+            missing = [t for t in traits if f"persona_{snake_case(t)}_avg" not in kinds]
+            if missing and "traits" in params:
+                raise ConfigError(
+                    f"{where}.params.traits: {missing} need data.extract.behavior.persona to "
+                    "select them and data.extract.behavior.stats to include 'avg'."
+                )
+        elif module == "behavior.policies" and params.get("branches"):
+            branches = [c for c, kind in kinds.items() if kind == "turn"]
+            bad = [b for b in params["branches"] if b not in branches]
+            if bad:
+                raise ConfigError(
+                    f"{where}.params.branches: {bad} are not selected in "
+                    f"data.extract.behavior.policies. Selected branches: {branches}."
+                )
 
 
 def _validate_group_by(group_by: Any, groupings: dict, where: str) -> None:
@@ -749,6 +809,7 @@ def load_config(path: str | Path) -> RunConfig:
         _validate_analysis(a, i, presets, groupings, global_filter)
         for i, a in enumerate(analyses_raw)
     ]
+    _validate_behavior_columns(cfg.analyses, cfg.data)
 
     cfg._resolved_graph = resolve_stage_graph(cfg)
     return cfg

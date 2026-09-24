@@ -57,6 +57,22 @@ class Download:
 
 
 @dataclass
+class View:
+    """One of several alternative presentations of a section's results.
+
+    An analysis declares views in ``metadata["views"]`` (an ordered mapping of
+    view name to ``{"label", "tables", "figures"}``). The first view is the
+    default; the HTML report shows one view at a time behind a toggle, and the
+    Markdown report renders every view under its own subheading.
+    """
+
+    name: str
+    label: str
+    figures: list[Figure] = field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)
+
+
+@dataclass
 class Section:
     """One analysis stage's contribution to the report."""
 
@@ -69,6 +85,7 @@ class Section:
     figures: list[Figure] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
     downloads: list[Download] = field(default_factory=list)
+    views: list[View] = field(default_factory=list)  # alternative presentations, default first
     empty: bool = False
 
     @property

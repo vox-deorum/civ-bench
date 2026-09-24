@@ -46,9 +46,6 @@ EVENT_COUNTERS = {
 
 
 class EventFamily:
-    def columns(self, selection, stats) -> list[str]:
-        return list(selection)
-
     def extract(self, cursor, ctx: GameContext, selection, stats) -> dict:
         if not selection:
             return {}

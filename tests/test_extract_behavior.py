@@ -11,7 +11,7 @@ import pytest
 
 from bench.catalog import Catalog
 from bench.config import schema as S
-from bench.config.behavior import resolve_behavior_spec
+from bench.config.behavior import behavior_columns, resolve_behavior_spec
 from bench.config.errors import ConfigError
 from bench.config.models import OutputConfig, RunConfig
 from bench.extract import run_extract
@@ -29,6 +29,7 @@ SPEC = {
     "persona": ["Boldness"],
     "events": list(S.BEHAVIOR_EVENTS),
     "policies": list(S.BEHAVIOR_POLICIES),
+    "relationships": list(S.BEHAVIOR_RELATIONSHIPS),
 }
 
 
@@ -37,8 +38,12 @@ def _event(event_type, turn, payload):
 
 
 def _make_db(path: Path, *, flavor=None, persona=None, policy_rows=(), events=(), with_index=True,
-             with_team=True) -> Path:
-    """Players 0 and 1 are majors on teams 0 and 1; player 22 is a city-state."""
+             with_team=True, relationships=None, summaries=None) -> Path:
+    """Players 0 and 1 are majors on teams 0 and 1; player 22 is a city-state.
+
+    ``summaries`` overrides the ``PlayerSummaries`` rows as ``(key, last_turn)``
+    pairs; a key other than 0, 1, or 22 becomes an extra major.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     cur = conn.cursor()
@@ -52,9 +57,23 @@ def _make_db(path: Path, *, flavor=None, persona=None, policy_rows=(), events=()
         cur.execute("CREATE TABLE PlayerInformations (Key INTEGER, Civilization TEXT, IsMajor INTEGER)")
         cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, ?)",
                         [(0, "Rome", 1), (1, "Greece", 1), (22, "Ife", 0)])
+    summary_rows = [(1, 0, 0), (2, 0, 9), (3, 1, 0), (4, 1, 5)]
+    if summaries is not None:
+        summary_rows = [(i, key, turn) for i, (key, turn) in enumerate(summaries, start=1)]
+        extra = sorted({key for key, _ in summaries} - {0, 1, 22})
+        if with_team:
+            cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, ?, 1)",
+                            [(key, f"Civ{key}", key) for key in extra])
+        else:
+            cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, 1)",
+                            [(key, f"Civ{key}") for key in extra])
     cur.execute("CREATE TABLE PlayerSummaries (ID INTEGER, Key INTEGER, Turn INTEGER)")
-    cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?)",
-                    [(1, 0, 0), (2, 0, 9), (3, 1, 0), (4, 1, 5)])
+    cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?)", summary_rows)
+    if relationships is not None:
+        cur.execute("CREATE TABLE RelationshipChanges (ID INTEGER PRIMARY KEY, Turn INTEGER, PlayerID INTEGER, "
+                    "TargetID INTEGER, PublicValue INTEGER, PrivateValue INTEGER, Rationale TEXT)")
+        cur.executemany("INSERT INTO RelationshipChanges (Turn, PlayerID, TargetID, PublicValue, PrivateValue, "
+                        "Rationale) VALUES (?, ?, ?, ?, ?, 'why')", relationships)
     if flavor is not None:
         cur.execute("CREATE TABLE FlavorChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Offense INTEGER, UseNuke INTEGER)")
         cur.executemany("INSERT INTO FlavorChanges VALUES (?, ?, ?, ?, ?)", flavor)
@@ -115,8 +134,21 @@ def test_fieldnames_follow_selection():
         "persona_boldness_min", "persona_boldness_avg", "persona_boldness_max",
         "wars_declared", "wars_received", "cities_nuked", "cities_razed",
         *S.BEHAVIOR_POLICIES,
+        *S.BEHAVIOR_RELATIONSHIPS,
     ]
     assert snake_case("MinorCivWarBias") == "minor_civ_war_bias"
+
+
+def test_behavior_columns_carry_kinds():
+    kinds = behavior_columns(SPEC)
+    assert list(kinds) == behavior_fieldnames(SPEC)[6:]
+    assert kinds["flavor_offense_avg"] == "level"
+    assert kinds["wars_declared"] == "count"
+    assert kinds["policy_changes"] == "count"
+    assert kinds["tradition"] == "turn"
+    assert kinds["stance_masked_hostility_share"] == "share"
+    assert set(kinds.values()) <= set(S.BEHAVIOR_COLUMN_KINDS)
+    assert "persona_friendliness_avg" in behavior_columns({})
 
 
 def test_panel_omits_behavior_and_token_columns():
@@ -238,10 +270,67 @@ def test_wars_received_without_team_column_uses_player_id(tmp_path):
 
 
 def test_empty_family_selection_adds_no_columns(tmp_path):
-    spec = {"flavor": [], "persona": [], "events": ["cities_razed"], "policies": []}
+    spec = {"flavor": [], "persona": [], "events": ["cities_razed"], "policies": [], "relationships": []}
     assert behavior_fieldnames(spec)[6:] == ["cities_razed"]
     db = _make_db(tmp_path / "exp" / "g_1.db", events=EVENTS)
     assert _rows_by_player(db, spec)[1]["cities_razed"] == 1
+
+
+# ── relationship family ──────────────────────────────────────────────────────
+def test_relationship_worked_example_weights_pair_turns_since_first_set(tmp_path):
+    # Player 0 lives to turn 150; public +20 on player 1 from turn 50, -10 on player 2 from turn 140.
+    db = _make_db(
+        tmp_path / "exp" / "g_1.db",
+        summaries=[(0, 150), (1, 150), (2, 150)],
+        relationships=[(50, 0, 1, 20, 0), (140, 0, 2, -10, 0)],
+    )
+    row = _rows_by_player(db)[0]
+    # Survival turns are inclusive: 101 pair-turns at +20 (50-150) and 11 at -10 (140-150).
+    assert row["stance_public_avg"] == pytest.approx(round((101 * 20 + 11 * -10) / 112, 4))
+    assert row["stance_public_avg"] == pytest.approx(17.0536)
+    assert row["stance_private_avg"] == 0
+    assert row["relationship_changes"] == 2
+    assert row["relationship_targets"] == 2
+
+
+def test_relationship_window_resets_and_target_survival(tmp_path):
+    # Player 1 dies at turn 5, so a stance on it counts only through turn 5.
+    db = _make_db(
+        tmp_path / "exp" / "g_1.db",
+        relationships=[
+            (1, 0, 1, 30, -20),   # masked hostility, turns 1-2
+            (3, 0, 1, 30, -20),   # same values again: not a change
+            (3, 0, 1, 0, 0),      # later row in turn 3 wins: reset, turns 3-5 still count
+            (2, 1, 0, -5, 10),    # player 1: masked goodwill, turns 2-5
+            (4, 0, 22, 50, 50),   # city-state target: ignored
+        ],
+    )
+    rows = _rows_by_player(db)
+    first = rows[0]
+    assert first["relationship_changes"] == 2
+    assert first["relationship_targets"] == 1
+    assert first["stance_public_avg"] == pytest.approx(round(30 * 2 / 5, 4))
+    assert first["stance_net_avg"] == pytest.approx(round(10 * 2 / 5, 4))
+    assert first["stance_masked_hostility_share"] == pytest.approx(0.4)
+    assert first["stance_masked_goodwill_share"] == 0
+    second = rows[1]
+    assert second["stance_masked_goodwill_share"] == 1
+    assert second["stance_private_avg"] == 10
+
+
+def test_relationship_counts_zero_and_averages_blank_without_rows(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", relationships=[(1, 0, 1, 10, 10)])
+    row = _rows_by_player(db)[1]
+    assert row["relationship_changes"] == 0
+    assert row["relationship_targets"] == 0
+    assert row["stance_public_avg"] == ""
+    assert row["stance_masked_hostility_share"] == ""
+
+
+def test_relationship_blank_without_table(tmp_path):
+    row = _rows_by_player(_make_db(tmp_path / "exp" / "g_1.db"))[0]
+    assert row["relationship_changes"] == ""
+    assert row["stance_net_avg"] == ""
 
 
 # ── export + runner ──────────────────────────────────────────────────────────
