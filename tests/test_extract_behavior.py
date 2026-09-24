@@ -11,7 +11,7 @@ import pytest
 
 from bench.catalog import Catalog
 from bench.config import schema as S
-from bench.config.behavior import behavior_columns, resolve_behavior_spec
+from bench.config.behavior import behavior_columns, flavor_gate_text, resolve_behavior_spec
 from bench.config.errors import ConfigError
 from bench.config.models import OutputConfig, RunConfig
 from bench.extract import run_extract
@@ -38,11 +38,14 @@ def _event(event_type, turn, payload):
 
 
 def _make_db(path: Path, *, flavor=None, persona=None, policy_rows=(), events=(), with_index=True,
-             with_team=True, relationships=None, summaries=None) -> Path:
+             with_team=True, relationships=None, summaries=None, summary_detail=None) -> Path:
     """Players 0 and 1 are majors on teams 0 and 1; player 22 is a city-state.
 
     ``summaries`` overrides the ``PlayerSummaries`` rows as ``(key, last_turn)``
     pairs; a key other than 0, 1, or 22 becomes an extra major.
+    ``summary_detail`` instead replaces the whole table with full
+    ``(id, key, turn, current_research, era)`` rows, which is what the flavor
+    gates read.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -67,8 +70,13 @@ def _make_db(path: Path, *, flavor=None, persona=None, policy_rows=(), events=()
         else:
             cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, 1)",
                             [(key, f"Civ{key}") for key in extra])
-    cur.execute("CREATE TABLE PlayerSummaries (ID INTEGER, Key INTEGER, Turn INTEGER)")
-    cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?)", summary_rows)
+    if summary_detail is not None:
+        cur.execute("CREATE TABLE PlayerSummaries (ID INTEGER, Key INTEGER, Turn INTEGER, "
+                    "CurrentResearch TEXT, Era TEXT)")
+        cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?, ?, ?)", summary_detail)
+    else:
+        cur.execute("CREATE TABLE PlayerSummaries (ID INTEGER, Key INTEGER, Turn INTEGER)")
+        cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?)", summary_rows)
     if relationships is not None:
         cur.execute("CREATE TABLE RelationshipChanges (ID INTEGER PRIMARY KEY, Turn INTEGER, PlayerID INTEGER, "
                     "TargetID INTEGER, PublicValue INTEGER, PrivateValue INTEGER, Rationale TEXT)")
@@ -102,7 +110,25 @@ def test_spec_defaults_fill_missing_keys():
     assert spec["persona"] == S.BEHAVIOR_DEFAULTS["persona"]
     assert spec["stats"] == ["min", "avg", "max"]
     assert spec["policies"] == S.BEHAVIOR_DEFAULTS["policies"]
+    assert spec["flavor_gates"] == S.DEFAULT_FLAVOR_GATES
     assert resolve_behavior_spec(None) == resolve_behavior_spec({})
+    # An explicit gate map replaces (not merges with) the defaults, and is copied.
+    gates = {"Offense": {"era": "Modern"}}
+    spec = resolve_behavior_spec({"flavor_gates": gates})
+    assert spec["flavor_gates"] == gates
+    assert spec["flavor_gates"] is not gates
+    assert spec["flavor_gates"]["Offense"] is not gates["Offense"]
+    assert resolve_behavior_spec({"flavor_gates": {}})["flavor_gates"] == {}
+
+
+def test_flavor_gate_text_describes_each_gate_kind():
+    assert flavor_gate_text({"era": "Modern"}) == (
+        "Counted from the Modern Era on; blank for players who never reach it.")
+    assert flavor_gate_text({"techs": ["Nuclear Fission", "Satellites", "Advanced Ballistics"]}) == (
+        "Counted once the player researches Nuclear Fission, Satellites, or Advanced "
+        "Ballistics; blank for players who never do.")
+    assert flavor_gate_text({"techs": ["Flight"]}) == (
+        "Counted once the player researches Flight; blank for players who never do.")
 
 
 @pytest.mark.parametrize("raw, match", [
@@ -114,6 +140,16 @@ def test_spec_defaults_fill_missing_keys():
     ({"flavor": ["Nuke", "Nuke"]}, "duplicate"),
     ({"flavor": "Nuke"}, "list of strings"),
     ([], "expected an object"),
+    ({"flavor_gates": {"Nukes": {"era": "Modern"}}}, "unknown flavor"),
+    ({"flavor_gates": "Air"}, "expected an object"),
+    ({"flavor_gates": {"Nuke": {"techs": ["The Wheel"], "era": "Modern"}}}, "exactly one of"),
+    ({"flavor_gates": {"Nuke": "Modern"}}, "exactly one of"),
+    ({"flavor_gates": {"Nuke": {}}}, "exactly one of"),
+    ({"flavor_gates": {"Nuke": {"mood": "dark"}}}, "exactly one of"),
+    ({"flavor_gates": {"Nuke": {"era": "Jurassic"}}}, "unknown era"),
+    ({"flavor_gates": {"Nuke": {"techs": []}}}, "non-empty list"),
+    ({"flavor_gates": {"Nuke": {"techs": "The Wheel"}}}, "non-empty list"),
+    ({"flavor_gates": {"Nuke": {"techs": ["The Wheel", " "]}}}, "non-empty list"),
 ])
 def test_spec_rejects_bad_selection(raw, match):
     with pytest.raises(ConfigError, match=match):
@@ -192,7 +228,7 @@ def test_state_stats_use_last_row_per_turn_and_weight_by_turns(tmp_path):
         (2, 0, 0, 30, 50),
         (3, 0, 4, 60, 80),   # holds turns 4..9 (survival turn 9)
     ], persona=[(1, 0, 0, 5), (2, 1, 0, 7)])
-    row = _rows_by_player(db)[0]
+    row = _rows_by_player(db, {**SPEC, "flavor_gates": {}})[0]   # UseNuke stays ungated
     # Offense: 30 for turns 0-3 (4 turns), 60 for turns 4-9 (6 turns).
     assert row["flavor_offense_min"] == 30
     assert row["flavor_offense_max"] == 60
@@ -200,6 +236,92 @@ def test_state_stats_use_last_row_per_turn_and_weight_by_turns(tmp_path):
     assert row["flavor_use_nuke_avg"] == pytest.approx((50 * 4 + 80 * 6) / 10)
     assert row["persona_boldness_min"] == row["persona_boldness_max"] == 5
     assert row["survival_turn"] == 9
+
+
+# A tech gate at turn 3 for player 0; player 1 never researches the tech.
+# Both set UseNuke from turn 0 (50 / 70), player 0 again at turn 4 (80).
+def _gated_db(tmp_path: Path) -> Path:
+    return _make_db(
+        tmp_path / "exp" / "g_1.db",
+        flavor=[(1, 0, 0, 10, 50), (2, 0, 4, 60, 80), (3, 1, 0, 20, 70)],
+        summary_detail=[
+            (1, 0, 0, "The Wheel", "Ancient Era"),
+            (2, 0, 3, "Nuclear Fission (67%)", "Atomic Era"),
+            (3, 0, 9, "Robotics", "Information Era"),
+            (4, 1, 0, "Farming", "Ancient Era"),
+            (5, 1, 5, "Writing", "Classical Era"),
+        ],
+    )
+
+
+def test_tech_gate_averages_only_from_the_first_research_turn(tmp_path):
+    # CurrentResearch matches on its prefix, so the progress suffix is fine.
+    spec = {**SPEC, "flavor_gates": {"UseNuke": {"techs": ["Nuclear Fission"]}}}
+    rows = _rows_by_player(_gated_db(tmp_path), spec)
+    # The state in effect at turn 3 (UseNuke 50) counts from turn 3: 50 for
+    # turn 3 (1 turn), 80 for turns 4-9 (6 turns).
+    assert rows[0]["flavor_use_nuke_min"] == 50
+    assert rows[0]["flavor_use_nuke_max"] == 80
+    assert rows[0]["flavor_use_nuke_avg"] == pytest.approx(round((50 * 1 + 80 * 6) / 7, 4))
+    # Ungated Offense still ranges over the whole life: 10 for turns 0-3, 60 for 4-9.
+    assert rows[0]["flavor_offense_avg"] == pytest.approx((10 * 4 + 60 * 6) / 10)
+    assert rows[0]["survival_turn"] == 9
+    # Player 1 never clears the gate: blank, though its UseNuke rows exist.
+    assert rows[1]["flavor_use_nuke_min"] == ""
+    assert rows[1]["flavor_use_nuke_avg"] == ""
+    assert rows[1]["flavor_use_nuke_max"] == ""
+    assert rows[1]["flavor_offense_avg"] == 20
+
+
+def test_era_gate_starts_at_the_named_era_or_later(tmp_path):
+    db = _make_db(
+        tmp_path / "exp" / "g_1.db",
+        flavor=[(1, 0, 0, 10, 50), (2, 0, 7, 60, 80), (3, 1, 0, 20, 70)],
+        summary_detail=[
+            (1, 0, 0, "Steam Power", "Industrial Era"),
+            (2, 0, 5, "Telecommunications", "Modern Era"),
+            (3, 0, 9, "Satellites", "Atomic Era"),
+            (4, 1, 0, "Farming", "Ancient Era"),
+            (5, 1, 4, "Robotics", "Atomic Era"),   # past Modern: the gate opens at 4
+            (6, 1, 8, "Internet", "Information Era"),
+        ],
+    )
+    spec = {**SPEC, "flavor_gates": {"UseNuke": {"era": "Modern"}}}
+    rows = _rows_by_player(db, spec)
+    # Player 0 reaches Modern at turn 5: 50 for turns 5-6 (2), 80 for 7-9 (3).
+    assert rows[0]["flavor_use_nuke_min"] == 50
+    assert rows[0]["flavor_use_nuke_max"] == 80
+    assert rows[0]["flavor_use_nuke_avg"] == pytest.approx((50 * 2 + 80 * 3) / 5)
+    # Player 1 clears the gate through a later era; its single state carries.
+    assert rows[1]["flavor_use_nuke_avg"] == 70
+    assert rows[1]["flavor_use_nuke_min"] == 70
+
+
+def test_gated_flavors_are_blank_when_the_db_lacks_the_gate_column(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", flavor=[(1, 0, 0, 10, 50)])
+    spec = {**SPEC, "flavor_gates": {"UseNuke": {"techs": ["Nuclear Fission"]},
+                                     "Offense": {"era": "Modern"}}}
+    rows = _rows_by_player(db, spec)   # PlayerSummaries has neither CurrentResearch nor Era
+    for column in ("flavor_use_nuke_min", "flavor_use_nuke_avg", "flavor_use_nuke_max",
+                   "flavor_offense_min", "flavor_offense_avg", "flavor_offense_max"):
+        assert rows[0][column] == ""
+
+
+def test_empty_flavor_gates_disables_gating(tmp_path):
+    rows = _rows_by_player(_gated_db(tmp_path), {**SPEC, "flavor_gates": {}})
+    # Ungated: the whole life is weighed (50 for turns 0-3, 80 for 4-9).
+    assert rows[0]["flavor_use_nuke_avg"] == pytest.approx((50 * 4 + 80 * 6) / 10)
+    assert rows[1]["flavor_use_nuke_avg"] == 70
+    # Gating does not change the header, so the CSV columns are identical.
+    assert behavior_fieldnames(SPEC) == behavior_fieldnames({**SPEC, "flavor_gates": {}})
+
+
+def test_default_gates_apply_without_config(tmp_path):
+    # SPEC omits flavor_gates, so UseNuke falls back to the default nuclear-tech
+    # gate: on this DB player 0 researches it at turn 3, player 1 never does.
+    rows = _rows_by_player(_gated_db(tmp_path))
+    assert rows[0]["flavor_use_nuke_avg"] == pytest.approx(round((50 * 1 + 80 * 6) / 7, 4))
+    assert rows[1]["flavor_use_nuke_avg"] == ""
 
 
 def test_state_blank_without_rows_or_table(tmp_path):

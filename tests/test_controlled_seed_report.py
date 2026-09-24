@@ -641,16 +641,21 @@ def test_cells_link_with_preselection_query(rendered):
 def test_cell_tooltips_share_one_meaning(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
-    # Both heatmaps carry the same tooltip per cell: civilization and runs,
-    # adjusted strength, and victory focus.
+    # Both heatmaps carry the same tooltip per cell: the row title and seat,
+    # then strength, focus, and runs as tab-separated grid lines.
     expected = (
-        "data-tip=\"Rome (3 runs)\n"
-        "Adj strength: 0.6000\n"
-        'Victory focus: Science (50.0%)"'
+        'data-tip="GPT-OSS-120B-Simple | Every-turn\n'
+        "P0 · Rome\n"
+        "Strength\t0.600\n"
+        "Focus\tScience\t50%\n"
+        'Runs\t3"'
     )
     assert index.count(expected) == 2  # the strength and the focus heatmap
-    # A single run reads "1 run".
-    assert 'data-tip="Egypt (1 run)\n' in index
+    # The one-run kimi game shows its own civilization on the seat line.
+    assert (
+        'data-tip="Kimi-K2.5 | Every-turn\nP0 · Egypt\n'
+        'Strength\t0.700\nFocus\tCulture\t70%\nRuns\t1"'
+    ) in index
 
 
 def test_strength_scale_is_rdylbu(rendered):
@@ -670,14 +675,15 @@ def test_strength_heatmap_leads_with_avg_column(rendered):
     # heatmaps.
     assert index.count('<th scope="col" class="col-avg"') == 2
     # The vanilla row pools both seats' runs; a one-seat row pools its own.
-    assert 'data-tip="Adj strength: 0.4000\nMean over 4 runs across 2 seats"' in index
-    assert 'data-tip="Adj strength: 0.7000\nMean over 1 run across 1 seat"' in index
+    assert ('data-tip="VPAI\nSeed average\nStrength\t0.400\nRuns\t4\tover 2 seats"'
+            in index)
+    assert 'Strength\t0.700\nRuns\t1\tover 1 seat"' in index
     # The avg cell is a colored summary, not a link into a detail page.
     assert (
         '<td class="heat-cell heat-cell-avg col-avg" '
         'style="background-color:#fee090;color:#18202a" '
-        'data-tip="Adj strength: 0.4000\n'
-        'Mean over 4 runs across 2 seats">0.40</td>' in index
+        'data-tip="VPAI\nSeed average\nStrength\t0.400\n'
+        'Runs\t4\tover 2 seats">0.40</td>' in index
     )
     # Seed 2's uncovered rows leave the avg cell blank (Kimi x 2, vanilla).
     assert index.count('class="heat-cell heat-cell-empty col-avg"') == 3
@@ -800,7 +806,7 @@ def test_omitted_formats_default_to_md_and_html(env):
 
 
 @pytest.mark.parametrize("sections, matched_first", [
-    (None, False),
+    (None, True),   # the default family order puts Matched Maps before Prediction
     (["controlled_seed"], True),
     (["controlled_seed", "pred_compare"], True),
     (["pred_compare", "controlled_seed"], False),
@@ -977,8 +983,19 @@ def test_renderer_escapes_labels_and_query_parameters():
     assert "<h1>" in overview
     assert "Weird &amp; &lt;Model&gt; | Per 5" in overview
     assert "href=\"seed-1-player-0.html?strategist=Weird+%26+%3CModel%3E&amp;condition=Per+5\"" in overview
-    # Attribute values escape embedded quotes.
-    assert 'data-tip="Civ &quot;X&quot; (2 runs)\nAdj strength: 0.6000\nVictory focus: Science (72.0%)"' in overview
+    # Attribute values escape embedded quotes; tip newlines and tabs stay literal.
+    assert (
+        'data-tip="Weird &amp; &lt;Model&gt; | Per 5\nP0 · Civ &quot;X&quot;\n'
+        'Strength\t0.600\nFocus\tScience\t72%\nRuns\t2"'
+    ) in overview
+    assert (
+        'data-tip="VPAI\nP0 · Civ &quot;X&quot;\n'
+        'Strength\t0.400\nFocus\tDomination\t25%\nRuns\t1"'
+    ) in overview
+    assert (
+        'data-tip="Weird &amp; &lt;Model&gt; | Per 5\nSeed average\n'
+        'Strength\t0.600\nRuns\t2\tover 1 seat"'
+    ) in overview
     detail = pages["controlled-seed/seed-1-player-0.html"]
     assert "Weird &amp; &lt;Model&gt;" in detail
     # Checkbox values escape the same labels.

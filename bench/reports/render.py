@@ -391,7 +391,15 @@ table.heatmap .col-avg { border-right: 2px solid #b6c1cd; }
 .heat-cell-avg { padding: .38rem .55rem; font-weight: 650; }
 tbody.vanilla-body tr.vanilla-row th, tbody.vanilla-body tr.vanilla-row td { border-top: 3px double #8d99a9; border-bottom: 3px double #8d99a9; background: #f3f0e8; }
 tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient(rgba(255,255,255,.35), rgba(255,255,255,.35)); }
-.heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); white-space: pre-line; font-size: .82rem; pointer-events: none; }
+.heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); font-size: .82rem; line-height: 1.35; pointer-events: none; }
+.heat-tooltip > span { display: block; }
+.heat-tooltip .tip-title { font-weight: 700; }
+.heat-tooltip .tip-sub { color: #5b6778; }
+.heat-tooltip .tip-grid { display: grid; grid-template-columns: auto auto; gap: .1rem .75rem; margin-top: .3rem; }
+.heat-tooltip .tip-label { color: #5b6778; }
+.heat-tooltip .tip-number { color: #6b3fa0; font-variant-numeric: tabular-nums; }
+.heat-tooltip .tip-note { color: #5b6778; font-variant-numeric: tabular-nums; }
+.heat-tooltip .tip-value > .tip-number + .tip-note { margin-left: .4rem; }
 .focus-legend { display: flex; flex-wrap: wrap; gap: .9rem; margin: .25rem 0 1.5rem; padding: 0; list-style: none; font-size: .85rem; }
 .focus-legend .swatch { display: inline-block; width: .85rem; height: .85rem; margin-right: .3rem; border: 1px solid #44516433; border-radius: .15rem; vertical-align: -0.1em; }
 .chart-controls { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; margin: .75rem 0; }

@@ -18,7 +18,7 @@ from .relationships import RelationshipFamily
 from .state import StateFamily
 
 FAMILIES = {
-    "flavor": StateFamily(table="FlavorChanges", prefix="flavor"),
+    "flavor": StateFamily(table="FlavorChanges", prefix="flavor", gated=True),
     "persona": StateFamily(table="PersonaChanges", prefix="persona"),
     "events": EventFamily(),
     "policies": PolicyFamily(),

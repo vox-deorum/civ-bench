@@ -49,7 +49,7 @@ def resolve_behavior_spec(raw: Any, where: str = "data.extract.behavior") -> dic
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: expected an object, got {type(raw).__name__}.")
 
-    allowed = {"stats", *S.BEHAVIOR_FAMILIES}
+    allowed = {"stats", "flavor_gates", *S.BEHAVIOR_FAMILIES}
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {unknown}. Allowed: {sorted(allowed)}.")
@@ -67,4 +67,42 @@ def resolve_behavior_spec(raw: Any, where: str = "data.extract.behavior") -> dic
         if dupes:
             raise ConfigError(f"{where}.{key}: duplicate name(s) {dupes}.")
         resolved[key] = list(value)
+    resolved["flavor_gates"] = resolve_flavor_gates(
+        raw.get("flavor_gates", S.DEFAULT_FLAVOR_GATES), f"{where}.flavor_gates",
+    )
     return resolved
+
+
+def resolve_flavor_gates(raw: Any, where: str = "data.extract.behavior.flavor_gates") -> dict:
+    """``{flavor: {"techs": [...]} | {"era": name}}``, validated and copied."""
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: expected an object, got {type(raw).__name__}.")
+    resolved: dict = {}
+    for flavor, gate in raw.items():
+        at = f"{where}.{flavor}"
+        if flavor not in S.FLAVOR_NAMES:
+            raise ConfigError(f"{at}: unknown flavor. Allowed: {list(S.FLAVOR_NAMES)}.")
+        if not isinstance(gate, dict) or len(gate) != 1 or next(iter(gate)) not in S.FLAVOR_GATE_KINDS:
+            raise ConfigError(
+                f'{at}: expected exactly one of {{"techs": [names]}} or {{"era": name}}.'
+            )
+        kind, value = next(iter(gate.items()))
+        if kind == "techs":
+            if (not isinstance(value, list) or not value
+                    or any(not isinstance(v, str) or not v.strip() for v in value)):
+                raise ConfigError(f"{at}.techs: expected a non-empty list of technology names.")
+            resolved[flavor] = {"techs": list(value)}
+        else:
+            if value not in S.ERA_ORDER:
+                raise ConfigError(f"{at}.era: unknown era {value!r}. Allowed: {list(S.ERA_ORDER)}.")
+            resolved[flavor] = {"era": value}
+    return resolved
+
+
+def flavor_gate_text(gate: dict) -> str:
+    """One sentence on when a gated flavor starts to count, for report tooltips."""
+    if "era" in gate:
+        return f"Counted from the {gate['era']} Era on; blank for players who never reach it."
+    techs = list(gate["techs"])
+    names = techs[0] if len(techs) == 1 else ", ".join(techs[:-1]) + f", or {techs[-1]}"
+    return f"Counted once the player researches {names}; blank for players who never do."

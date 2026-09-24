@@ -38,6 +38,7 @@ def behavior_fieldnames(spec: Optional[dict] = None) -> list[str]:
 
 def extract_game_behavior_data(db_path, spec: dict, catalog: Optional[Catalog] = None, issues=None):
     """Extract behavior rows for one game DB; a malformed DB is recorded and skipped."""
+    spec = resolve_behavior_spec(spec)
     conn, cursor = open_database_readonly(db_path)
     if not conn:
         if issues is not None:
@@ -57,7 +58,7 @@ def extract_game_behavior_data(db_path, spec: dict, catalog: Optional[Catalog] =
 
         seeding = extract_seeding_fields(metadata, where=f"game {game_id}")
         identities = compose_identities(metadata, major_players, experiment, catalog, seeding)
-        ctx = build_game_context(cursor, major_players)
+        ctx = build_game_context(cursor, major_players, spec["flavor_gates"])
 
         values_by_family = {
             name: family.extract(cursor, ctx, spec[name], spec["stats"])

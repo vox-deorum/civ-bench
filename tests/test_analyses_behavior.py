@@ -22,6 +22,7 @@ from bench.analyses.behavior.commitment import turn_metrics
 from bench.analyses.behavior.policies import _earliest
 from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
+from bench.config.behavior import flavor_gate_text
 
 BASELINE = "vanilla-standard"
 TREATMENT = "llm-standard"
@@ -229,7 +230,7 @@ def test_flavor_heatmaps_carry_layout_and_colors(behavior_env, tmp_path):
     spec = result.metadata["heatmaps"]["flavors_absolute"]
     assert spec["column_labels"] == {OFFENSE: "Off"}
     assert spec["column_names"] == {OFFENSE: "Offense"}
-    assert spec["column_tips"][OFFENSE].startswith("Offense: Pivots the military")
+    assert spec["column_tips"][OFFENSE].startswith("Offense\nPivots the military")
     assert spec["column_group"] == "metric_group"
     assert spec["range_columns"] == ["mean_min", "mean_max"]
     absolute = _table(result, "flavors_absolute")
@@ -260,15 +261,36 @@ def test_completed_baseline_averages_complete_strategist_experiments(behavior_en
     assert _cell(rel, LLM, OFFENSE) == pytest.approx(((8 - 50) + (8 - 30) + (8 - 70)) / 3)
     # A completed experiment is part of its own baseline.
     assert _cell(rel, LLM2, OFFENSE) == pytest.approx(0.0)
-    # Null holds 50 against the field: 0, 0, +20, -20.
-    assert _cell(rel, "Null", OFFENSE) == pytest.approx(0.0)
+    # The Null strategist never moves off 50, so it is left out of both tables.
+    absolute = _table(result, "flavors_absolute")
+    assert "Null" not in set(rel["player_type"]) | set(absolute["player_type"])
     assert meta["views"]["relative"]["label"] == "Relative to completed-experiment average"
-    spec = meta["heatmaps"]["flavors_relative"]
-    assert spec["reference_rows"] == ["Null", "Vanilla"]
-    assert spec["row_order"][0] == "Null"
-    assert "Never changes flavors" in spec["row_tips"]["Null"]
-    # The headline leaves Null out.
+    # Both views pin the baseline pool itself as the first row, in absolute
+    # terms on the 0 to 100 scale, without a CI or a median.
+    pinned = "Completed-experiment average"
+    pool = pd.Series([40.0, 60.0, 30.0, 70.0])
+    for name, table in (("flavors_relative", rel), ("flavors_absolute", absolute)):
+        base = table[table["row_kind"] == "baseline"]
+        assert len(base) == 1, name
+        row = base.iloc[0]
+        assert row["player_type"] == row["strategist"] == row["row_label"] == pinned
+        assert pd.isna(row["condition"]) and row["metric"] == OFFENSE   # "" reads back as NaN
+        assert row["mean"] == pytest.approx(50.0)
+        assert row["sd"] == pytest.approx(pool.std())
+        assert row["n_players"] == 4 and row["n_games"] == 4
+        assert row["color_position"] == pytest.approx(0.5)   # 50 on the fixed 0-100 scale
+        assert np.isnan(row["ci_lower"]) and np.isnan(row["ci_upper"])
+        assert np.isnan(row["median"])
+        spec = meta["heatmaps"][name]
+        assert spec["baseline_rows"] == [pinned]
+        # Null is gone from the tables, so it leaves the reference rows too.
+        assert spec["reference_rows"] == [pinned, "Vanilla"]
+        assert spec["row_order"][0] == pinned
+        expected_label = "Difference" if name == "flavors_relative" else "Average"
+        assert spec["value_label"] == expected_label
+    # The headline leaves Null and the pinned baseline row out.
     assert "**Null**" not in result.summary
+    assert pinned not in result.summary
 
 
 def test_condition_pairing_labels_rows_like_matched_maps(behavior_env, tmp_path):
@@ -278,9 +300,12 @@ def test_condition_pairing_labels_rows_like_matched_maps(behavior_env, tmp_path)
     absolute = _table(result, "flavors_absolute")
     labels = dict(zip(absolute["player_type"], absolute["row_label"]))
     assert labels[LLM] == f"{LLM} | Base"
-    assert labels["Null"] == "Null"
-    assert list(absolute.columns[:4]) == ["player_type", "strategist", "condition", "row_label"]
-    assert result.metadata["heatmaps"]["flavors_absolute"]["row_order"][0] == "Null"
+    assert "Null" not in labels                      # Null is left out entirely
+    pinned = "Completed-experiment average"
+    assert labels[pinned] == pinned                  # the baseline row keeps its own label
+    assert list(absolute.columns[:5]) == ["row_kind", "player_type", "strategist",
+                                          "condition", "row_label"]
+    assert result.metadata["heatmaps"]["flavors_absolute"]["row_order"][0] == pinned
 
 
 def test_rate_normalizes_counts_by_turns_alive(behavior_env, tmp_path):
@@ -327,9 +352,15 @@ def test_baseline_survives_player_filters(behavior_env):
                               "params": FLAVORS, "filter": {"players": [LLM]}}])
     filtered = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
     rel = _table(filtered, "flavors_relative")
-    assert set(rel["player_type"]) == {LLM}
+    assert set(rel.loc[rel["row_kind"] == "group", "player_type"]) == {LLM}
     expected = _cell(_table(unfiltered, "flavors_relative"), LLM, OFFENSE)
     assert _cell(rel, LLM, OFFENSE) == expected
+    # The pinned baseline row holds the unfiltered pool: 5, 6, 7 over 9 players.
+    base = rel[rel["row_kind"] == "baseline"]
+    assert len(base) == 1
+    assert base["player_type"].iloc[0] == f"Matched '{BASELINE}'"
+    assert base["mean"].iloc[0] == pytest.approx(6.0)
+    assert base["n_players"].iloc[0] == 9 and base["n_games"].iloc[0] == 3
 
 
 def test_tables_are_byte_stable(behavior_env):
@@ -338,7 +369,8 @@ def test_tables_are_byte_stable(behavior_env):
     for name in ("flavors_relative", "flavors_absolute"):
         with open(first.table_paths[name], "rb") as a, open(second.table_paths[name], "rb") as b:
             assert a.read() == b.read()
-    ci = _table(first, "flavors_absolute")[["ci_lower", "ci_upper"]]
+    absolute = _table(first, "flavors_absolute")
+    ci = absolute.loc[absolute["row_kind"] == "group", ["ci_lower", "ci_upper"]]
     assert ci.notna().all().all()
 
 
@@ -358,7 +390,44 @@ def test_flavor_columns_follow_group_order(behavior_env, tmp_path):
     result, _ = behavior_env("behavior.flavors", FLAVORS, behavior_spec=spec)
     assert result.metadata["flavors"] == ["Offense", "UseNuke", "Naval", "Science", "Espionage"]
     groups = _table(result, "flavors_absolute").drop_duplicates("metric")["metric_group"]
-    assert list(groups) == ["Military", "Military", "Naval and air", "Economy", "Other"]
+    assert list(groups) == ["Military", "Nuclear", "Naval and air", "Economy", "Other"]
+
+
+def test_null_rows_are_left_out_of_both_flavor_tables(behavior_env, tmp_path):
+    _add_complete_experiments(tmp_path)          # adds Null players holding 50
+    result, _ = behavior_env("behavior.flavors", FLAVORS)
+    for name in ("flavors_relative", "flavors_absolute"):
+        table = _table(result, name)
+        assert "Null" not in set(table["player_type"])
+        assert "Vanilla" in set(table["player_type"])
+    # Null's explanatory row tip is gone with the row.
+    assert result.metadata["heatmaps"]["flavors_absolute"]["row_tips"] == {}
+
+
+def test_uncontrolled_run_has_no_pinned_baseline_row(behavior_env):
+    # Nothing is complete, so there is no relative view and nothing to pin.
+    result, _ = behavior_env("behavior.flavors", {"bootstrap_n": 20})
+    assert list(result.metadata["views"]) == ["absolute"]
+    absolute = _table(result, "flavors_absolute")
+    assert set(absolute["row_kind"]) == {"group"}
+    assert "baseline_rows" not in result.metadata["heatmaps"]["flavors_absolute"]
+
+
+def test_gated_flavor_tips_carry_the_gate_sentence(behavior_env, tmp_path):
+    frame = pd.read_csv(tmp_path / "behavior.csv")
+    frame["flavor_use_nuke_avg"] = frame["flavor_offense_avg"]
+    frame.to_csv(tmp_path / "behavior.csv", index=False)
+    spec = {**BEHAVIOR_SPEC, "flavor": ["Offense", "UseNuke"]}
+    result, _ = behavior_env("behavior.flavors", FLAVORS, behavior_spec=spec)
+    heat = result.metadata["heatmaps"]["flavors_absolute"]
+    use_nuke = "flavor_use_nuke_avg"
+    # UseNuke carries the default nuclear-tech gate; Offense does not.
+    assert heat["column_tips"][use_nuke] == "\n".join([
+        "UseNuke", C.S.FLAVOR_INFO["UseNuke"][2],
+        flavor_gate_text(C.S.DEFAULT_FLAVOR_GATES["UseNuke"]),
+    ])
+    assert heat["column_tips"][OFFENSE] == "Offense\n" + C.S.FLAVOR_INFO["Offense"][2]
+    assert "count only from the turn a player gains access" in heat["help"]
 
 
 # ── diplomacy ──────────────────────────────────────────────────────────────────

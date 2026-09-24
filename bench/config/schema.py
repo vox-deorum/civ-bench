@@ -69,22 +69,20 @@ FLAVOR_NAMES = (
 FLAVOR_INFO = {
     'Offense': ('Off', 'Military', 'Pivots the military towards offensive stances. Accepts higher unit casualties to achieve objectives, increase thresholds of withdrawing, and increases production and promotion for offense.'),
     'Defense': ('Def', 'Military', 'Increases military production and unit promotion for defensive purposes.'),
-    'UseNuke': ('UNuk', 'Military', 'Sets (flavor%) per-turn probability of launching nuclear strikes during war when strategic conditions are met.'),
     'CityDefense': ('CDef', 'Military', 'Prioritizes unit promotions for static defense (friendly territory bonuses, capital defense, garrisoned attacks).'),
-    'MilitaryTraining': ('MTrn', 'Military', 'Prioritizes military quality through training buildings and upgrading units with gold.'),
     'Mobilization': ('Mob', 'Military', 'Increases the proportion of military production (compared with civilian production).'),
+    'MilitaryTraining': ('MTrn', 'Military', 'Prioritizes military quality through training buildings and upgrading units with gold.'),
     'Recon': ('Rec', 'Military', 'Increases explorer unit production and tactical exploration of the map.'),
     'Ranged': ('Rng', 'Military', 'Increases firepower by raising target composition of ranged units and range-extending promotions.'),
     'Mobile': ('Mobl', 'Military', 'Increases mobility and maneuverability by raising target composition of mobile units and prioritizes related promotions.'),
-    'Nuke': ('Nuke', 'Military', 'Increases nuclear weapon arsenals for strategic deterrence.'),
+    'Nuke': ('Nuke', 'Nuclear', 'Increases nuclear weapon arsenals for strategic deterrence.'),
+    'UseNuke': ('UNuk', 'Nuclear', 'Sets (flavor%) per-turn probability of launching nuclear strikes during war when strategic conditions are met.'),
     'Naval': ('Nav', 'Naval and air', 'Increases the production of naval production and prioritizes combat-effective naval promotions. Naval size is also based on coastal city percentage and geography.'),
     'NavalRecon': ('NRec', 'Naval and air', 'Increases the production of more naval melee units for sea control and exploration.'),
     'Air': ('Air', 'Naval and air', 'Increases air control by raising target composition of air units and prioritizes related promotions.'),
-    'AirCarrier': ('Carr', 'Naval and air', 'Increases carrier production to support naval-based air force operations.'),
     'Antiair': ('AA', 'Naval and air', 'Increases anti-air unit composition ratio to counter enemy aircraft.'),
+    'AirCarrier': ('Carr', 'Naval and air', 'Increases carrier production to support naval-based air force operations.'),
     'Airlift': ('Lift', 'Naval and air', 'Prioritizes airlift infrastructure for rapid troop deployment, favoring centralized reserves over forward garrisons.'),
-    'NavalGrowth': ('NGro', 'Economy', 'Prioritizes naval economic infrastructure in coastal cities.'),
-    'NavalTileImprovement': ('NTile', 'Economy', 'Develops water resources for immediate economic benefit.'),
     'Expansion': ('Exp', 'Economy', 'Prioritizes settler production and lowers location criteria to settle more cities. Essential in early game.'),
     'Growth': ('Gro', 'Economy', 'Prioritizes population growth through food-focused tile improvements and buildings.'),
     'TileImprovement': ('Tile', 'Economy', 'Prioritizes worker production and peaceful tile development.'),
@@ -93,15 +91,35 @@ FLAVOR_INFO = {
     'Gold': ('Gold', 'Economy', 'Prioritizes gold-focused tiles and buildings.'),
     'Science': ('Sci', 'Economy', 'Prioritizes science-focused tiles and buildings.'),
     'Culture': ('Cul', 'Economy', 'Prioritizes culture-focused tiles and buildings.'),
-    'WaterConnection': ('WCon', 'Economy', 'Prioritizes lighthouse construction for coastal city connectivity.'),
     'Happiness': ('Hap', 'Economy', 'Prioritizes happiness-generating buildings and luxury resources.'),
+    'NavalGrowth': ('NGro', 'Economy', 'Prioritizes naval economic infrastructure in coastal cities.'),
+    'NavalTileImprovement': ('NTile', 'Economy', 'Develops water resources for immediate economic benefit.'),
+    'WaterConnection': ('WCon', 'Economy', 'Prioritizes lighthouse construction for coastal city connectivity.'),
     'GreatPeople': ('GP', 'Other', 'Prioritizes specialist buildings and great person generation infrastructure.'),
     'Wonder': ('Wond', 'Other', 'Prioritizes wonder construction.'),
     'Religion': ('Rel', 'Other', 'Prioritizes religious infrastructure, missionary production, and faith generation.'),
     'Diplomacy': ('Dip', 'Other', 'Prioritizes diplomatic unit production and city-state investment.'),
-    'Spaceship': ('Spc', 'Other', 'Prioritizes late-game science victory components and spaceship part production.'),
     'Espionage': ('Esp', 'Other', 'Prioritizes counterintelligence protection for high-value science cities.'),
+    'Spaceship': ('Spc', 'Other', 'Prioritizes late-game science victory components and spaceship part production.'),
 }
+# Vox Populi eras in game order; the `Era` column holds the localized name
+# ("Modern Era"), matched on its first word.
+ERA_ORDER = ("Ancient", "Classical", "Medieval", "Renaissance", "Industrial", "Modern", "Atomic", "Information")
+# Flavor → the bar a player must clear before its setting counts: the first turn
+# it researches one of `techs` (PlayerSummaries.CurrentResearch), or the first
+# turn in `era` or later. A gated flavor is summarized from that turn on and is
+# blank for a player who never clears it. `data.extract.behavior.flavor_gates`
+# replaces this map; `{}` turns gating off.
+_NUCLEAR_TECHS = ["Nuclear Fission", "Satellites", "Advanced Ballistics"]
+DEFAULT_FLAVOR_GATES = {
+    "Nuke": {"techs": list(_NUCLEAR_TECHS)},
+    "UseNuke": {"techs": list(_NUCLEAR_TECHS)},
+    "Air": {"era": "Modern"},
+    "Antiair": {"era": "Modern"},
+    "AirCarrier": {"era": "Modern"},
+    "Airlift": {"era": "Modern"},
+}
+FLAVOR_GATE_KINDS = ("techs", "era")
 PERSONA_NAMES = (
     "VictoryCompetitiveness", "WonderCompetitiveness", "MinorCivCompetitiveness",
     "Boldness", "WarBias", "HostileBias", "WarmongerHate", "NeutralBias",

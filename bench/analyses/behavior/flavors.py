@@ -12,21 +12,24 @@ over the turns it held a setting), per player type:
 * **absolute**: the average setting, colored on the fixed 0 to 100 scale.
 
 Both views are HTML heatmaps: one column per flavor under its short name, in
-four groups, with the full name and the tool's description in the header
-tooltip (:data:`bench.config.schema.FLAVOR_INFO`).
+five groups, with the full name and the tool's description in the header
+tooltip (:data:`bench.config.schema.FLAVOR_INFO`). The Null strategist, which
+never moves off 50, is left out. In controlled runs both views pin the baseline
+average as the top row, in absolute terms on the 0 to 100 scale. Flavors gated
+by ``data.extract.behavior.flavor_gates`` (nuclear and air) count only from the
+turn a player gains access, and their header tooltip says so.
 """
 
 from __future__ import annotations
 
 from ...config import schema as S
-from ...config.behavior import snake_case
+from ...config.behavior import flavor_gate_text, resolve_behavior_spec, snake_case
 from ..base import AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from . import common as C
 from .base import BehaviorAnalysis, MetricViews
 
 FLAVOR_RANGE = (0.0, 100.0)
-BALANCED = 50
 
 
 def flavor_column(name: str, stat: str = "avg") -> str:
@@ -35,7 +38,7 @@ def flavor_column(name: str, stat: str = "avg") -> str:
 
 class BehaviorFlavors(BehaviorAnalysis):
     module = "behavior.flavors"
-    friendly_name = "Flavor settings"
+    friendly_name = "Strategic settings"
     description = (
         "Shows how each strategist sets the in-game AI's flavors (0 to 100, 50 is "
         "balanced), against the average of completed experiments on the same map "
@@ -65,6 +68,7 @@ class BehaviorFlavors(BehaviorAnalysis):
                 "averages; re-run extract with data.extract.behavior.flavor selected and "
                 "'avg' in data.extract.behavior.stats."
             )
+        rows = rows[rows[self.by].astype(str) != ctx.catalog.null_label]
         if rows.empty:
             return AnalysisResult(summary="No behavior rows remain after filtering.")
 
@@ -77,6 +81,21 @@ class BehaviorFlavors(BehaviorAnalysis):
             if flavor_column(f, "min") in rows.columns and flavor_column(f, "max") in rows.columns
         }
         baseline_label = baseline.label if baseline is not None else "baseline"
+        gates = resolve_behavior_spec((ctx.config.data.get("extract") or {}).get("behavior"))["flavor_gates"]
+        tips = {}
+        for f in flavors:
+            lines = [f, S.FLAVOR_INFO[f][2]]
+            if f in gates:
+                lines.append(flavor_gate_text(gates[f]))
+            tips[flavor_column(f)] = "\n".join(lines)
+        notes = []
+        if views.relative is not None and views.baseline_summary:
+            notes.append(f"The top row is the {baseline_label} itself, as an average setting "
+                         "on the 0 to 100 scale.")
+        gated = [f for f in flavors if f in gates]
+        if gated:
+            notes.append(f"{', '.join(gated)} count only from the turn a player gains access.")
+        note = "".join(f" {n}" for n in notes)
         out = MetricViews()
         self.add_heatmap_views(
             ctx, views, out, "flavors",
@@ -89,18 +108,19 @@ class BehaviorFlavors(BehaviorAnalysis):
                     "Each cell is the mean, over players, of the player's turn-weighted "
                     f"average flavor minus the {baseline_label} at the same map and seat. "
                     "Colors run from 2 SDs of the baseline players below (red) to 2 SDs "
-                    "above (blue). Completed experiments are part of their own baseline."
+                    "above (blue). Completed experiments are part of their own "
+                    f"baseline.{note}"
                 ),
                 C.ABSOLUTE: (
                     "Each cell is the mean, over players, of the player's turn-weighted "
                     "average flavor while it held a setting. Colors are fixed from 0 "
                     "(red) through 50, balanced and the in-game AI's own value (yellow), "
-                    "to 100 (blue)."
+                    f"to 100 (blue).{note}"
                 ),
             },
             names=names,
             short_names={flavor_column(f): S.FLAVOR_INFO[f][0] for f in flavors},
-            column_tips={flavor_column(f): f"{f}: {S.FLAVOR_INFO[f][2]}" for f in flavors},
+            column_tips=tips,
             groups={flavor_column(f): S.FLAVOR_INFO[f][1] for f in flavors},
             fixed={m: FLAVOR_RANGE for m in metrics},
             legends={
@@ -109,13 +129,11 @@ class BehaviorFlavors(BehaviorAnalysis):
                 C.ABSOLUTE: [[0.0, "0 forbid"], [0.3, "30 enough"], [0.5, "50 balanced (in-game AI)"],
                              [0.7, "70 prioritize"], [1.0, "100 emergency focus"]],
             },
-            value_labels={C.RELATIVE: f"vs the {baseline_label}", C.ABSOLUTE: "average setting"},
+            value_labels={C.RELATIVE: "Difference", C.ABSOLUTE: "Average"},
             decimals=0,
-            row_tips={ctx.catalog.null_label: (
-                f"Never changes flavors, so it holds the in-game AI's balanced value of {BALANCED}."
-            )},
             ranges=ranges,
-            range_label="In-game range (mean of each player's min and max)",
+            range_label="Range",
+            baseline_row=True,
         )
         metadata = {
             **views.metadata(),

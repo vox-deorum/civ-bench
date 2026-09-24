@@ -22,6 +22,9 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     Display order; keys not listed follow in first-appearance order.
 ``reference_rows``, ``row_tips``
     Rows pinned in their own body at the top, and row-label tooltips.
+``baseline_rows``
+    Rows holding the baseline's absolute values: shown unsigned, with an
+    ``sd`` line in the tooltip of a signed (relative) table.
 ``column_group``
     Optional column naming each column's group, shown as a spanning header.
 ``column_names``, ``column_labels``, ``column_tips``
@@ -33,6 +36,10 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     Optional ``[low, high]`` columns shown as one more tooltip line.
 ``legend``
     ``[[position, label], ...]`` swatches under the table.
+
+A cell tooltip follows the report script's tip format: the first line is the
+title, other plain lines are subtitles, and ``label<TAB>value[<TAB>note]``
+lines form a grid with the numbers in an accent color (see :func:`tip_row`).
 
 Every value, color, and tooltip is computed here, so unchanged inputs render
 byte-identically.
@@ -154,9 +161,22 @@ def _number(value, decimals: int, signed: bool) -> str:
     return text
 
 
-def _cell_value(rec: dict, spec: dict) -> str:
+def _signed(spec: dict, row: str) -> bool:
+    return bool(spec.get("signed", False)) and row not in set(spec.get("baseline_rows") or [])
+
+
+def _cell_value(rec: dict, spec: dict, row: str) -> str:
     return _number(rec.get(spec.get("value", "mean")), int(spec.get("decimals", 1)),
-                   bool(spec.get("signed", False)))
+                   _signed(spec, row))
+
+
+def tip_row(label: str, value: str = "", note: str = "") -> str:
+    """One grid line of a tooltip: muted label, accent-colored value, muted note."""
+    return f"{label}\t{value}\t{note}" if note else f"{label}\t{value}"
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
 
 
 def _column_name(spec: dict, column: str) -> str:
@@ -168,36 +188,33 @@ def _column_label(spec: dict, column: str) -> str:
 
 
 def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
+    """Row and column name, then value, CI, spread, range, and sample size as grid lines."""
     decimals = int(spec.get("decimals", 1)) + 1
-    signed = bool(spec.get("signed", False))
+    baseline = row in set(spec.get("baseline_rows") or [])
+    signed = _signed(spec, row)
     value = _number(rec.get(spec.get("value", "mean")), decimals, signed)
-    lines = [f"{row} · {_column_name(spec, column)}"]
-    line = value
-    if spec.get("value_label"):
-        line = f"{value} {spec['value_label']}"
+    label = "Average" if baseline else str(spec.get("value_label") or "Value")
+    lines = [row, _column_name(spec, column), tip_row(label, value)]
     lo = _number(rec.get("ci_lower"), decimals, signed)
     hi = _number(rec.get("ci_upper"), decimals, signed)
     if lo and hi:
         level = spec.get("ci_level")
-        prefix = f"{float(level) * 100:g}% CI " if isinstance(level, (int, float)) else "CI "
-        line += f" ({prefix}{lo} to {hi})"
-    lines.append(line)
-    median = _number(rec.get("median"), decimals, signed)
-    if median:
-        lines.append(f"Median {median}")
+        prefix = f"{float(level) * 100:g}% CI" if isinstance(level, (int, float)) else "CI"
+        lines.append(tip_row(prefix, "", f"{lo} to {hi}"))
+    sd = _number(rec.get("sd"), decimals, False)
+    if baseline and sd and spec.get("signed"):
+        lines.append(tip_row("SD", sd, "one legend step"))
     bounds = spec.get("range_columns")
     if isinstance(bounds, list) and len(bounds) == 2:
         low = _number(rec.get(bounds[0]), 0, False)
         high = _number(rec.get(bounds[1]), 0, False)
         if low and high:
-            lines.append(f"{spec.get('range_label', 'Range')}: {low} to {high}")
+            lines.append(tip_row(str(spec.get("range_label", "Range")), "",
+                                 f"{low} to {high} (mean min to max)"))
     n_players, n_games = rec.get("n_players"), rec.get("n_games")
     if n_players is not None and n_games is not None and np.isfinite(float(n_players)):
         players, games = int(n_players), int(float(n_games))
-        lines.append(
-            f"{players} player{'s' if players != 1 else ''} in "
-            f"{games} game{'s' if games != 1 else ''}"
-        )
+        lines.append(tip_row("Players", str(players), f"in {plural(games, 'game')}"))
     return "\n".join(lines)
 
 
@@ -210,7 +227,7 @@ def _label_html(label: str, tip: str) -> str:
 def _cell_html(rec: Optional[dict], spec: dict, row: str, column: str) -> str:
     if rec is None:
         return '<td class="heat-cell heat-cell-empty" aria-label="no data"></td>'
-    text = _cell_value(rec, spec)
+    text = _cell_value(rec, spec, row)
     position = rec.get(COLOR_COLUMN)
     try:
         position = float(position)
@@ -324,7 +341,7 @@ def render_heatmap_md(frame: pd.DataFrame, spec: dict) -> list[str]:
         "|" + "|".join([":---"] + ["---:"] * len(columns)) + "|",
     ]
     for row in reference + body:
-        values = [_cell_value(cells[(row, c)], spec) if (row, c) in cells else "" for c in columns]
+        values = [_cell_value(cells[(row, c)], spec, row) if (row, c) in cells else "" for c in columns]
         lines.append("| " + " | ".join(clean(v) for v in [row, *values]) + " |")
     key = [
         f"{_column_label(spec, c)} = {_column_name(spec, c)}"

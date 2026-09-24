@@ -19,10 +19,53 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
    Also switches section views: the first view of each group is shown, and a
    choice applies to every group on the page that offers the same view. And it
    shows the text of any [data-tip] element (heatmap cells and labels) in one
-   floating tooltip on hover or keyboard focus. */
+   floating tooltip on hover or keyboard focus. A tip's first line is its bold
+   title when there are more; "label<TAB>value<TAB>note" lines form a grid with
+   the value and the note's numbers in an accent color, and other lines are
+   muted subtitles. */
 (function () {
   "use strict";
   var tooltip = null;
+  function span(cls, text) {
+    var node = document.createElement("span");
+    node.className = cls;
+    node.textContent = text;
+    return node;
+  }
+  /* A note's numbers (a CI range, a game count) share the value color. */
+  function noteSpan(text) {
+    var node = span("tip-note", "");
+    text.split(/([+\\-\\u2212]?\\d[\\d,.]*%?)/).forEach(function (part, index) {
+      if (!part) { return; }
+      node.appendChild(index % 2 ? span("tip-number", part) : document.createTextNode(part));
+    });
+    return node;
+  }
+  function renderTip(text) {
+    tooltip.textContent = "";
+    var lines = text.split("\\n");
+    var grid = null;
+    lines.forEach(function (line, index) {
+      var cells = line.split("\\t");
+      if (cells.length > 1) {
+        if (!grid) {
+          grid = document.createElement("div");
+          grid.className = "tip-grid";
+          tooltip.appendChild(grid);
+        }
+        grid.appendChild(span("tip-label", cells[0]));
+        var value = document.createElement("span");
+        value.className = "tip-value";
+        if (cells[1]) { value.appendChild(span("tip-number", cells[1])); }
+        if (cells[2]) { value.appendChild(noteSpan(cells[2])); }
+        grid.appendChild(value);
+        return;
+      }
+      grid = null;
+      var cls = index === 0 && lines.length > 1 ? "tip-title" : (index === 0 ? "tip-text" : "tip-sub");
+      tooltip.appendChild(span(cls, line));
+    });
+  }
   function showTip(target) {
     if (!tooltip) {
       tooltip = document.createElement("div");
@@ -31,7 +74,7 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
       tooltip.setAttribute("role", "tooltip");
       document.body.appendChild(tooltip);
     }
-    tooltip.textContent = target.getAttribute("data-tip") || "";
+    renderTip(target.getAttribute("data-tip") || "");
     tooltip.style.display = "block";
     var rect = target.getBoundingClientRect();
     var top = rect.top - tooltip.offsetHeight - 6;

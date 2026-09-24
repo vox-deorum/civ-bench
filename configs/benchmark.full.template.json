@@ -54,7 +54,17 @@
       "max_dbs": null,
       "prune_missing": false,
       "force_rebuild": false,
-      "issues_path": "runs/import_issues.csv"
+      "issues_path": "runs/import_issues.csv",
+      "behavior": {
+        "flavor_gates": {
+          "Nuke": {"techs": ["Nuclear Fission", "Satellites", "Advanced Ballistics"]},
+          "UseNuke": {"techs": ["Nuclear Fission", "Satellites", "Advanced Ballistics"]},
+          "Air": {"era": "Modern"},
+          "Antiair": {"era": "Modern"},
+          "AirCarrier": {"era": "Modern"},
+          "Airlift": {"era": "Modern"}
+        }
+      }
     },
     "tables": {
       "turns": "runs/turn_data.csv",

@@ -123,6 +123,7 @@ class BehaviorAnalysis(Analysis):
         row_tips: dict | None = None,
         ranges: dict | None = None,
         range_label: str = "",
+        baseline_row: bool = False,
     ) -> None:
         """Write ``<slug>_relative`` / ``<slug>_absolute`` and their heatmap specs.
 
@@ -134,6 +135,10 @@ class BehaviorAnalysis(Analysis):
         ``mean_min`` / ``mean_max`` for the absolute tooltip. The per-view
         dictionaries (``titles``, ``help_texts``, ``legends``,
         ``value_labels``) are keyed by :data:`C.RELATIVE` / :data:`C.ABSOLUTE`.
+
+        With ``baseline_row``, both views pin a row with the baseline pool's absolute
+        mean per metric (``row_kind == "baseline"``), colored like the absolute
+        view; it needs a relative view, so an uncontrolled run has none.
         """
         metrics = list(names)
         per_view = [(C.ABSOLUTE, views.absolute, metrics)]
@@ -141,6 +146,11 @@ class BehaviorAnalysis(Analysis):
             per_view.insert(0, (C.RELATIVE, views.relative,
                                 [m for m in metrics if m in views.relative_metrics]))
         reference = [ctx.catalog.null_label, ctx.catalog.vanilla_label]
+        pinned = ""
+        if baseline_row and views.relative is not None and views.baseline_summary:
+            label = views.baseline.label
+            pinned = label[:1].upper() + label[1:]
+            reference.insert(0, pinned)
         for view, frame, view_metrics in per_view:
             if not view_metrics:
                 continue
@@ -154,7 +164,11 @@ class BehaviorAnalysis(Analysis):
                 summary = _attach_ranges(summary, frame, self.by, ranges)
             summary["color_position"] = C.color_positions(summary, view, views, fixed)
             table, order = C.heatmap_rows(ctx, summary, self.by)
-            leading = [self.by, "strategist", "condition", "row_label"]
+            table.insert(0, "row_kind", "group")
+            if pinned:
+                table = _with_baseline_row(table, views, view_metrics, pinned, self.by, groups, fixed)
+                order = [pinned] + order
+            leading = ["row_kind", self.by, "strategist", "condition", "row_label"]
             table = table[leading + [c for c in table.columns if c not in leading]]
             name = f"{slug}_{view}"
             out.add(view, name, table=table)
@@ -177,6 +191,7 @@ class BehaviorAnalysis(Analysis):
                 ci_level=self.ci_level,
                 legend=legends[view],
                 range_label=range_label if view == C.ABSOLUTE and ranges else "",
+                baseline_rows=[pinned] if pinned else None,
             )
 
     def heatmap_headline(self, ctx: AnalysisContext, out: MetricViews, views: C.BehaviorViews,
@@ -188,6 +203,8 @@ class BehaviorAnalysis(Analysis):
             if table is None or table.empty:
                 continue
             table = table[~table[self.by].astype(str).isin(skip)]
+            if "row_kind" in table.columns:
+                table = table[table["row_kind"] != "baseline"]
             strong = table[table["n_players"] >= 3]
             table = strong if not strong.empty else table
             if table.empty:
@@ -293,6 +310,27 @@ class BehaviorAnalysis(Analysis):
             f"**{overall:.2f}** overall), across **{len(views.absolute)}** players in "
             f"**{n_games}** games."
         )
+
+
+def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: list[str],
+                       label: str, by: str, groups: dict | None, fixed: dict | None) -> pd.DataFrame:
+    """``table`` with the baseline pool's absolute means prepended as one row."""
+    records = []
+    for metric in metrics:
+        stats = views.baseline_summary.get(metric)
+        if stats is None:
+            continue
+        records.append({
+            "row_kind": "baseline", by: label, "strategist": label, "condition": "",
+            "row_label": label, "metric": metric, "metric_group": (groups or {}).get(metric, ""),
+            "mean": stats["mean"], "sd": stats["sd"],
+            "n_players": stats["n_players"], "n_games": stats["n_games"],
+        })
+    if not records:
+        return table
+    rows = pd.DataFrame(records)
+    rows["color_position"] = C.color_positions(rows, C.ABSOLUTE, views, fixed)
+    return pd.concat([rows, table], ignore_index=True)
 
 
 def _attach_ranges(summary: pd.DataFrame, rows: pd.DataFrame, by: str, ranges: dict) -> pd.DataFrame:

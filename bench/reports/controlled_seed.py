@@ -45,7 +45,9 @@ from bench.reports.content import (
     report_summary, metadata_text,
 )
 from .errors import ReportError
-from .heatmap import cell_text_color as _cell_text_color, interpolate as _interpolate, position_background
+from .heatmap import (
+    cell_text_color as _cell_text_color, interpolate as _interpolate, plural, position_background, tip_row,
+)
 from .model import ControlledSeedDocument
 
 CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
@@ -245,32 +247,33 @@ def _civ_headings(doc: ControlledSeedDocument) -> dict[tuple[int, int], str]:
 
 
 # ── heatmaps ──────────────────────────────────────────────────────────────────
-def _cell_tooltip(row: dict) -> str:
-    """The shared cell tooltip: civilization and runs, strength, and focus.
+def _cell_tooltip(doc: ControlledSeedDocument, row: dict, player_id: int) -> str:
+    """The shared cell tooltip: row and seat, then strength, focus, and runs.
 
     Both overview heatmaps carry the same tooltip so a cell means the same thing
-    wherever it is hovered.
+    wherever it is hovered. Lines follow the report's tip format (``tip_row``).
     """
     runs = int(row["run_count"])
     strength = float(row["mean_adjusted_strength"])
     pct = float(row["dominant_focus_pct"])
-    strength_line = (
-        f"Adj strength: {strength:.4f}"
-        if np.isfinite(strength)
-        else "Adj strength: unavailable"
-    )
-    focus_line = (
-        f"Victory focus: {row['dominant_focus']} ({pct:.1f}%)"
-        if np.isfinite(pct)
-        else "Victory focus: unavailable"
-    )
-    return (
-        f"{row['civilization']} ({runs} run{'s' if runs != 1 else ''})\n"
-        f"{strength_line}\n{focus_line}"
-    )
+    lines = [
+        _row_title(doc, str(row["strategist"]), str(row["condition"])),
+        f"P{player_id} · {row['civilization']}",
+        tip_row("Strength", f"{strength:.3f}" if np.isfinite(strength) else "n/a"),
+        tip_row("Focus", str(row["dominant_focus"]), f"{pct:.0f}%")
+        if np.isfinite(pct) else tip_row("Focus", "n/a"),
+        tip_row("Runs", str(runs)),
+    ]
+    return "\n".join(lines)
 
 
-def _heat_cell(row: dict, seed: int, player_id: int, kind: str) -> str:
+def _row_title(doc: ControlledSeedDocument, strategist: str, condition: str) -> str:
+    if strategist == doc.vanilla_label and condition == doc.vanilla_label:
+        return "VPAI"
+    return f"{_strategist_label(doc, strategist)} | {condition}"
+
+
+def _heat_cell(doc: ControlledSeedDocument, row: dict, seed: int, player_id: int, kind: str) -> str:
     """One populated heatmap cell: colored, tooltip-equipped, and clickable."""
     strategist, condition = str(row["strategist"]), str(row["condition"])
     if kind == "strength":
@@ -286,7 +289,7 @@ def _heat_cell(row: dict, seed: int, player_id: int, kind: str) -> str:
     href = _detail_link(seed, player_id, strategist, condition)
     return (
         f'<td class="heat-cell" style="background-color:{background};'
-        f'color:{color}" data-tip="{_esc(_cell_tooltip(row))}">'
+        f'color:{color}" data-tip="{_esc(_cell_tooltip(doc, row, player_id))}">'
         f'<a href="{_esc(href)}" style="color:inherit">{_esc(text)}</a></td>'
     )
 
@@ -335,7 +338,7 @@ def _heatmap(
             if row is None:
                 out.append(_empty_heat_cell())
             else:
-                out.append(_heat_cell(row, seed, player_id, kind))
+                out.append(_heat_cell(doc, row, seed, player_id, kind))
         return out
 
     def avg_cell(strategist: str, condition: str) -> str:
@@ -362,11 +365,12 @@ def _heatmap(
             / runs
         )
         background = _strength_background(value)
-        tip = (
-            f"Adj strength: {value:.4f}\n"
-            f"Mean over {runs} run{'s' if runs != 1 else ''} across "
-            f"{len(rows)} seat{'s' if len(rows) != 1 else ''}"
-        )
+        tip = "\n".join([
+            _row_title(doc, strategist, condition),
+            "Seed average",
+            tip_row("Strength", f"{value:.3f}"),
+            tip_row("Runs", str(runs), f"over {plural(len(rows), 'seat')}"),
+        ])
         return (
             f'<td class="heat-cell heat-cell-avg col-avg" '
             f'style="background-color:{background};'

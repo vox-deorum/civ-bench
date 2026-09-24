@@ -304,8 +304,8 @@ def test_run_report_writes_md_and_html(report_env):
     assert md.startswith("# civbench-dev")
     assert "regenerated every result" not in md
     assert "Run **civbench-dev**" not in md
-    # Family chapters, canonical order: prediction → calibration → performance.
-    assert md.index("## Prediction") < md.index("## Calibration") < md.index("## Performance")
+    # Family chapters, canonical order: performance → prediction → calibration.
+    assert md.index("## Performance") < md.index("## Prediction") < md.index("## Calibration")
     prediction_summary = _summarize_family(
         FamilyGroup(key="prediction", title="Prediction")
     )
@@ -667,7 +667,7 @@ def test_partial_sections_prioritize_and_include_the_rest(report_env):
 @pytest.mark.parametrize("sections", [None, [], ["perf_usage_efficiency", "pred_compare"]])
 def test_section_remainder_uses_default_order(report_env, sections):
     report_env.report["sections"] = sections
-    expected = ["pred_metrics", "pred_compare", "cal_reliability", "perf_usage_efficiency"]
+    expected = ["perf_usage_efficiency", "pred_metrics", "pred_compare", "cal_reliability"]
     if sections:
         expected = sections + [sid for sid in expected if sid not in sections]
     assert _resolve_section_ids(report_env, []) == expected
@@ -681,11 +681,11 @@ def test_section_autofill_skips_disabled_and_deduplicates(report_env, include_di
     report_env.report["sections"] = ["pred_compare", "pred_compare"]
     warnings = []
     assert _resolve_section_ids(report_env, warnings) == [
-        "pred_compare", "pred_metrics", "perf_usage_efficiency",
+        "pred_compare", "perf_usage_efficiency", "pred_metrics",
     ]
     assert any("listed more than once" in warning for warning in warnings)
     report_env.report["sections"] = ["cal_reliability"]
-    expected = ["pred_metrics", "pred_compare", "perf_usage_efficiency"]
+    expected = ["perf_usage_efficiency", "pred_metrics", "pred_compare"]
     if include_disabled:
         expected.insert(0, "cal_reliability")
     assert _resolve_section_ids(report_env, []) == expected
@@ -1132,9 +1132,23 @@ def test_malformed_views_fall_back_to_a_single_view(views_env):
 
 
 # ── HTML heatmap tables ────────────────────────────────────────────────────────
+BASELINE_ROW = "Completed-experiment average"
+
+
 def _heat_frame(view: str, n_rows: int = 60) -> pd.DataFrame:
-    """A long heatmap table: Null plus ``n_rows - 1`` strategists over two flavors."""
+    """A long heatmap table: the pinned baseline row, Null, and ``n_rows - 1``
+    strategists over two flavors. The baseline row holds the pool's absolute
+    means (no median or CI), like ``behavior.flavors`` writes."""
     records = []
+    for metric, group_name in (("flavor_offense_avg", "Military"),
+                               ("flavor_science_avg", "Economy")):
+        records.append({
+            "row_kind": "baseline", "player_type": BASELINE_ROW, "strategist": BASELINE_ROW,
+            "condition": "", "row_label": BASELINE_ROW,
+            "metric": metric, "metric_group": group_name,
+            "mean": 55.0, "sd": 12.0, "n_players": 12, "n_games": 5,
+            "color_position": 0.55,
+        })
     for i in range(n_rows):
         group = "Null" if i == 0 else f"Model-{i:02d}"
         for metric, group_name, position in (
@@ -1142,6 +1156,7 @@ def _heat_frame(view: str, n_rows: int = 60) -> pd.DataFrame:
             ("flavor_science_avg", "Economy", 1.0 if i == 1 else 0.5),
         ):
             records.append({
+                "row_kind": "group",
                 "player_type": group, "strategist": group, "condition": "", "row_label": group,
                 "metric": metric, "metric_group": group_name,
                 "mean": 12.4 if view == "relative" else 62.4, "median": 12.0,
@@ -1155,15 +1170,17 @@ def _heat_spec(view: str) -> dict:
     return {
         "view": view, "title": f"Flavors {view}", "help": "How to read it.",
         "row": "row_label", "column": "metric", "value": "mean",
-        "row_heading": "Strategist | Condition", "row_order": ["Null", "Model-02", "Model-01"],
-        "reference_rows": ["Null"], "row_tips": {"Null": "Never changes flavors."},
+        "row_heading": "Strategist | Condition",
+        "row_order": [BASELINE_ROW, "Null", "Model-02", "Model-01"],
+        "reference_rows": [BASELINE_ROW, "Null"], "row_tips": {"Null": "Never changes flavors."},
+        "baseline_rows": [BASELINE_ROW],
         "column_order": ["flavor_offense_avg", "flavor_science_avg"],
         "column_names": {"flavor_offense_avg": "Offense", "flavor_science_avg": "Science"},
         "column_labels": {"flavor_offense_avg": "Off", "flavor_science_avg": "Sci"},
-        "column_tips": {"flavor_offense_avg": "Offense: Pivots the military.",
-                        "flavor_science_avg": "Science: Prioritizes science."},
+        "column_tips": {"flavor_offense_avg": "Offense\nPivots the military.",
+                        "flavor_science_avg": "Science\nPrioritizes science."},
         "column_group": "metric_group", "decimals": 0, "signed": view == "relative",
-        "value_label": "vs the baseline" if view == "relative" else "average setting",
+        "value_label": "Difference" if view == "relative" else "Average",
         "ci_level": 0.95, "legend": [[0, "low"], [0.5, "balanced"], [1, "high"]],
     }
 
@@ -1202,17 +1219,35 @@ def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
     assert page.count('<table class="heatmap">') == 2
     assert page.count('<div class="view-switch"') == 1
     # Short headers carry the full name and description in their tooltip.
-    assert '<span tabindex="0" data-tip="Offense: Pivots the military.">Off</span>' in page
+    assert '<span tabindex="0" data-tip="Offense\nPivots the military.">Off</span>' in page
     assert 'colspan="1" class="heat-group">Military</th>' in page
-    # Null is pinned in the reference body, before the configured order.
+    # The baseline pool and Null are pinned in the reference body, before the order.
     assert '<tbody class="vanilla-body"><tr class="vanilla-row">' in page
-    assert page.index('data-tip="Never changes flavors.">Null') < page.index(">Model-02<") < page.index(">Model-01<")
+    assert (page.index(f">{BASELINE_ROW}</th>") < page.index('data-tip="Never changes flavors.">Null')
+            < page.index(">Model-02<") < page.index(">Model-01<"))
     # Positions 0, 0.5, and 1 take the red, yellow, and blue anchors.
-    assert 'background-color:#a50026;color:#ffffff" data-tip="Model-01 · Offense' in page
-    assert 'background-color:#313695;color:#ffffff" data-tip="Model-01 · Science' in page
+    assert 'background-color:#a50026;color:#ffffff" data-tip="Model-01\nOffense' in page
+    assert 'background-color:#313695;color:#ffffff" data-tip="Model-01\nScience' in page
     assert "background-color:#ffffbf" in page
     assert ">+12</td>" in page and ">62</td>" in page
-    assert "+12.4 vs the baseline (95% CI +10.0 to +15.0)" in page
+    # Cell tooltips are grid lines: label, value, CI, and counts (decimals + 1).
+    assert (
+        'data-tip="Model-01\nOffense\nDifference\t+12.4\n95% CI\t\t+10.0 to +15.0\n'
+        'Players\t48\tin 48 games"' in page
+    )
+    # The baseline row reads unsigned even in the signed relative table, and
+    # shows its SD (one legend step) and absolute-average label.
+    assert (
+        'data-tip="' + BASELINE_ROW + '\nOffense\nAverage\t55.0\n'
+        'SD\t12.0\tone legend step\nPlayers\t12\tin 5 games"' in page
+    )
+    # The absolute table drops the SD line and the cell never takes a sign.
+    assert (
+        'data-tip="' + BASELINE_ROW + '\nOffense\nAverage\t55.0\n'
+        'Players\t12\tin 5 games"' in page
+    )
+    assert ">+55<" not in page
+    assert f">{BASELINE_ROW}</th>" in page  # the row label itself carries no sign logic
     # The whole long table survives the inline row cap (60 rows x 2 flavors).
     assert page.count(">Model-59<") == 2
     assert "heatmaps:" not in page
@@ -1223,6 +1258,9 @@ def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
     md = (out / "report.md").read_text(encoding="utf-8")
     assert r"| Strategist \| Condition | Off | Sci |" in md
     assert "| Null | 62 | 62 |" in md
+    # The baseline row renders unsigned in both the relative and absolute grids.
+    assert md.count(f"| {BASELINE_ROW} | 55 | 55 |") == 2
+    assert "+55" not in md
     assert "_Columns: Off = Offense; Sci = Science._" in md
 
 

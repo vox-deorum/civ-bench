@@ -88,6 +88,9 @@ class BehaviorViews:
     relative_metrics: list[str] = field(default_factory=list)
     baseline: Optional[Baseline] = None
     baseline_sd: dict = field(default_factory=dict)
+    # metric → {mean, sd, n_players, n_games} of the pool on controlled games,
+    # in absolute terms (the pinned baseline row of the HTML heatmaps).
+    baseline_summary: dict = field(default_factory=dict)
     dropped_metrics: list[str] = field(default_factory=list)
     n_unmatched: int = 0
     n_baseline_rows: int = 0
@@ -275,6 +278,14 @@ def build_views(
         return views
     means = pool.groupby(["seed", "player_id"])[usable].mean()
     views.baseline_sd = {m: float(pool[m].std(ddof=1)) for m in usable}
+    for metric in usable:
+        values = pool[["game_id", metric]].dropna()
+        views.baseline_summary[metric] = {
+            "mean": float(values[metric].mean()),
+            "sd": views.baseline_sd[metric],
+            "n_players": int(len(values)),
+            "n_games": int(values["game_id"].nunique()),
+        }
     views.n_baseline_rows = int(len(pool))
     views.n_baseline_experiments = int(pool["experiment"].nunique())
 
@@ -603,6 +614,7 @@ def heatmap_spec(
     ci_level: float,
     legend: list,
     range_label: str = "",
+    baseline_rows: Optional[list] = None,
 ) -> dict:
     """The ``metadata["heatmaps"]`` entry for one view's table (layout only)."""
     spec = {
@@ -631,5 +643,7 @@ def heatmap_spec(
     if range_label:
         spec["range_columns"] = ["mean_min", "mean_max"]
         spec["range_label"] = range_label
+    if baseline_rows:
+        spec["baseline_rows"] = list(baseline_rows)
     return spec
 
