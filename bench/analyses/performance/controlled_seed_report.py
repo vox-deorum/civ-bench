@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 
@@ -78,40 +79,6 @@ def _unique_per_game_player(df: pd.DataFrame, source: str, stage_id: str) -> pd.
             "an analysis error, not extra observations."
         )
     return df
-
-
-def _condition_display(spec, condition_key: str, vanilla_label: str) -> str:
-    if condition_key == "vanilla":
-        return vanilla_label
-    if condition_key == "base":
-        return spec.base_label
-    return condition_key.lstrip("-")
-
-
-def _condition_order(spec, observed_keys: set[str], vanilla_label: str) -> list[str]:
-    """Display order: base label, configured suffix order, then unconfigured observed."""
-    order = [_condition_display(spec, "base", vanilla_label)]
-    order += [_condition_display(spec, key, vanilla_label) for key in spec.suffixes]
-    known = {"vanilla"} | {"base"} | set(spec.suffixes)
-    extra = sorted({k for k in observed_keys if k not in known})
-    order += [_condition_display(spec, key, vanilla_label) for key in extra]
-    seen: set[str] = set()
-    return [label for label in order if not (label in seen or seen.add(label))]
-
-
-def _strategist_order(catalog, strategists: list[str]) -> list[str]:
-    """Catalog order first (by resolved model id), then unlisted identities lexically."""
-    catalog_ids = [m["id"] for m in catalog.strategist_models()]
-    rank = {model_id: idx for idx, model_id in enumerate(catalog_ids)}
-
-    def sort_key(name: str):
-        model_id = catalog.split_player_type(name)["model_id"]
-        position = rank.get(str(model_id))
-        if position is None:
-            return (1, str(model_id), name)
-        return (0, position, name)
-
-    return sorted(set(strategists), key=sort_key)
 
 
 def _dominant_focus(row: dict) -> tuple[str, float]:
@@ -255,7 +222,7 @@ class PerformanceControlledSeedReport(Analysis):
             ctx, spec, rows, vanilla_label, baseline_experiment
         )
         rows["condition"] = [
-            _condition_display(spec, key, vanilla_label)
+            condition_display(spec, key, vanilla_label)
             for key in rows["condition_key"]
         ]
 
@@ -270,11 +237,11 @@ class PerformanceControlledSeedReport(Analysis):
         probability = self._probability_table(curves)
         index = self._index_table(rows, probability, vanilla_label)
 
-        strategist_order = _strategist_order(
+        strategist_order = order_strategists(
             ctx.catalog, [s for s in summary["strategist"].unique() if s != vanilla_label]
         )
         condition_keys = set(rows["condition_key"].astype(str))
-        condition_order = _condition_order(spec, condition_keys, vanilla_label)
+        condition_order = order_conditions(spec, condition_keys, vanilla_label)
         colors = self._strategist_colors(ctx, strategist_order, vanilla_label)
 
         n_seeds = int(rows["seed"].nunique())

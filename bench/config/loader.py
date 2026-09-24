@@ -506,15 +506,21 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
 
 def _validate_behavior_param_types(params: dict, where: str) -> None:
     """Types of the shared ``behavior.*`` params; columns are checked in a later pass."""
-    for key in ("metrics", "traits", "branches"):
+    for key in ("flavors", "traits", "branches"):
         if key in params:
             _check_string_list(params[key], f"{where}.params.{key}", allow_empty=False)
     if "rate" in params:
         _check_domain(params["rate"], set(S.BEHAVIOR_RATES), f"{where}.params.rate")
     if "by" in params:
         _check_type(params["by"], (str,), f"{where}.params.by")
-    if params.get("baseline_experiment") is not None:
-        _check_type(params["baseline_experiment"], (str,), f"{where}.params.baseline_experiment")
+    baseline = params.get("baseline")
+    if isinstance(baseline, list):
+        _check_string_list(baseline, f"{where}.params.baseline", allow_empty=False)
+    elif baseline is not None and not isinstance(baseline, str):
+        raise ConfigError(
+            f"{where}.params.baseline: must be \"{S.BEHAVIOR_BASELINE_COMPLETED}\", an "
+            "experiment id, or a non-empty list of experiment ids."
+        )
 
 
 def _validate_behavior_columns(analyses: list[Stage], data: dict) -> None:
@@ -528,17 +534,20 @@ def _validate_behavior_columns(analyses: list[Stage], data: dict) -> None:
         where = f"analyses (id={stage.id!r})"
         module = stage.raw["module"]
         params = stage.raw.get("params") or {}
-        if module == "behavior.profiles":
-            metrics = params.get("metrics")
-            if not metrics:
-                raise ConfigError(f"{where}.params.metrics: required for behavior.profiles.")
-            bad = [m for m in metrics if m not in kinds]
-            if bad:
+        if module == "behavior.flavors" and params.get("flavors"):
+            unknown = [f for f in params["flavors"] if f not in S.FLAVOR_NAMES]
+            if unknown:
                 raise ConfigError(
-                    f"{where}.params.metrics: {bad} are not columns of the behavior table as "
-                    f"configured by data.extract.behavior. Allowed: {list(kinds)}."
+                    f"{where}.params.flavors: unknown flavor(s) {unknown}. "
+                    f"Allowed: {list(S.FLAVOR_NAMES)}."
                 )
-        elif module == "behavior.diplomacy":
+            missing = [f for f in params["flavors"] if f"flavor_{snake_case(f)}_avg" not in kinds]
+            if missing:
+                raise ConfigError(
+                    f"{where}.params.flavors: {missing} need data.extract.behavior.flavor to "
+                    "select them and data.extract.behavior.stats to include 'avg'."
+                )
+        if module == "behavior.diplomacy":
             traits = params.get("traits") or list(S.BEHAVIOR_DIPLOMACY_TRAITS)
             unknown = [t for t in traits if t not in S.PERSONA_NAMES]
             if unknown:

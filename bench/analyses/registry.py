@@ -17,8 +17,8 @@ from .base import Analysis
 from .behavior import (
     BehaviorCommitment,
     BehaviorDiplomacy,
+    BehaviorFlavors,
     BehaviorPolicies,
-    BehaviorProfiles,
 )
 from .calibration import (
     CalibrationCellBaseline,
@@ -67,7 +67,7 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "performance.game_log": PerformanceGameLog,
     "performance.usage_efficiency": PerformanceUsageEfficiency,
     # behavior.*
-    "behavior.profiles": BehaviorProfiles,
+    "behavior.flavors": BehaviorFlavors,
     "behavior.diplomacy": BehaviorDiplomacy,
     "behavior.commitment": BehaviorCommitment,
     "behavior.policies": BehaviorPolicies,

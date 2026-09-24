@@ -39,6 +39,7 @@ _FAMILY_TITLES = {
     "prediction": "Prediction",
     "calibration": "Calibration",
     "performance": "Performance",
+    "controlled_seed": CONTROLLED_SEED_TITLE,
     "behavior": "Behavior",
     "exploratory": "Exploratory",
 }
@@ -62,6 +63,7 @@ _FAMILY_PURPOSES = {
         "Compare strategists' strength, progress, cost, and token use, with "
         "coverage checks to show which experiments support the results."
     ),
+    "controlled_seed": CONTROLLED_SEED_PURPOSE,
     "behavior": (
         "Describe how strategists play (military, diplomatic, strategic, and "
         "policy choices), against the in-game AI on the same map and seat and "
@@ -74,11 +76,16 @@ _FAMILY_PURPOSES = {
 
 # Stable display order for the families; unknown families sort after these, in the
 # order they first appear among the sections.
-_FAMILY_ORDER = ["ratings", "prediction", "calibration", "performance", "behavior", "exploratory"]
+_FAMILY_ORDER = [
+    "ratings", "performance", "controlled_seed",
+    "behavior", "exploratory", "prediction", "calibration"
+]
 
 
 def family_of(module: str) -> str:
     """The family key of a ``family.module`` registry name (``"ratings"``)."""
+    if module == "performance.controlled_seed_report":
+        return "controlled_seed"
     return module.split(".", 1)[0] if "." in module else module
 
 

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from .commitment import BehaviorCommitment
 from .diplomacy import BehaviorDiplomacy
+from .flavors import BehaviorFlavors
 from .policies import BehaviorPolicies
-from .profiles import BehaviorProfiles
 
 __all__ = [
     "BehaviorCommitment",
     "BehaviorDiplomacy",
+    "BehaviorFlavors",
     "BehaviorPolicies",
-    "BehaviorProfiles",
 ]

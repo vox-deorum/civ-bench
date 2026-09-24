@@ -5,14 +5,19 @@ set of metric columns, then hands the rows to :func:`build_views`, which returns
 two views of the same metrics:
 
 * **relative** (the default): controlled rows only, each metric minus the mean
-  of the baseline experiment's in-game AI at the same ``(seed, player_id)``
-  cell. Rows without a matched cell and the baseline rows themselves are left
-  out; metrics the baseline never populates are dropped.
+  of the baseline pool at the same ``(seed, player_id)`` cell. Metrics the pool
+  never populates are dropped.
 * **absolute**: every filtered row, as measured.
 
-The baseline pool is read from the unfiltered table (minus problem games and
-decision-failure games), so player filters such as ``only_llm`` cannot remove
-the in-game AI rows the comparison needs.
+The pool comes from ``params.baseline`` (:func:`resolve_baseline`): one
+experiment such as the in-game AI, a list of experiments, or ``"completed"``,
+the strategist players of every experiment that fills the controlled grid. It
+is read from the unfiltered table (minus problem games and decision-failure
+games), so player filters such as ``only_llm`` cannot remove it.
+
+:func:`heatmap_rows`, :func:`color_positions`, and :func:`heatmap_spec` turn a
+view's summary into the long table and layout spec the report draws as an HTML
+heatmap, so every page labels, orders, and colors its cells the same way.
 """
 
 from __future__ import annotations
@@ -25,7 +30,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from ...config import schema as S
 from ...plotting.heatmap import plot_diverging_heatmap
+from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ...plotting.styles import sort_player_types
 from ..base import AnalysisContext
 from ..errors import AnalysisError
@@ -33,6 +40,11 @@ from ..errors import AnalysisError
 RELATIVE = "relative"
 ABSOLUTE = "absolute"
 VIEW_LABELS = {RELATIVE: "Relative to matched in-game AI", ABSOLUTE: "Absolute"}
+COMPLETED = S.BEHAVIOR_BASELINE_COMPLETED
+# A relative cell reaches full color at this many pool SDs from the baseline.
+RELATIVE_COLOR_SD = 2.0
+# An absolute cell without a fixed range reaches full color at this z-score.
+ABSOLUTE_COLOR_Z = 2.0
 
 DEFAULT_RATE = "per_100_turns"
 DEFAULT_BOOTSTRAP_N = 1000
@@ -44,6 +56,28 @@ SUMMARY_COLUMNS = [
 ]
 
 
+@dataclass(frozen=True)
+class Baseline:
+    """Where a relative view's reference values come from.
+
+    ``kind`` is ``"completed"`` (every strategist in a completed experiment, each
+    part of its own baseline) or ``"experiments"`` (the named experiments, whose
+    own rows leave the relative view).
+    """
+
+    kind: str
+    experiments: tuple[str, ...]
+    label: str
+
+    @property
+    def self_included(self) -> bool:
+        return self.kind == COMPLETED
+
+    @property
+    def view_label(self) -> str:
+        return f"Relative to {self.label}"
+
+
 @dataclass
 class BehaviorViews:
     """Per-player metric rows for both views plus the provenance of the relative one."""
@@ -52,21 +86,26 @@ class BehaviorViews:
     relative: Optional[pd.DataFrame]
     metrics: list[str]
     relative_metrics: list[str] = field(default_factory=list)
-    baseline_experiment: Optional[str] = None
+    baseline: Optional[Baseline] = None
     baseline_sd: dict = field(default_factory=dict)
     dropped_metrics: list[str] = field(default_factory=list)
     n_unmatched: int = 0
     n_baseline_rows: int = 0
+    n_baseline_experiments: int = 0
     relative_note: str = ""
 
     def metadata(self) -> dict:
         out = {"n_absolute_players": int(len(self.absolute))}
-        if self.baseline_experiment:
-            out["baseline_experiment"] = self.baseline_experiment
+        if self.baseline is not None:
+            out["baseline"] = self.baseline.label
+            if not self.baseline.self_included:
+                out["baseline_experiments"] = list(self.baseline.experiments)
         if self.relative is not None:
             out["n_relative_players"] = int(len(self.relative))
             out["n_unmatched_controlled_players"] = int(self.n_unmatched)
             out["n_baseline_players"] = int(self.n_baseline_rows)
+            if self.baseline is not None and self.baseline.self_included:
+                out["n_baseline_experiments"] = int(self.n_baseline_experiments)
             if self.dropped_metrics:
                 out["relative_metrics_without_baseline"] = list(self.dropped_metrics)
         elif self.relative_note:
@@ -75,16 +114,54 @@ class BehaviorViews:
 
 
 # ── params ────────────────────────────────────────────────────────────────────
-def resolve_baseline_experiment(ctx: AnalysisContext, params: dict) -> Optional[str]:
-    """The stage's ``baseline_experiment``, else the first strength stage's one."""
-    if params.get("baseline_experiment"):
-        return str(params["baseline_experiment"])
+def strength_baseline_experiment(ctx: AnalysisContext) -> Optional[str]:
+    """The first enabled strength stage's ``baseline_experiment`` (the in-game AI)."""
     for stage in ctx.config.adjust:
         if stage.enabled and stage.raw.get("module") == "strength":
             value = (stage.raw.get("params") or {}).get("baseline_experiment")
             if value:
                 return str(value)
     return None
+
+
+def completed_experiments(ctx: AnalysisContext) -> tuple[str, ...]:
+    """Experiments that fill every controlled ``(seed, seating_rotation)`` slot.
+
+    Problem games and decision-failure games do not count, as in
+    ``performance.experiment_completeness``.
+    """
+    from ...data.loading import condition_completeness
+
+    path = (ctx.config.data.get("tables") or {}).get("games")
+    if not path or not Path(path).exists():
+        return ()
+    games = ctx.load_table("games")
+    shares = condition_completeness(games, "experiment", ctx.decision_failure_ids())
+    return tuple(sorted(name for name, share in shares.items() if share >= 1.0))
+
+
+def resolve_baseline(ctx: AnalysisContext, params: dict, default: Optional[str] = None) -> Optional[Baseline]:
+    """The stage's ``baseline``, else the module ``default``, else the in-game AI.
+
+    ``default`` is ``"completed"`` or ``None``; ``None`` falls back to the first
+    strength stage's ``baseline_experiment``.
+    """
+    value = params.get("baseline", default)
+    in_game_ai = strength_baseline_experiment(ctx)
+    if value == COMPLETED:
+        return Baseline(COMPLETED, completed_experiments(ctx), "completed-experiment average")
+    if value is None:
+        value = in_game_ai
+        if value is None:
+            return None
+    names = (str(value),) if isinstance(value, str) else tuple(str(v) for v in value)
+    if names == (in_game_ai,):
+        label = "matched in-game AI"
+    elif len(names) == 1:
+        label = f"matched '{names[0]}'"
+    else:
+        label = f"matched average of {len(names)} experiments"
+    return Baseline("experiments", names, label)
 
 
 def stage_rng(ctx: AnalysisContext, *parts) -> np.random.Generator:
@@ -143,13 +220,20 @@ def per_100_turns(df: pd.DataFrame, columns, turns_col: str = "survival_turn") -
     return df
 
 
-def baseline_pool(ctx: AnalysisContext, full: pd.DataFrame, baseline: Optional[str]) -> pd.DataFrame:
-    """Baseline-experiment rows from an unfiltered table, minus decision-failure games."""
-    if not baseline:
+def baseline_pool(ctx: AnalysisContext, full: pd.DataFrame, baseline: Optional[Baseline]) -> pd.DataFrame:
+    """Baseline rows from an unfiltered table, minus decision-failure games.
+
+    A ``"completed"`` pool keeps strategist players only: the in-game AI
+    opponents inside those games and the Null strategist are left out.
+    """
+    if baseline is None or not baseline.experiments:
         return full.iloc[0:0]
     failed = {str(g) for g in ctx.decision_failure_ids()}
-    pool = full[full["experiment"] == baseline]
-    return pool[~pool["game_id"].isin(failed)]
+    pool = full[full["experiment"].isin(baseline.experiments)]
+    pool = pool[~pool["game_id"].isin(failed)]
+    if baseline.self_included:
+        pool = pool[~pool["player_type"].isin({ctx.catalog.vanilla_label, ctx.catalog.null_label})]
+    return pool
 
 
 # ── views ─────────────────────────────────────────────────────────────────────
@@ -158,17 +242,23 @@ def build_views(
     pool: pd.DataFrame,
     metrics: list[str],
     cells: Optional[pd.DataFrame],
-    baseline: Optional[str],
+    baseline: Optional[Baseline],
 ) -> BehaviorViews:
     """Build the absolute rows and, when the design allows, the relative rows.
 
     ``rows`` are the filtered players, ``pool`` the unfiltered baseline rows,
-    both already carrying numeric metric columns.
+    both already carrying numeric metric columns. Players with no value for any
+    metric (for example in-game AI opponents on the flavor page) are left out
+    of both views, so player counts cover only players who were measured.
     """
+    rows = rows[rows[metrics].notna().any(axis=1)] if metrics else rows
     views = BehaviorViews(absolute=rows.reset_index(drop=True), relative=None,
-                          metrics=list(metrics), baseline_experiment=baseline)
-    if not baseline:
-        views.relative_note = "no baseline_experiment is configured"
+                          metrics=list(metrics), baseline=baseline)
+    if baseline is None:
+        views.relative_note = "no baseline is configured"
+        return views
+    if not baseline.experiments:
+        views.relative_note = "no experiment is complete"
         return views
     if cells is None or cells.empty:
         views.relative_note = "no controlled games"
@@ -176,18 +266,21 @@ def build_views(
 
     pool = pool.merge(cells, on="game_id", how="inner")
     if pool.empty:
-        views.relative_note = f"baseline experiment '{baseline}' has no controlled games"
+        views.relative_note = f"the {baseline.label} has no controlled games"
         return views
     usable = [m for m in metrics if pool[m].notna().any()]
     views.dropped_metrics = [m for m in metrics if m not in usable]
     if not usable:
-        views.relative_note = "the baseline populates none of the metrics"
+        views.relative_note = f"the {baseline.label} populates none of the metrics"
         return views
     means = pool.groupby(["seed", "player_id"])[usable].mean()
     views.baseline_sd = {m: float(pool[m].std(ddof=1)) for m in usable}
+    views.n_baseline_rows = int(len(pool))
+    views.n_baseline_experiments = int(pool["experiment"].nunique())
 
-    candidates = rows[rows["experiment"] != baseline].merge(cells, on="game_id", how="inner")
-    views.n_baseline_rows = int((rows["experiment"] == baseline).sum())
+    in_baseline = rows["experiment"].isin(baseline.experiments)
+    candidates = rows if baseline.self_included else rows[~in_baseline]
+    candidates = candidates.merge(cells, on="game_id", how="inner")
     matched = candidates.join(means, on=["seed", "player_id"], rsuffix="__baseline", how="left")
     has_cell = matched[[f"{m}__baseline" for m in usable]].notna().any(axis=1)
     views.n_unmatched = int((~has_cell).sum())
@@ -197,7 +290,7 @@ def build_views(
     for metric in views.dropped_metrics:
         matched = matched.drop(columns=metric)
     if matched.empty:
-        views.relative_note = "no controlled player has a matched baseline cell"
+        views.relative_note = f"no controlled player has a {baseline.label} cell"
         return views
     views.relative = matched.reset_index(drop=True)
     views.relative_metrics = usable
@@ -344,13 +437,16 @@ def relative_colors(summary: pd.DataFrame, baseline_sd: dict, by: str) -> dict:
     return colors
 
 
-def views_metadata(declared: dict) -> dict:
+def views_metadata(declared: dict, baseline: Optional[Baseline] = None) -> dict:
     """``metadata["views"]`` in display order, relative first, skipping empty views."""
+    labels = dict(VIEW_LABELS)
+    if baseline is not None:
+        labels[RELATIVE] = baseline.view_label
     out = {}
     for name in (RELATIVE, ABSOLUTE):
         spec = declared.get(name)
         if spec and (spec.get("tables") or spec.get("figures")):
-            out[name] = {"label": VIEW_LABELS[name], **spec}
+            out[name] = {"label": labels[name], **spec}
     return out
 
 
@@ -400,3 +496,140 @@ def share_table(df: pd.DataFrame, by: str, category: str, categories: list[str])
     out = shares.reset_index()
     order = sort_player_types(out[by]) if by == "player_type" else sorted(out[by])
     return out.set_index(by).loc[order].reset_index()
+
+
+# ── HTML heatmap tables ───────────────────────────────────────────────────────
+def heatmap_rows(ctx: AnalysisContext, summary: pd.DataFrame, by: str) -> tuple[pd.DataFrame, list[str]]:
+    """Add ``strategist``, ``condition``, and ``row_label``, and return the row order.
+
+    With condition pairing on and ``by == "player_type"``, a row reads
+    "Strategist | Condition" and rows sort like Matched Maps: the Null and
+    Vanilla baselines first, then catalog strategist order, then condition
+    order. Otherwise the row label is the group value, in :func:`order_groups`.
+    """
+    out = summary.copy()
+    groups = [str(g) for g in dict.fromkeys(out[by].astype(str))]
+    spec = ctx.condition_pairing() if by == "player_type" else None
+    baselines = [ctx.catalog.null_label, ctx.catalog.vanilla_label]
+    if spec is None:
+        out["strategist"], out["condition"] = out[by].astype(str), ""
+        out["row_label"] = out[by].astype(str)
+        order = sort_player_types(groups) if by == "player_type" else sorted(groups)
+        return out, order
+
+    identity: dict[str, tuple[str, str, str]] = {}
+    keys: set[str] = set()
+    for group in groups:
+        if group in baselines:
+            identity[group] = (group, "", group)
+            continue
+        strategist, suffix = ctx.catalog.split_condition_suffix(group, list(spec.suffixes))
+        key = "base" if not suffix else suffix
+        keys.add(key)
+        condition = condition_display(spec, key, ctx.catalog.vanilla_label)
+        identity[group] = (str(strategist), condition, f"{strategist} | {condition}")
+    strategist_rank = {
+        name: i for i, name in enumerate(order_strategists(
+            ctx.catalog, [v[0] for g, v in identity.items() if g not in baselines]
+        ))
+    }
+    condition_rank = {
+        name: i for i, name in enumerate(order_conditions(spec, keys, ctx.catalog.vanilla_label))
+    }
+
+    def rank(group: str):
+        strategist, condition, _label = identity[group]
+        if group in baselines:
+            return (0, baselines.index(group), 0, "")
+        return (1, strategist_rank.get(strategist, len(strategist_rank)),
+                condition_rank.get(condition, len(condition_rank)), group)
+
+    ordered = sorted(groups, key=rank)
+    out["strategist"] = out[by].astype(str).map(lambda g: identity[g][0])
+    out["condition"] = out[by].astype(str).map(lambda g: identity[g][1])
+    out["row_label"] = out[by].astype(str).map(lambda g: identity[g][2])
+    return out, [identity[g][2] for g in ordered]
+
+
+def color_positions(
+    summary: pd.DataFrame,
+    view: str,
+    views: BehaviorViews,
+    fixed: Optional[dict] = None,
+) -> pd.Series:
+    """Each cell's place on the report's 0 to 1 color scale (0.5 is neutral).
+
+    * relative: the mean difference in pool SDs, full color at
+      ±``RELATIVE_COLOR_SD``;
+    * absolute: the metric's ``fixed[metric] = (low, high)`` range when given,
+      else a z-score across every absolute player, full color at
+      ±``ABSOLUTE_COLOR_Z``.
+    """
+    fixed = fixed or {}
+    positions = []
+    for rec in summary.itertuples(index=False):
+        mean = float(rec.mean)
+        if view == RELATIVE:
+            sd = views.baseline_sd.get(rec.metric, float("nan"))
+            score = mean / sd / RELATIVE_COLOR_SD if sd and np.isfinite(sd) else 0.0
+            position = 0.5 + 0.5 * float(np.clip(score, -1.0, 1.0))
+        elif rec.metric in fixed:
+            low, high = fixed[rec.metric]
+            position = float(np.clip((mean - low) / (high - low), 0.0, 1.0))
+        else:
+            values = views.absolute[rec.metric].dropna()
+            sd = float(values.std(ddof=1)) if len(values) > 1 else float("nan")
+            z = (mean - float(values.mean())) / sd if sd and np.isfinite(sd) else 0.0
+            position = 0.5 + 0.5 * float(np.clip(z / ABSOLUTE_COLOR_Z, -1.0, 1.0))
+        positions.append(round(position, 6))
+    return pd.Series(positions, index=summary.index, dtype=float)
+
+
+def heatmap_spec(
+    *,
+    view: str,
+    title: str,
+    help_text: str,
+    row_order: list[str],
+    reference_rows: list[str],
+    row_tips: dict,
+    column_order: list[str],
+    column_names: dict,
+    column_labels: dict,
+    column_tips: dict,
+    grouped: bool,
+    decimals: int,
+    value_label: str,
+    ci_level: float,
+    legend: list,
+    range_label: str = "",
+) -> dict:
+    """The ``metadata["heatmaps"]`` entry for one view's table (layout only)."""
+    spec = {
+        "view": view,
+        "title": title,
+        "help": help_text,
+        "row": "row_label",
+        "column": "metric",
+        "value": "mean",
+        "row_heading": "Strategist | Condition",
+        "row_order": list(row_order),
+        "reference_rows": list(reference_rows),
+        "row_tips": dict(row_tips),
+        "column_order": list(column_order),
+        "column_names": dict(column_names),
+        "column_labels": dict(column_labels),
+        "column_tips": dict(column_tips),
+        "decimals": int(decimals),
+        "signed": view == RELATIVE,
+        "value_label": value_label,
+        "ci_level": float(ci_level),
+        "legend": [list(entry) for entry in legend],
+    }
+    if grouped:
+        spec["column_group"] = "metric_group"
+    if range_label:
+        spec["range_columns"] = ["mean_min", "mean_max"]
+        spec["range_label"] = range_label
+    return spec
+

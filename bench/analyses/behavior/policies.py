@@ -86,7 +86,7 @@ class BehaviorPolicies(BehaviorAnalysis):
         metadata = {
             **views.metadata(),
             "branches": branches,
-            "views": C.views_metadata(out.declared),
+            "views": C.views_metadata(out.declared, views.baseline),
         }
         return AnalysisResult(
             tables=out.tables, figures=out.figures,

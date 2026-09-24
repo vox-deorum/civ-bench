@@ -33,6 +33,7 @@ from .controlled_seed import (
     chapter_seeds,
     render_controlled_seed_site,
 )
+from .heatmap import render_heatmap_html, render_heatmap_md
 from .model import ReportDocument, Section, Table
 
 
@@ -290,10 +291,13 @@ def _display_frame(frame):
 
 
 def _render_table_md(table: Table, lines: list[str]) -> None:
-    lines.append(f"**{table.name}**")
-    lines.append("")
-    lines.append(_escape_md_cells(_display_frame(table.frame)).to_markdown(index=False))
-    lines.append("")
+    if table.heatmap is not None:
+        lines.extend(render_heatmap_md(table.frame, table.heatmap))
+    else:
+        lines.append(f"**{table.name}**")
+        lines.append("")
+        lines.append(_escape_md_cells(_display_frame(table.frame)).to_markdown(index=False))
+        lines.append("")
     note = []
     if table.truncated:
         note.append(
@@ -379,6 +383,10 @@ table.heatmap .row-label { text-align: left; white-space: normal; min-width: 13r
 .heat-cell a { display: block; padding: .38rem .55rem; color: inherit; text-decoration: none; }
 .heat-cell a:hover, .heat-cell a:focus-visible { outline: 2px solid #175ca8; outline-offset: -2px; }
 .heat-cell-empty { background: transparent; }
+.heat-cell-value { padding: .38rem .55rem; }
+table.heatmap th.heat-group { border-left: 2px solid #b6c1cd; color: #445164; font-size: .8rem; letter-spacing: .03em; }
+table.heatmap .row-label { position: sticky; left: 0; z-index: 1; background: #f0f3f7; }
+table.heatmap tbody .row-label { background: #fbfcfd; }
 table.heatmap .col-avg { border-right: 2px solid #b6c1cd; }
 .heat-cell-avg { padding: .38rem .55rem; font-weight: 650; }
 tbody.vanilla-body tr.vanilla-row th, tbody.vanilla-body tr.vanilla-row td { border-top: 3px double #8d99a9; border-bottom: 3px double #8d99a9; background: #f3f0e8; }
@@ -594,7 +602,7 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         )
         parts.append("</section>")
         return
-    _render_artifacts_html(section.figures, section.tables, parts)
+    _render_artifacts_html(section.figures, section.tables, parts, anchor)
     if section.views:
         _render_views_html(section, parts, anchor)
     if section.downloads:
@@ -612,7 +620,7 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
     parts.append("</section>")
 
 
-def _render_artifacts_html(figures, tables, parts: list[str]) -> None:
+def _render_artifacts_html(figures, tables, parts: list[str], anchor: str = "") -> None:
     for figure in figures:
         if figure.interactive:
             escaped_path = _html.escape(figure.rel_path)
@@ -631,7 +639,7 @@ def _render_artifacts_html(figures, tables, parts: list[str]) -> None:
             f'<figcaption class="caption">{_html.escape(figure.caption)}</figcaption></figure>'
         )
     for table in tables:
-        _render_table_html(table, parts)
+        _render_table_html(table, parts, anchor)
 
 
 def _render_views_html(section: Section, parts: list[str], anchor: str) -> None:
@@ -658,12 +666,20 @@ def _render_views_html(section: Section, parts: list[str], anchor: str) -> None:
             f'data-view="{_html.escape(view.name)}">'
         )
         parts.append(f'<p class="view-heading"><strong>{_html.escape(view.label)}</strong></p>')
-        _render_artifacts_html(view.figures, view.tables, parts)
+        _render_artifacts_html(view.figures, view.tables, parts, anchor)
         parts.append("</div>")
     parts.append("</div>")
 
 
-def _render_table_html(table: Table, parts: list[str]) -> None:
+def _render_table_html(table: Table, parts: list[str], anchor: str = "") -> None:
+    if table.heatmap is not None:
+        link = (
+            f'<a href="{_html.escape(table.rel_csv)}">full CSV</a>' if table.rel_csv else ""
+        )
+        help_text = str(table.heatmap.get("help") or "")
+        help_html = render_help_html(help_text, f"help-{anchor or 'heat'}-{_slug(table.name)}") if help_text else ""
+        parts.append(render_heatmap_html(table.frame, table.heatmap, help_html, link))
+        return
     parts.append(f"<p><strong>{_html.escape(table.name)}</strong></p>")
     parts.append('<div class="table-scroll" role="region" tabindex="0">')
     parts.append(_display_frame(table.frame).to_html(index=False, border=0))

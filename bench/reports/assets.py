@@ -17,9 +17,47 @@ from __future__ import annotations
 
 REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Escape.
    Also switches section views: the first view of each group is shown, and a
-   choice applies to every group on the page that offers the same view. */
+   choice applies to every group on the page that offers the same view. And it
+   shows the text of any [data-tip] element (heatmap cells and labels) in one
+   floating tooltip on hover or keyboard focus. */
 (function () {
   "use strict";
+  var tooltip = null;
+  function showTip(target) {
+    if (!tooltip) {
+      tooltip = document.createElement("div");
+      tooltip.id = "heat-tooltip";
+      tooltip.className = "heat-tooltip";
+      tooltip.setAttribute("role", "tooltip");
+      document.body.appendChild(tooltip);
+    }
+    tooltip.textContent = target.getAttribute("data-tip") || "";
+    tooltip.style.display = "block";
+    var rect = target.getBoundingClientRect();
+    var top = rect.top - tooltip.offsetHeight - 6;
+    if (top < 4) { top = rect.bottom + 6; }
+    var left = Math.min(rect.left, document.documentElement.clientWidth - tooltip.offsetWidth - 8);
+    tooltip.style.top = (window.scrollY + top) + "px";
+    tooltip.style.left = (window.scrollX + Math.max(4, left)) + "px";
+  }
+  function hideTip() {
+    if (tooltip) { tooltip.style.display = "none"; }
+  }
+  function tipTarget(event) {
+    return event.target.closest ? event.target.closest("[data-tip]") : null;
+  }
+  document.addEventListener("mouseover", function (event) {
+    var target = tipTarget(event);
+    if (target) { showTip(target); }
+  });
+  document.addEventListener("mouseout", function (event) {
+    if (tipTarget(event)) { hideTip(); }
+  });
+  document.addEventListener("focusin", function (event) {
+    var target = tipTarget(event);
+    if (target) { showTip(target); }
+  });
+  document.addEventListener("focusout", hideTip);
   var groups = document.querySelectorAll(".view-group");
   function showView(group, name) {
     var panels = group.querySelectorAll(".view-panel");

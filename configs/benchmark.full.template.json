@@ -3,26 +3,54 @@
   "friendly_name": "Staff benchmark 2026, standard 8-seat map",
   "description": "TEMPLATE (tracked example: copy to a local, gitignored configs/benchmark*.json to run). Kitchen-sink run: the lean CORE (see benchmark.template.json) plus every OPTIONAL module wired but `\"enabled\": false`, so opting in is a one-flag edit. Also demonstrates the folded params (bootstrap CIs on bt_main; strategy grouping on bt_strategy) and a pre-trained estimator. Behavior analyses are deferred; the behavior table is extracted.",
   "seed": 42,
-
   "filters": {
-    "staff_recent": { "experiments": ["2026-staff-standard"], "min_games": 5, "min_condition_completeness": null, "max_decision_failure_pct": 0.2 },
-    "llm_only": { "only_llm": true, "min_games": 5 },
-    "late_game": { "turn_range": [200, null] }
+    "staff_recent": {
+      "experiments": [
+        "2026-staff-standard"
+      ],
+      "min_games": 5,
+      "min_condition_completeness": null,
+      "max_decision_failure_pct": 0.2
+    },
+    "llm_only": {
+      "only_llm": true,
+      "min_games": 5
+    },
+    "late_game": {
+      "turn_range": [
+        200,
+        null
+      ]
+    }
   },
-
   "groupings": {
     "strategy": {
       "kind": "argmax",
-      "columns": ["domination_ratio", "culture_ratio", "diplomatic_ratio", "science_ratio"],
-      "labels": ["Domination", "Culture", "Diplomatic", "Science"]
+      "columns": [
+        "domination_ratio",
+        "culture_ratio",
+        "diplomatic_ratio",
+        "science_ratio"
+      ],
+      "labels": [
+        "Domination",
+        "Culture",
+        "Diplomatic",
+        "Science"
+      ]
     }
   },
-
   "data": {
     "extract": {
       "enabled": true,
       "runs_dir": "runs/",
-      "outputs": ["turns", "panel", "games", "tokens", "behavior"],
+      "outputs": [
+        "turns",
+        "panel",
+        "games",
+        "tokens",
+        "behavior"
+      ],
       "max_dbs": null,
       "prune_missing": false,
       "force_rebuild": false,
@@ -37,7 +65,6 @@
     },
     "filter": "staff_recent"
   },
-
   "estimators": [
     {
       "id": "score",
@@ -61,7 +88,9 @@
       "enabled": true,
       "features": {
         "include": null,
-        "exclude": ["civ_*"]
+        "exclude": [
+          "civ_*"
+        ]
       },
       "predict_subset": "all",
       "save_predictions": "reports/estimators/attention/predictions.csv",
@@ -110,13 +139,16 @@
       }
     }
   ],
-
   "adjust": [
     {
       "id": "strength",
       "module": "strength",
       "enabled": true,
-      "uses": { "estimators": ["attention"] },
+      "uses": {
+        "estimators": [
+          "attention"
+        ]
+      },
       "save": "reports/adjust/player_strength_panel.csv",
       "params": {
         "turn_progress_min": 0.2,
@@ -130,69 +162,149 @@
       }
     }
   ],
-
   "analyses": [
     {
       "id": "bt_main",
       "module": "ratings.bradley_terry",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": { "n": 1000, "stratified": true } }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "group_by": [
+          "player_type"
+        ],
+        "weighted": true,
+        "ref": "Vanilla",
+        "min_games": 5,
+        "bootstrap": {
+          "n": 1000,
+          "stratified": true
+        }
+      }
     },
     {
       "id": "bt_strategy",
       "module": "ratings.bradley_terry",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type", "strategy"], "weighted": true, "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "group_by": [
+          "player_type",
+          "strategy"
+        ],
+        "weighted": true,
+        "ref": "Vanilla",
+        "min_games": 5,
+        "bootstrap": null
+      }
     },
     {
       "id": "pl_main",
       "module": "ratings.plackett_luce",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "group_by": [
+          "player_type"
+        ],
+        "ref": "Vanilla",
+        "min_games": 5,
+        "bootstrap": null
+      }
     },
     {
       "id": "pl_strategy",
       "module": "ratings.plackett_luce",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "group_by": ["player_type", "strategy"], "ref": "Vanilla", "min_games": 5, "bootstrap": null }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "group_by": [
+          "player_type",
+          "strategy"
+        ],
+        "ref": "Vanilla",
+        "min_games": 5,
+        "bootstrap": null
+      }
     },
     {
       "id": "matchup_strength",
       "module": "ratings.matchups",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "mode": "both", "validate_ols": true }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "mode": "both",
+        "validate_ols": true
+      }
     },
     {
       "id": "matchup_winrates",
       "module": "ratings.outcome_matchups",
       "enabled": true,
-      "uses": { "tables": ["panel"] },
-      "params": { "include_score_ratio": true }
+      "uses": {
+        "tables": [
+          "panel"
+        ]
+      },
+      "params": {
+        "include_score_ratio": true
+      }
     },
     {
       "id": "ratings_ablation_bt",
       "module": "ratings.ablation_bt",
       "enabled": false,
-      "uses": { "tables": ["strength"] },
-      "params": { "weighted": true }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "weighted": true
+      }
     },
     {
       "id": "ratings_vanilla_slot_effect",
       "module": "ratings.vanilla_slot_effect",
       "enabled": false,
-      "uses": { "tables": ["strength"] },
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
       "params": {}
     },
     {
       "id": "pred_metrics",
       "module": "prediction.evaluate",
       "enabled": true,
-      "params": { "metrics": ["roc_auc", "brier_score", "log_loss", "balanced_accuracy"] }
+      "params": {
+        "metrics": [
+          "roc_auc",
+          "brier_score",
+          "log_loss",
+          "balanced_accuracy"
+        ]
+      }
     },
     {
       "id": "pred_compare",
@@ -204,76 +316,134 @@
       "id": "pred_winner_trajectories",
       "module": "prediction.winner_trajectories",
       "enabled": false,
-      "uses": { "estimators": ["attention"] },
-      "params": { "sample_games": 12 }
+      "uses": {
+        "estimators": [
+          "attention"
+        ]
+      },
+      "params": {
+        "sample_games": 12
+      }
     },
     {
       "id": "pred_vs_elo",
       "module": "prediction.elo_comparison",
       "enabled": false,
-      "uses": { "estimators": ["attention"] },
-      "needs": ["bt_main"],
+      "uses": {
+        "estimators": [
+          "attention"
+        ]
+      },
+      "needs": [
+        "bt_main"
+      ],
       "params": {}
     },
     {
       "id": "pred_context_slicing",
       "module": "prediction.context_slicing",
       "enabled": false,
-      "uses": { "estimators": ["attention"] },
-      "params": { "by": ["experiment", "player_type"] }
+      "uses": {
+        "estimators": [
+          "attention"
+        ]
+      },
+      "params": {
+        "by": [
+          "experiment",
+          "player_type"
+        ]
+      }
     },
     {
       "id": "cal_reliability",
       "module": "calibration.reliability",
       "enabled": true,
-      "params": { "n_bins": 10 }
+      "params": {
+        "n_bins": 10
+      }
     },
     {
       "id": "cal_loss_progress",
       "module": "calibration.loss_by_progress",
       "enabled": true,
       "filter": "late_game",
-      "params": { "n_bins": 20, "metrics": ["brier_score", "log_loss"] }
+      "params": {
+        "n_bins": 20,
+        "metrics": [
+          "brier_score",
+          "log_loss"
+        ]
+      }
     },
     {
       "id": "cal_civ_effects",
       "module": "calibration.civ_effects",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
       "params": {}
     },
     {
       "id": "cal_cell_baseline",
       "module": "calibration.cell_baseline",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
       "params": {}
     },
     {
       "id": "perf_score_ratio",
       "module": "performance.score_ratio",
       "enabled": true,
-      "params": { "target": "score_ratio", "predictors": ["player_type", "civilization"] }
+      "params": {
+        "target": "score_ratio",
+        "predictors": [
+          "player_type",
+          "civilization"
+        ]
+      }
     },
     {
       "id": "perf_strength",
       "module": "performance.strength_panel",
       "enabled": true,
-      "uses": { "tables": ["strength"] },
-      "params": { "metric": "adjusted_strength", "by": "player_type" }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "metric": "adjusted_strength",
+        "by": "player_type"
+      }
     },
     {
       "id": "perf_experiment_completeness",
       "module": "performance.experiment_completeness",
       "enabled": true,
-      "uses": { "tables": ["strength", "tokens"] },
+      "uses": {
+        "tables": [
+          "strength",
+          "tokens"
+        ]
+      },
       "params": {}
     },
     {
       "id": "perf_turn_predicted",
       "module": "performance.turn_predicted",
       "enabled": true,
-      "params": { "aggregate": "mean", "by": "player_type" }
+      "params": {
+        "aggregate": "mean",
+        "by": "player_type"
+      }
     },
     {
       "id": "game_log",
@@ -286,15 +456,29 @@
       "id": "controlled_seed",
       "module": "performance.controlled_seed_report",
       "enabled": false,
-      "uses": { "estimators": ["attention"], "tables": ["strength"] },
+      "uses": {
+        "estimators": [
+          "attention"
+        ],
+        "tables": [
+          "strength"
+        ]
+      },
       "params": {}
     },
     {
       "id": "perf_perm_importance",
       "module": "performance.permutation_importance",
       "enabled": false,
-      "uses": { "estimators": ["xgboost_cv"] },
-      "params": { "n_repeats": 20, "groups": "feature_families" }
+      "uses": {
+        "estimators": [
+          "xgboost_cv"
+        ]
+      },
+      "params": {
+        "n_repeats": 20,
+        "groups": "feature_families"
+      }
     },
     {
       "id": "explore_panel",
@@ -312,23 +496,74 @@
       "id": "explore_strategy_profiles",
       "module": "exploratory.strategy_profiles",
       "enabled": false,
-      "uses": { "tables": ["strength"] },
-      "params": { "by": "player_type" }
+      "uses": {
+        "tables": [
+          "strength"
+        ]
+      },
+      "params": {
+        "by": "player_type"
+      }
     },
     {
       "id": "perf_usage_efficiency",
       "module": "performance.usage_efficiency",
       "enabled": true,
-      "uses": { "tables": ["tokens"], "analyses": ["bt_main"] },
-      "params": { "currency": "usd", "log_x": true, "annotate": false }
+      "uses": {
+        "tables": [
+          "tokens"
+        ],
+        "analyses": [
+          "bt_main"
+        ]
+      },
+      "params": {
+        "currency": "usd",
+        "log_x": true,
+        "annotate": false
+      }
+    },
+    {
+      "id": "beh_flavors",
+      "module": "behavior.flavors",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "beh_diplomacy",
+      "module": "behavior.diplomacy",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "beh_commitment",
+      "module": "behavior.commitment",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "beh_policies",
+      "module": "behavior.policies",
+      "enabled": true,
+      "params": {}
     }
   ],
-
   "report": {
     "out_dir": "reports/",
-    "formats": ["md", "html"],
+    "formats": [
+      "md",
+      "html"
+    ],
     "sections": null,
-    "overview_sections": ["bt_main", "matchup_winrates", "pred_metrics", "cal_reliability", "perf_strength", "perf_experiment_completeness", "perf_usage_efficiency"],
+    "overview_sections": [
+      "bt_main",
+      "matchup_winrates",
+      "pred_metrics",
+      "cal_reliability",
+      "perf_strength",
+      "perf_experiment_completeness",
+      "perf_usage_efficiency"
+    ],
     "section_overrides": {},
     "title": null,
     "footer": null,

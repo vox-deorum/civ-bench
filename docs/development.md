@@ -20,9 +20,9 @@ The installable package is `bench/`. Each subpackage owns one stage kind or one 
 | `bench/catalog/` | The model and experiment catalogs, backed by `configs/*.json`. |
 | `bench/estimators/` | Victory-probability predictor producers: tune, train, load, infer. |
 | `bench/adjust/` | Derived-table producers (the `strength` panel). |
-| `bench/analyses/` | The pluggable analysis modules, in five families. |
+| `bench/analyses/` | The pluggable analysis modules, in six families. The descriptive `behavior/` modules share their baseline, view, and heatmap-table helpers in `behavior/common.py`. |
 | `bench/stats/` | The statistics layer: OLS/logistic wrappers, clustered/weighted fits, heatmaps. |
-| `bench/reports/` | Assemble analysis artifacts into Markdown and HTML. |
+| `bench/reports/` | Assemble analysis artifacts into Markdown and HTML. `heatmap.py` holds the shared HTML heatmap tables and RdYlBu color scale used by Matched Maps and the behavior pages. |
 | `bench/plotting/` | Shared styles, colors, and figure helpers. |
 
 Tests live in `tests/` at the repo root, one file per area. Roadmap and implementation notes live in `plans/`.

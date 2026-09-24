@@ -11,11 +11,7 @@ import pandas as pd
 
 from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
 from bench.analyses.errors import AnalysisError
-from bench.analyses.performance.controlled_seed_report import (
-    _condition_display,
-    _condition_order,
-    _strategist_order,
-)
+from bench.plotting.pairing import condition_display, order_conditions, order_strategists
 
 
 GAMES_COLUMNS = [
@@ -97,7 +93,7 @@ class PerformanceGameLog(Analysis):
         game_table = self._games_table(games, panel)
 
         non_vanilla = players.loc[~players["is_vanilla"], "strategist"].astype(str)
-        strategist_order = _strategist_order(ctx.catalog, non_vanilla.tolist())
+        strategist_order = order_strategists(ctx.catalog, non_vanilla.tolist())
         pairing = ctx.condition_pairing()
         if pairing is None:
             condition_order: list[str] = []
@@ -106,7 +102,7 @@ class PerformanceGameLog(Analysis):
             for value in panel["player_type"].astype(str):
                 _, suffix = ctx.catalog.split_condition_suffix(value, list(pairing.suffixes))
                 keys.add("base" if not suffix else suffix)
-            condition_order = _condition_order(pairing, keys, vanilla_label)
+            condition_order = order_conditions(pairing, keys, vanilla_label)
 
         latest = game_table.iloc[0]["game_id"] if not game_table.empty else None
         date_values = game_table["date_utc"].dropna().astype(str)
@@ -144,7 +140,7 @@ class PerformanceGameLog(Analysis):
             )
             strategists.append(str(strategist or ""))
             conditions.append(
-                _condition_display(spec, "base" if not suffix else suffix, ctx.catalog.vanilla_label)
+                condition_display(spec, "base" if not suffix else suffix, ctx.catalog.vanilla_label)
             )
         return strategists, conditions
 

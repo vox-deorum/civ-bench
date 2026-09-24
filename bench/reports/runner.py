@@ -37,6 +37,7 @@ from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .context import ReportBuildContext
 from .errors import ReportError
+from .heatmap import heatmap_spec, spec_fits
 from .model import Download, Figure, GameLogDocument, Section, Table, View
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
@@ -281,13 +282,18 @@ def _build_section(
             context.record_table(stage_id, tbl["name"], src_dir, tbl["file"])
         if tbl["name"] in inline_tables:
             frame = pd.read_csv(src)
-            shown = frame.head(MAX_TABLE_ROWS)
+            spec = heatmap_spec(section.metadata, tbl["name"])
+            if not spec_fits(spec, frame):
+                spec = None
+            # A heatmap pivots its long table into one grid, so it needs every row.
+            shown = frame if spec is not None else frame.head(MAX_TABLE_ROWS)
             table = Table(
                 name=tbl["name"],
                 frame=shown,
                 rel_csv=rel_csv,
                 n_total_rows=int(len(frame)),
                 n_shown_rows=int(len(shown)),
+                heatmap=spec,
             )
             section.tables.append(table)
             inline_by_name[("tables", tbl["name"])] = table

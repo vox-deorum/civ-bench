@@ -139,10 +139,11 @@ render the matrix instead.
     "issues_path": "runs/import_issues.csv",  // where malformed/locked-DB import issues are recorded
     "behavior": {                        // optional; omitted keys use these defaults
       "stats":   ["min", "avg", "max"],
-      "flavor":  ["UseNuke", "Nuke", "Offense", "Defense", "Mobilization", "Expansion", "Diplomacy", "Spaceship"],
-      "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness"],
+      "flavor":  ["Offense", "Defense", "Mobilization", "CityDefense", "MilitaryTraining", "Recon", "Ranged", "Mobile", "Nuke", "UseNuke", "Naval", "NavalRecon", "NavalGrowth", "NavalTileImprovement", "Air", "AirCarrier", "Antiair", "Airlift", "Expansion", "Growth", "TileImprovement", "Infrastructure", "Production", "WaterConnection", "Gold", "Science", "Culture", "Happiness", "GreatPeople", "Wonder", "Religion", "Diplomacy", "Spaceship", "Espionage"],
+      "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness", "DiplomaticBalance", "Friendliness", "WorkWithWillingness", "WorkAgainstWillingness", "Loyalty", "Neediness", "Chattiness"],
       "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed"],
-      "policies": ["policy_changes", "tradition", "authority", "progress", "fealty", "statecraft", "artistry", "industry", "imperialism", "rationalism", "freedom", "autocracy", "order"]
+      "policies": ["policy_changes", "tradition", "authority", "progress", "fealty", "statecraft", "artistry", "industry", "imperialism", "rationalism", "freedom", "autocracy", "order"],
+      "relationships": ["relationship_changes", "relationship_targets", "stance_public_avg", "stance_private_avg", "stance_net_avg", "stance_masked_hostility_share", "stance_masked_goodwill_share"]
     }
   },
 
@@ -175,6 +176,7 @@ The `behavior` table has one row per major player per game. Its key columns are 
 | `persona` | any `PersonaChanges` personality column (for example `Boldness`, `WarBias`) | `persona_<snake_name>_<stat>`, for example `persona_war_bias_avg` |
 | `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed` | one count column per name |
 | `policies` | `policy_changes`, `tradition`, `authority`, `progress`, `fealty`, `statecraft`, `artistry`, `industry`, `imperialism`, `rationalism`, `freedom`, `autocracy`, `order` | real policy-change count plus first-adoption turn for each selected branch |
+| `relationships` | `relationship_changes`, `relationship_targets`, `stance_public_avg`, `stance_private_avg`, `stance_net_avg`, `stance_masked_hostility_share`, `stance_masked_goodwill_share` | one column per name |
 
 - Each key is optional and falls back to the default shown above. An empty list turns that family off. Unknown names, stats, and duplicates are config errors. Policy fields have no `stats`; only flavor and persona use the `stats` selection.
 - Flavor and persona values are the state in effect on each turn: the last row of a turn wins, and it carries forward until the next row. `min` and `max` range over the states in effect from the player's first row to `survival_turn`. `avg` is turn-weighted. Rows written by the in-game AI (`Tweaked by In-Game AI`) count, because the game used them. A player with no rows (for example an in-game AI player with no `FlavorChanges`) gets blank cells. If an older DB lacks a selected column, only that column's cells are blank.
@@ -184,6 +186,12 @@ The `behavior` table has one row per major player per game. Its key columns are 
   - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
   - `cities_razed`: `CityRazed` events by the player.
 - `policy_changes` counts `PolicyChanges` rows containing a real field mutation, excluding rationale-only and empty rows. Each branch column records its first adoption turn from `PlayerAdoptPolicyBranch` or `IdeologyAdopted`; branches the player never adopted contain `N/A`.
+- Relationship columns come from the `RelationshipChanges` table. State is tracked per `(player, target)` pair: only major-civ targets, never self; the last row of a turn wins and carries forward.
+  - `relationship_changes` counts rows that change the pair's public or private value (the starting state is 0 and 0; re-setting the same values does not count). `relationship_targets` counts distinct major targets ever set.
+  - The stance averages weight each pair-turn once, from the first row on that target through the earlier of the two players' survival turns (inclusive). Resets to 0 still count, and targets never set are excluded. `stance_net_avg` is public plus private.
+  - `stance_masked_hostility_share` is the share of pair-turns with public > 0 > private; `stance_masked_goodwill_share` is the share with public < 0 < private.
+  - When the table exists, the two counts are 0 for players who set nothing and the averages and shares are blank; when the table is missing, every cell is blank. The documented range of the values is -100 to 100 but it is not enforced; values are kept raw.
+- Every behavior column has a kind the analyses use: `count` (events, `policy_changes`, `relationship_changes`; scaled by turns alive), `level` (flavor and persona stats, `relationship_targets`, stance averages), `share` (stance shares), and `turn` (policy branch first-adoption turns).
 - Changing the selection changes the CSV header, so the next extract rebuilds the whole table.
 
 ### 3.1 `filters`: named, reusable filter presets
@@ -801,7 +809,34 @@ and `na_games` count distinct games with complete or incomplete cost records.
   "uses": { "tables": ["strength"] }, "params": { "by": "player_type" } }
 ```
 
-> **Behavior analyses are deferred.** The `behavior` table (§3.0) is extracted, but no analysis module consumes it yet. Behavioral profiling may return later as an opt-in analysis extension.
+#### `behavior.*`: descriptive behavior analyses
+
+The `behavior.*` family reads the canonical `behavior` table (§3.0) and profiles how each strategist drives the in-game AI: its flavor settings, its diplomatic persona and stances, its strategic commitment, and its policy paths. All params are optional and unknown keys are config errors.
+
+```jsonc
+{ "id": "beh_flavors",    "module": "behavior.flavors",    "enabled": true, "params": {} }
+{ "id": "beh_diplomacy",  "module": "behavior.diplomacy",  "enabled": true, "params": { "rate": "per_100_turns" } }
+{ "id": "beh_commitment", "module": "behavior.commitment", "enabled": true, "params": {} }
+{ "id": "beh_policies",   "module": "behavior.policies",   "enabled": true, "params": { "baseline": "vanilla-standard-fixed" } }
+```
+
+Params shared by all four modules:
+
+- **`baseline`**: `"completed"`, one experiment id, or a non-empty list of experiment ids. `"completed"` means every experiment that fills every controlled (seed, seating_rotation) slot, after dropping problem games and decision-failure games; its pool keeps strategist players only (Null and Vanilla rows are left out), and completed experiments are part of their own baseline. With a named experiment or list, those experiments' rows are the pool and leave the relative view. When `baseline` is omitted, `behavior.flavors` uses `"completed"` and the other three use the first enabled strength stage's `baseline_experiment` (the in-game AI, §5.1).
+- **`by`**: the grouping column; default `"player_type"`.
+- **`bootstrap_n`** (integer >= 1, default 1000) and **`ci_level`** (default 0.95): the bootstrap confidence intervals.
+- **`condition_pairing`**: the same override shape as other modules (§2.2).
+- **`rate`**: `"per_100_turns"` (default) or `"per_game"`; accepted by `behavior.diplomacy` and `behavior.commitment` only. It scales the count columns by turns alive (`survival_turn` + 1).
+
+Per-module params:
+
+- `behavior.flavors`: optional **`flavors`**, a non-empty list of flavor names (each must be extracted with `avg`); the default is every extracted flavor. Older behavior tables with fewer flavors still work: the module shows the extracted ones and lists the rest in metadata as `flavors_not_extracted`.
+- `behavior.diplomacy`: optional **`traits`**, a list of persona names; the default is DiplomaticBalance, Friendliness, WorkWithWillingness, WorkAgainstWillingness, Loyalty, DenounceWillingness, Forgiveness, Meanness, Neediness, Chattiness, and DeceptiveBias.
+- `behavior.policies`: optional **`branches`**, a list of extracted policy branches.
+
+**Two views.** Every module produces two views of the same metrics. The **relative** view (the default, shown first) covers controlled players only: each player's value minus the baseline pool's mean at the same (seed, player_id) cell. The **absolute** view covers every filtered player. Summaries per group and metric give mean, median, a bootstrap CI resampling whole games (seeded from the run seed), `n_players`, and `n_games`. If there is no baseline, no controlled games, or no complete experiment, only the absolute view is written and the reason appears in the section tooltip. The baseline pool is read from the unfiltered table, so player filters never remove it.
+
+**The flavors page.** The in-game AI records no flavor values, and 50 is its own balanced value, so the relative baseline is the completed-experiment average. Its two tables, `flavors_relative` and `flavors_absolute`, render as HTML heatmaps (§7): one column per flavor under a short name (for example Off for Offense), grouped into Military, Naval and air, Economy, and Other, with the full name and the set-flavors tool description in the header tooltip. Rows read `Strategist | Condition` when condition pairing is on; Null and Vanilla rows are pinned at the top. Absolute colors use a fixed 0 to 100 scale with 50 at the midpoint; relative colors are the difference in baseline-pool SDs, full color at 2 SDs. Cell tooltips show the value, CI, median, player and game counts, and (in the absolute view, when min and max are extracted) the mean in-game range.
 
 ### 6.3 Module friendly names and descriptions
 
@@ -833,6 +868,10 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `performance.controlled_seed_report` | Matched Maps | Aggregates games on shared maps by seed and final seat into the tables behind the report's Matched Maps chapter (§7.1). |
 | `performance.game_log` | Game Log | Lists completed games and player seats for filtering, provenance, and optional replay links. |
 | `performance.usage_efficiency` | Usage, cost, and skill | Compares cost and token use per player per game with skill, and measures Elo above or below the fitted usage-skill curve. |
+| `behavior.flavors` | Flavor settings | Shows how each strategist sets the in-game AI's flavors (0 to 100, 50 is balanced), against the average of completed experiments on the same map and seat and in absolute terms. |
+| `behavior.diplomacy` | Diplomatic behavior | Describes diplomatic persona traits and the public and private stances strategists set toward rivals, including how often the two conflict. |
+| `behavior.commitment` | Strategic commitment | Shows how often strategists act, change course, and switch grand strategy, and how much of the game they spend in their main strategy. |
+| `behavior.policies` | Policy paths | Shows which policy branches and ideologies each player type adopts and how early, against the in-game AI on the same map and seat. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
 identity; they cannot run, so they never appear on a report.
@@ -884,13 +923,17 @@ overview page.
 
 `benchmark_citation` is optional. When omitted or `null`, the report includes only the fixed CivBench paper citation. When configured, it must contain exactly two non-blank string fields, `title` and `url`. The report adds an `@misc` BibTeX citation for the benchmark results, using `title` and `url`, alongside the paper citation in `report.md` and `index.html`, before the configurable footer. Citations appear only in the main overview and Markdown report.
 
-The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears in canonical family order (ratings / prediction / calibration / performance / exploratory), with members in config order. An ordered `id` list puts those sections first, then automatically appends every remaining enabled analysis in the default order. Duplicate ids appear only once; unknown ids stop rendering. Automatic fill excludes disabled analyses, while explicitly listed disabled ids follow `include_disabled`. Chapters follow their first section's position in the resolved list, including Matched Maps. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes all other enabled analyses. Disable an analysis to exclude it from the default report. Each family page opens with a sentence explaining what its analyses help readers assess; result summaries appear with the individual analyses.
+The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears in canonical family order (ratings / prediction / calibration / performance / behavior / exploratory), with members in config order. An ordered `id` list puts those sections first, then automatically appends every remaining enabled analysis in the default order. Duplicate ids appear only once; unknown ids stop rendering. Automatic fill excludes disabled analyses, while explicitly listed disabled ids follow `include_disabled`. Chapters follow their first section's position in the resolved list, including Matched Maps. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes all other enabled analyses. Disable an analysis to exclude it from the default report. Each family page opens with a sentence explaining what its analyses help readers assess; result summaries appear with the individual analyses.
 
 Each section is headed by the module instance's **resolved friendly name** (§6.3), overridden by that stage's optional `name` when given. A question-mark tooltip after the heading contains its description, registry module, and metadata. Tooltips open on hover, keyboard focus, or click/tap, and Escape dismisses them. The stage `id` supplies its stable anchor for report links and curation (TOC, overview, sidebar). The page title is `report.title`, else the config's `friendly_name`, else its `name`. The config's `description` renders under the title on the main overview and `report.md`; other HTML pages carry it in the page heading's tooltip. Markdown sections collect technical details in a collapsible disclosure. Result summaries keep key numbers bold and use VPAI for the baseline, with its configured experiment identifier in the technical details. Headings fall back to stage ids when no friendly identity is configured.
 
 `overview_sections` controls the compact cards in `index.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact seven-section list shown above. Every card shows the analysis's one-sentence result summary, and the same sentence appears in its detailed section. A legacy or custom analysis without a summary receives an explicit fallback sentence in both views. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
-**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+**Section views.** An analysis can offer alternative views of its results through `metadata.views`, an ordered mapping of view name to its `label`, `tables`, and `figures`. The first view is the default. The HTML page shows one view at a time behind a toggle, and one click switches every section on the page that offers a view of the same name, so all behavior sections flip between relative and absolute together. Without JavaScript every view stays visible under its label; the Markdown report renders each view under a bold label.
+
+**HTML heatmap tables.** An analysis asks for a table to render as a colored heatmap through `metadata.heatmaps`, a mapping from table name to a layout spec: the row and column keys, their order, pinned reference rows, short column labels with header tooltips, an optional group column for spanning headers, the number format, and a legend. The table itself carries each cell's value and a `color_position` from 0 to 1 on the RdYlBu scale shared with Matched Maps (0 red, 0.5 pale yellow, 1 blue). Cells show hover and keyboard tooltips with the value, confidence interval, and counts, and the Markdown report shows the same grid as a pipe table with a key for the short column names. A heatmap table is kept whole instead of capped at the inline row limit. A spec that does not fit its table falls back to a plain table. Neither `views` nor `heatmaps` appears in section tooltips.
+
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
 The overview shows a compact announcement for the most recently completed rated condition, using the first overall Bradley-Terry or Plackett-Luce section in report order. A second announcement lists incomplete conditions as `Model (20/24)` when the global `min_condition_completeness` filter is configured. It disappears when all conditions are complete. Both use the coverage analysis's saved `condition_progress` table; rerun that analysis to add announcements to older artifacts. Completion dates use game timestamps in UTC, taking the earliest accepted game in each required slot and then the latest slot date. Missing dates or ratings omit the score announcement; missing coverage artifacts omit both announcements.
 

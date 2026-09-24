@@ -64,6 +64,44 @@ FLAVOR_NAMES = (
     "Production", "WaterConnection", "Gold", "Science", "Culture", "Happiness",
     "GreatPeople", "Wonder", "Religion", "Diplomacy", "Spaceship", "Espionage",
 )
+# Flavor → (short header, report group, the set-flavors tool's description).
+# The descriptions mirror the MCP server's docs/strategies/flavors.json.
+FLAVOR_INFO = {
+    'Offense': ('Off', 'Military', 'Pivots the military towards offensive stances. Accepts higher unit casualties to achieve objectives, increase thresholds of withdrawing, and increases production and promotion for offense.'),
+    'Defense': ('Def', 'Military', 'Increases military production and unit promotion for defensive purposes.'),
+    'UseNuke': ('UNuk', 'Military', 'Sets (flavor%) per-turn probability of launching nuclear strikes during war when strategic conditions are met.'),
+    'CityDefense': ('CDef', 'Military', 'Prioritizes unit promotions for static defense (friendly territory bonuses, capital defense, garrisoned attacks).'),
+    'MilitaryTraining': ('MTrn', 'Military', 'Prioritizes military quality through training buildings and upgrading units with gold.'),
+    'Mobilization': ('Mob', 'Military', 'Increases the proportion of military production (compared with civilian production).'),
+    'Recon': ('Rec', 'Military', 'Increases explorer unit production and tactical exploration of the map.'),
+    'Ranged': ('Rng', 'Military', 'Increases firepower by raising target composition of ranged units and range-extending promotions.'),
+    'Mobile': ('Mobl', 'Military', 'Increases mobility and maneuverability by raising target composition of mobile units and prioritizes related promotions.'),
+    'Nuke': ('Nuke', 'Military', 'Increases nuclear weapon arsenals for strategic deterrence.'),
+    'Naval': ('Nav', 'Naval and air', 'Increases the production of naval production and prioritizes combat-effective naval promotions. Naval size is also based on coastal city percentage and geography.'),
+    'NavalRecon': ('NRec', 'Naval and air', 'Increases the production of more naval melee units for sea control and exploration.'),
+    'Air': ('Air', 'Naval and air', 'Increases air control by raising target composition of air units and prioritizes related promotions.'),
+    'AirCarrier': ('Carr', 'Naval and air', 'Increases carrier production to support naval-based air force operations.'),
+    'Antiair': ('AA', 'Naval and air', 'Increases anti-air unit composition ratio to counter enemy aircraft.'),
+    'Airlift': ('Lift', 'Naval and air', 'Prioritizes airlift infrastructure for rapid troop deployment, favoring centralized reserves over forward garrisons.'),
+    'NavalGrowth': ('NGro', 'Economy', 'Prioritizes naval economic infrastructure in coastal cities.'),
+    'NavalTileImprovement': ('NTile', 'Economy', 'Develops water resources for immediate economic benefit.'),
+    'Expansion': ('Exp', 'Economy', 'Prioritizes settler production and lowers location criteria to settle more cities. Essential in early game.'),
+    'Growth': ('Gro', 'Economy', 'Prioritizes population growth through food-focused tile improvements and buildings.'),
+    'TileImprovement': ('Tile', 'Economy', 'Prioritizes worker production and peaceful tile development.'),
+    'Infrastructure': ('Infr', 'Economy', 'Prioritizes road construction and city connections for income and military readiness.'),
+    'Production': ('Prod', 'Economy', 'Prioritizes production-focused tiles and buildings.'),
+    'Gold': ('Gold', 'Economy', 'Prioritizes gold-focused tiles and buildings.'),
+    'Science': ('Sci', 'Economy', 'Prioritizes science-focused tiles and buildings.'),
+    'Culture': ('Cul', 'Economy', 'Prioritizes culture-focused tiles and buildings.'),
+    'WaterConnection': ('WCon', 'Economy', 'Prioritizes lighthouse construction for coastal city connectivity.'),
+    'Happiness': ('Hap', 'Economy', 'Prioritizes happiness-generating buildings and luxury resources.'),
+    'GreatPeople': ('GP', 'Other', 'Prioritizes specialist buildings and great person generation infrastructure.'),
+    'Wonder': ('Wond', 'Other', 'Prioritizes wonder construction.'),
+    'Religion': ('Rel', 'Other', 'Prioritizes religious infrastructure, missionary production, and faith generation.'),
+    'Diplomacy': ('Dip', 'Other', 'Prioritizes diplomatic unit production and city-state investment.'),
+    'Spaceship': ('Spc', 'Other', 'Prioritizes late-game science victory components and spaceship part production.'),
+    'Espionage': ('Esp', 'Other', 'Prioritizes counterintelligence protection for high-value science cities.'),
+}
 PERSONA_NAMES = (
     "VictoryCompetitiveness", "WonderCompetitiveness", "MinorCivCompetitiveness",
     "Boldness", "WarBias", "HostileBias", "WarmongerHate", "NeutralBias",
@@ -116,8 +154,7 @@ BEHAVIOR_FAMILIES = {
 }
 BEHAVIOR_DEFAULTS = {
     "stats": ["min", "avg", "max"],
-    "flavor": ["UseNuke", "Nuke", "Offense", "Defense", "Mobilization",
-               "Expansion", "Diplomacy", "Spaceship"],
+    "flavor": list(FLAVOR_NAMES),
     "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness",
                 "DeceptiveBias", "Forgiveness", "DenounceWillingness",
                 "MinorCivWarBias", "VictoryCompetitiveness",
@@ -247,7 +284,7 @@ ANALYSIS_MODULES = {
     "performance.game_log",
     "performance.usage_efficiency",
     # behavior.*
-    "behavior.profiles",
+    "behavior.flavors",
     "behavior.diplomacy",
     "behavior.commitment",
     "behavior.policies",
@@ -263,8 +300,10 @@ STRENGTH_RATING_MODULES = {
     "ratings.matchups",
 }
 
-# Params every behavior.* module accepts (§6.2).
-BEHAVIOR_COMMON_PARAMS = {"baseline_experiment", "rate", "by", "bootstrap_n", "ci_level"}
+# Params every behavior.* module accepts (§6.2). `baseline` is "completed", one
+# experiment id, or a list of experiment ids.
+BEHAVIOR_COMMON_PARAMS = {"baseline", "rate", "by", "bootstrap_n", "ci_level", "condition_pairing"}
+BEHAVIOR_BASELINE_COMPLETED = "completed"
 BEHAVIOR_RATES = ("per_100_turns", "per_game")
 
 # ── per-module analysis param schemas (§6, validated in loader._validate_analysis) ──
@@ -293,7 +332,7 @@ ANALYSIS_PARAM_KEYS = {
     "performance.usage_efficiency": {
         "currency", "log_x", "annotate", "condition_pairing",
     },
-    "behavior.profiles": {"metrics", *BEHAVIOR_COMMON_PARAMS},
+    "behavior.flavors": {"flavors", *(BEHAVIOR_COMMON_PARAMS - {"rate"})},
     "behavior.diplomacy": {"traits", *BEHAVIOR_COMMON_PARAMS},
     "behavior.commitment": set(BEHAVIOR_COMMON_PARAMS),
     "behavior.policies": {"branches", *(BEHAVIOR_COMMON_PARAMS - {"rate"})},

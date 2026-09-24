@@ -117,7 +117,7 @@ class BehaviorCommitment(BehaviorAnalysis):
         if rows.empty:
             return AnalysisResult(summary="No players remain after filtering.")
 
-        baseline = C.resolve_baseline_experiment(ctx, self.params)
+        baseline = self.baseline(ctx)
         pool = pd.DataFrame(columns=rows.columns)
         if baseline:
             pool_turns = C.baseline_pool(ctx, full_turns, baseline)
@@ -142,7 +142,7 @@ class BehaviorCommitment(BehaviorAnalysis):
             **views.metadata(),
             "grand_strategies": strategies,
             "rate": self.rate,
-            "views": C.views_metadata(out.declared),
+            "views": C.views_metadata(out.declared, views.baseline),
         }
         if turn_range is not None:
             metadata["turn_range"] = list(turn_range)

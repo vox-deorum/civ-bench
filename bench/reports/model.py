@@ -42,6 +42,7 @@ class Table:
     rel_csv: Optional[str] = None  # report-relative path to the full CSV
     n_total_rows: int = 0
     n_shown_rows: int = 0
+    heatmap: Optional[dict] = None  # layout spec when the table renders as a heatmap
 
     @property
     def truncated(self) -> bool:

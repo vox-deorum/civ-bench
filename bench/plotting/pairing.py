@@ -63,6 +63,40 @@ def resolve_pairing(global_block, stage_override, catalog) -> Optional[PairingSp
     )
 
 
+def condition_display(spec, condition_key: str, vanilla_label: str) -> str:
+    if condition_key == "vanilla":
+        return vanilla_label
+    if condition_key == "base":
+        return spec.base_label
+    return condition_key.lstrip("-")
+
+
+def order_conditions(spec, observed_keys: set[str], vanilla_label: str) -> list[str]:
+    """Display order: base label, configured suffix order, then unconfigured observed."""
+    order = [condition_display(spec, "base", vanilla_label)]
+    order += [condition_display(spec, key, vanilla_label) for key in spec.suffixes]
+    known = {"vanilla"} | {"base"} | set(spec.suffixes)
+    extra = sorted({k for k in observed_keys if k not in known})
+    order += [condition_display(spec, key, vanilla_label) for key in extra]
+    seen: set[str] = set()
+    return [label for label in order if not (label in seen or seen.add(label))]
+
+
+def order_strategists(catalog, strategists: list[str]) -> list[str]:
+    """Catalog order first (by resolved model id), then unlisted identities lexically."""
+    catalog_ids = [m["id"] for m in catalog.strategist_models()]
+    rank = {model_id: idx for idx, model_id in enumerate(catalog_ids)}
+
+    def sort_key(name: str):
+        model_id = catalog.split_player_type(name)["model_id"]
+        position = rank.get(str(model_id))
+        if position is None:
+            return (1, str(model_id), name)
+        return (0, position, name)
+
+    return sorted(set(strategists), key=sort_key)
+
+
 def attach_pair_columns(
     df: pd.DataFrame,
     catalog,

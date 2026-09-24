@@ -13,8 +13,8 @@ tables per controlled seed (mean adjusted strength on a fixed RdYlBu scale, red 
 0, yellow at 0.5, blue at 1, with a leading Avg column pooling each condition
 row's runs, plus the dominant victory focus with a stable categorical color per
 strategy), one detail page per ``(seed, player_id)`` pair, and static
-JavaScript assets for tooltips, the strategist checkboxes, and an offline Plotly
-probability-curve chart. Every value, color, link, and query string is computed
+JavaScript assets for the strategist checkboxes and an offline Plotly
+probability-curve chart (cell tooltips come from the shared help script). Every value, color, link, and query string is computed
 server-side, so unchanged inputs re-render byte-identically; the browser script
 only changes trace visibility, color, and emphasis. The chart's Y axis fits the
 visible curves, and same-family strategists that share a catalog color are spread
@@ -45,6 +45,7 @@ from bench.reports.content import (
     report_summary, metadata_text,
 )
 from .errors import ReportError
+from .heatmap import cell_text_color as _cell_text_color, interpolate as _interpolate, position_background
 from .model import ControlledSeedDocument
 
 CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
@@ -123,15 +124,9 @@ FOCUS_COLORS = {
     "Science": "#4e9b4e",
 }
 
-# The adjusted-strength heatmap scale is matplotlib's RdYlBu (its 11 ColorBrewer
-# anchors), fixed from 0 to 1 across every seed so the panels compare directly:
-# 0 is red, 0.5 is yellow, 1 is blue.
-_STRENGTH_SCALE = (
-    "#a50026", "#d73027", "#f46d43", "#fdae61", "#fee090",
-    "#ffffbf", "#e0f3f8", "#abd9e9", "#74add1", "#4575b4", "#313695",
-)
-_TEXT_DARK = "#18202a"
-_TEXT_LIGHT = "#ffffff"
+# The adjusted-strength heatmap scale is the shared RdYlBu scale
+# (bench.reports.heatmap), fixed from 0 to 1 across every seed so the panels
+# compare directly: 0 is red, 0.5 is yellow, 1 is blue.
 
 # Plotly dash styles cycled by condition position, so one strategist's
 # conditions stay distinguishable while sharing its color.
@@ -164,36 +159,8 @@ def _label_html(label: str, tooltip: str) -> str:
     return _esc(label)
 
 
-def _hex_to_rgb(value: str) -> tuple[int, int, int]:
-    value = value.lstrip("#")
-    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
-
-
-def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
-    return "#{:02x}{:02x}{:02x}".format(*rgb)
-
-
-def _interpolate(start: str, end: str, t: float) -> str:
-    a, b = _hex_to_rgb(start), _hex_to_rgb(end)
-    return _rgb_to_hex(tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3)))
-
-
-def _luminance(rgb: tuple[int, int, int]) -> float:
-    return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255.0
-
-
-def _cell_text_color(background: str) -> str:
-    return _TEXT_LIGHT if _luminance(_hex_to_rgb(background)) < 0.55 else _TEXT_DARK
-
-
 def _strength_background(value: float) -> str:
-    t = 0.0 if not np.isfinite(value) else min(1.0, max(0.0, value))
-    n = len(_STRENGTH_SCALE) - 1
-    position = t * n
-    index = min(int(position), n - 1)
-    return _interpolate(
-        _STRENGTH_SCALE[index], _STRENGTH_SCALE[index + 1], position - index
-    )
+    return position_background(value)
 
 
 def _focus_background(label: str, pct: float) -> str:
@@ -895,83 +862,12 @@ def render_controlled_seed_site(
 
 # ── the static browser script ─────────────────────────────────────────────────
 CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
-   Tooltips on heatmap cells plus Plotly trace controls for seed-player detail
-   pages. Same-family strategist colors are spread through the shared
-   civBench.distinguishColors util (assets/report-common.js). */
+   Plotly trace controls for seed-player detail pages. Heatmap cell tooltips
+   come from the shared assets/report-help.js, and same-family strategist
+   colors are spread through the shared civBench.distinguishColors util
+   (assets/report-common.js). */
 (function () {
   "use strict";
-
-  // ── shared tooltip ───────────────────────────────────────────────────────
-  var tooltip = null;
-
-  function ensureTooltip() {
-    if (!tooltip) {
-      tooltip = document.createElement("div");
-      tooltip.id = "heat-tooltip";
-      tooltip.className = "heat-tooltip";
-      tooltip.setAttribute("role", "tooltip");
-      document.body.appendChild(tooltip);
-    }
-    return tooltip;
-  }
-
-  function showTooltip(target) {
-    var tip = ensureTooltip();
-    tip.textContent = target.getAttribute("data-tip") || "";
-    tip.style.display = "block";
-    var rect = target.getBoundingClientRect();
-    var top = rect.top - tip.offsetHeight - 6;
-    if (top < 4) {
-      top = rect.bottom + 6;
-    }
-    tip.style.top = (window.scrollY + top) + "px";
-    tip.style.left = (window.scrollX + rect.left) + "px";
-  }
-
-  function showChartTooltip(clientX, clientY, text) {
-    var tip = ensureTooltip();
-    tip.textContent = text;
-    tip.style.display = "block";
-    var left = window.scrollX + clientX + 16;
-    var top = window.scrollY + clientY - tip.offsetHeight - 12;
-    if (top < window.scrollY + 4) {
-      top = window.scrollY + clientY + 16;
-    }
-    var edge = window.scrollX + document.documentElement.clientWidth -
-      tip.offsetWidth - 8;
-    if (left > edge) {
-      left = window.scrollX + clientX - tip.offsetWidth - 16;
-    }
-    tip.style.left = left + "px";
-    tip.style.top = top + "px";
-  }
-
-  function hideTooltip() {
-    if (tooltip) {
-      tooltip.style.display = "none";
-    }
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    document.addEventListener("mouseover", function (event) {
-      var target = event.target.closest("[data-tip]");
-      if (target) {
-        showTooltip(target);
-      }
-    });
-    document.addEventListener("mouseout", function (event) {
-      if (event.target.closest && event.target.closest("[data-tip]")) {
-        hideTooltip();
-      }
-    });
-    document.addEventListener("focusin", function (event) {
-      var target = event.target.closest && event.target.closest("[data-tip]");
-      if (target) {
-        showTooltip(target);
-      }
-    });
-    document.addEventListener("focusout", hideTooltip);
-  });
 
   // ── detail page: Plotly chart controls ──────────────────────────────────
   function readQuery() {

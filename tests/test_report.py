@@ -1070,10 +1070,10 @@ def views_env(tmp_path, write_spec, dev_spec):
     spec["analyses"] = [
         {"id": "perf_usage_efficiency", "module": "performance.usage_efficiency",
          "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
-        {"id": "beh_two", "module": "behavior.profiles", "enabled": True,
-         "params": {"metrics": ["wars_declared"]}},
-        {"id": "beh_one", "module": "behavior.profiles", "enabled": True,
-         "params": {"metrics": ["wars_declared"]}},
+        {"id": "beh_two", "module": "behavior.diplomacy", "enabled": True,
+         "params": {}},
+        {"id": "beh_one", "module": "behavior.diplomacy", "enabled": True,
+         "params": {}},
     ]
     spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
                       "overview_sections": None, "section_overrides": {}, "title": None,
@@ -1084,16 +1084,16 @@ def views_env(tmp_path, write_spec, dev_spec):
     frame = pd.DataFrame({"player_type": ["Kimi"], "metric": ["wars_declared"], "mean": [1.5]})
     views = {
         "relative": {"label": "Relative to matched in-game AI",
-                     "tables": [], "figures": ["profile_relative"]},
-        "absolute": {"label": "Absolute", "tables": [], "figures": ["profile_absolute"]},
+                     "tables": [], "figures": ["diplomacy_relative"]},
+        "absolute": {"label": "Absolute", "tables": [], "figures": ["diplomacy_absolute"]},
     }
-    _emit(cfg, "beh_two", "behavior.profiles", summary="Two views.",
+    _emit(cfg, "beh_two", "behavior.diplomacy", summary="Two views.",
           metadata={"baseline_experiment": "vanilla", "views": views},
-          tables={"profile_relative": frame, "profile_absolute": frame},
-          figures=["profile_relative", "profile_absolute"])
-    _emit(cfg, "beh_one", "behavior.profiles", summary="One view.",
+          tables={"diplomacy_relative": frame, "diplomacy_absolute": frame},
+          figures=["diplomacy_relative", "diplomacy_absolute"])
+    _emit(cfg, "beh_one", "behavior.diplomacy", summary="One view.",
           metadata={"views": {"absolute": views["absolute"]}},
-          tables={"profile_absolute": frame}, figures=["profile_absolute"])
+          tables={"diplomacy_absolute": frame}, figures=["diplomacy_absolute"])
     return cfg
 
 
@@ -1108,8 +1108,8 @@ def test_views_render_a_toggle_with_the_first_view_selected(views_env):
     assert 'data-view="relative" aria-controls="section-beh-two-view-relative" aria-pressed="true"' in page
     assert 'aria-pressed="false">Absolute</button>' in page
     assert page.count('class="view-panel"') == 3
-    assert page.index('src="assets/beh_two/profile_relative.png"') < page.index(
-        'src="assets/beh_two/profile_absolute.png"')
+    assert page.index('src="assets/beh_two/diplomacy_relative.png"') < page.index(
+        'src="assets/beh_two/diplomacy_absolute.png"')
     assert "views:" not in page                                # layout keys stay out of tooltips
     assert ".views-ready .view-switch" in (out / "assets/report.css").read_text(encoding="utf-8")
     assert "views-ready" in (out / "assets/report-help.js").read_text(encoding="utf-8")
@@ -1119,13 +1119,119 @@ def test_views_render_a_toggle_with_the_first_view_selected(views_env):
     assert md.index("**Relative to matched in-game AI**") < md.index("**Absolute**")
     assert "views:" not in md
     # Tables stay downloads (module defaults inline figures only).
-    assert "assets/beh_two/profile_relative.csv" in md
+    assert "assets/beh_two/diplomacy_relative.csv" in md
 
 
 def test_malformed_views_fall_back_to_a_single_view(views_env):
-    _emit(views_env, "beh_two", "behavior.profiles", summary="Broken.",
-          metadata={"views": ["relative"]}, figures=["profile_relative"])
+    _emit(views_env, "beh_two", "behavior.diplomacy", summary="Broken.",
+          metadata={"views": ["relative"]}, figures=["diplomacy_relative"])
     run_report(views_env)
     page = (report_dir(views_env) / "behavior.html").read_text(encoding="utf-8")
     assert page.count('<div class="view-switch"') == 0
-    assert 'src="assets/beh_two/profile_relative.png"' in page
+    assert 'src="assets/beh_two/diplomacy_relative.png"' in page
+
+
+# ── HTML heatmap tables ────────────────────────────────────────────────────────
+def _heat_frame(view: str, n_rows: int = 60) -> pd.DataFrame:
+    """A long heatmap table: Null plus ``n_rows - 1`` strategists over two flavors."""
+    records = []
+    for i in range(n_rows):
+        group = "Null" if i == 0 else f"Model-{i:02d}"
+        for metric, group_name, position in (
+            ("flavor_offense_avg", "Military", 0.0 if i == 1 else 0.5),
+            ("flavor_science_avg", "Economy", 1.0 if i == 1 else 0.5),
+        ):
+            records.append({
+                "player_type": group, "strategist": group, "condition": "", "row_label": group,
+                "metric": metric, "metric_group": group_name,
+                "mean": 12.4 if view == "relative" else 62.4, "median": 12.0,
+                "ci_lower": 10.0, "ci_upper": 15.0, "n_players": 48, "n_games": 48,
+                "color_position": position,
+            })
+    return pd.DataFrame(records)
+
+
+def _heat_spec(view: str) -> dict:
+    return {
+        "view": view, "title": f"Flavors {view}", "help": "How to read it.",
+        "row": "row_label", "column": "metric", "value": "mean",
+        "row_heading": "Strategist | Condition", "row_order": ["Null", "Model-02", "Model-01"],
+        "reference_rows": ["Null"], "row_tips": {"Null": "Never changes flavors."},
+        "column_order": ["flavor_offense_avg", "flavor_science_avg"],
+        "column_names": {"flavor_offense_avg": "Offense", "flavor_science_avg": "Science"},
+        "column_labels": {"flavor_offense_avg": "Off", "flavor_science_avg": "Sci"},
+        "column_tips": {"flavor_offense_avg": "Offense: Pivots the military.",
+                        "flavor_science_avg": "Science: Prioritizes science."},
+        "column_group": "metric_group", "decimals": 0, "signed": view == "relative",
+        "value_label": "vs the baseline" if view == "relative" else "average setting",
+        "ci_level": 0.95, "legend": [[0, "low"], [0.5, "balanced"], [1, "high"]],
+    }
+
+
+@pytest.fixture
+def heatmap_env(tmp_path, write_spec, dev_spec):
+    root = str(tmp_path / "out")
+    spec = dev_spec
+    spec["output"] = {"root": root, "suffix": ""}
+    spec["data"]["extract"]["enabled"] = False
+    spec["adjust"] = []
+    spec["analyses"] = [{"id": "beh_flavors", "module": "behavior.flavors", "enabled": True,
+                         "params": {}}]
+    spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
+                      "overview_sections": None, "section_overrides": {}, "title": None,
+                      "include_disabled": False}
+    cfg = load_config(write_spec(spec))
+    views = {
+        "relative": {"label": "Relative to completed-experiment average",
+                     "tables": ["flavors_relative"], "figures": []},
+        "absolute": {"label": "Absolute", "tables": ["flavors_absolute"], "figures": []},
+    }
+    _emit(cfg, "beh_flavors", "behavior.flavors", summary="Flavors.",
+          metadata={"views": views, "heatmaps": {
+              "flavors_relative": _heat_spec("relative"),
+              "flavors_absolute": _heat_spec("absolute")}},
+          tables={"flavors_relative": _heat_frame("relative"),
+                  "flavors_absolute": _heat_frame("absolute")})
+    return cfg
+
+
+def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
+    run_report(heatmap_env)
+    out = report_dir(heatmap_env)
+    page = (out / "behavior.html").read_text(encoding="utf-8")
+    assert page.count('<table class="heatmap">') == 2
+    assert page.count('<div class="view-switch"') == 1
+    # Short headers carry the full name and description in their tooltip.
+    assert '<span tabindex="0" data-tip="Offense: Pivots the military.">Off</span>' in page
+    assert 'colspan="1" class="heat-group">Military</th>' in page
+    # Null is pinned in the reference body, before the configured order.
+    assert '<tbody class="vanilla-body"><tr class="vanilla-row">' in page
+    assert page.index('data-tip="Never changes flavors.">Null') < page.index(">Model-02<") < page.index(">Model-01<")
+    # Positions 0, 0.5, and 1 take the red, yellow, and blue anchors.
+    assert 'background-color:#a50026;color:#ffffff" data-tip="Model-01 · Offense' in page
+    assert 'background-color:#313695;color:#ffffff" data-tip="Model-01 · Science' in page
+    assert "background-color:#ffffbf" in page
+    assert ">+12</td>" in page and ">62</td>" in page
+    assert "+12.4 vs the baseline (95% CI +10.0 to +15.0)" in page
+    # The whole long table survives the inline row cap (60 rows x 2 flavors).
+    assert page.count(">Model-59<") == 2
+    assert "heatmaps:" not in page
+    assert "data-tip" in (out / "assets/report-help.js").read_text(encoding="utf-8")
+    css = (out / "assets/report.css").read_text(encoding="utf-8")
+    assert "table.heatmap .row-label { position: sticky" in css
+
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert r"| Strategist \| Condition | Off | Sci |" in md
+    assert "| Null | 62 | 62 |" in md
+    assert "_Columns: Off = Offense; Sci = Science._" in md
+
+
+def test_a_heatmap_spec_that_does_not_fit_renders_a_plain_table(heatmap_env):
+    frame = _heat_frame("absolute", n_rows=3).drop(columns=["color_position"])
+    _emit(heatmap_env, "beh_flavors", "behavior.flavors", summary="Flavors.",
+          metadata={"heatmaps": {"flavors_absolute": _heat_spec("absolute")}},
+          tables={"flavors_absolute": frame})
+    run_report(heatmap_env)
+    page = (report_dir(heatmap_env) / "behavior.html").read_text(encoding="utf-8")
+    assert '<table class="heatmap">' not in page
+    assert "<strong>flavors_absolute</strong>" in page

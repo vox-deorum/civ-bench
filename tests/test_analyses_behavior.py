@@ -4,6 +4,8 @@ Design: a baseline experiment where every seat is the in-game AI, and a
 treatment experiment where seat 0 is an LLM. Both play seeds 1 and 2. The
 treatment also has one uncontrolled game and one controlled game on seed 3,
 which the baseline never played (so its players have no matched cell).
+Neither fills the whole controlled grid; :func:`_add_complete_experiments`
+adds two that do, for the ``"completed"`` baseline.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import pandas as pd
 import pytest
 
 from bench.analyses import run_analysis
+from bench.analyses.behavior import common as C
 from bench.analyses.behavior.commitment import turn_metrics
 from bench.analyses.behavior.policies import _earliest
 from bench.catalog import Catalog
@@ -149,100 +152,218 @@ def _table(result, name):
     return pd.read_csv(result.table_paths[name])
 
 
+def _add_complete_experiments(tmp_path):
+    """Two experiments on every controlled slot: an LLM one and a Null one.
+
+    Controlled slots are (1, 0), (1, 1), (2, 0), and (3, 0). ``LLM2`` sets Offense
+    to 40 / 60 / 30 / 70 on seat 0; Null holds 50. Their AI opponents set nothing.
+    """
+    slots = [(1, 0), (1, 1), (2, 0), (3, 0)]
+    games = pd.read_csv(tmp_path / "games.csv")
+    behavior = pd.read_csv(tmp_path / "behavior.csv")
+    new_games, new_rows = [], []
+    for exp, strategist, values in (
+        (COMPLETE, LLM2, [40.0, 60.0, 30.0, 70.0]),
+        (NULL_EXP, "Null", [50.0] * 4),
+    ):
+        for (seed, rot), value in zip(slots, values):
+            gid = f"{exp}-{seed}{rot}"
+            new_games.append({"game_id": gid, "experiment": exp, "seed": seed,
+                              "seating_rotation": rot, "timestamp": "2026-01-01"})
+            for pid in range(3):
+                new_rows.append({
+                    "experiment": exp, "game_id": gid, "player_id": pid,
+                    "player_type": strategist if pid == 0 else "Vanilla",
+                    "civilization": f"Civ{pid}", "survival_turn": SURVIVAL,
+                    "flavor_offense_avg": value if pid == 0 else np.nan,
+                })
+    pd.concat([games, pd.DataFrame(new_games)]).to_csv(tmp_path / "games.csv", index=False)
+    pd.concat([behavior, pd.DataFrame(new_rows)]).to_csv(tmp_path / "behavior.csv", index=False)
+
+
 def _cell(table, group, metric, column="mean"):
     row = table[(table["player_type"] == group) & (table["metric"] == metric)]
     assert len(row) == 1, (group, metric, table)
     return float(row[column].iloc[0])
 
 
-# ── profiles ───────────────────────────────────────────────────────────────────
-PROFILE = {"baseline_experiment": BASELINE, "metrics": ["wars_declared", "flavor_offense_avg"],
-           "bootstrap_n": 50}
+# ── flavors and the shared view machinery ──────────────────────────────────────
+COMPLETE = "llm2-standard"
+NULL_EXP = "null-standard"
+LLM2 = "GLM-5"
+FLAVORS = {"baseline": BASELINE, "bootstrap_n": 50}
+OFFENSE = "flavor_offense_avg"
 
 
 def test_relative_subtracts_the_matched_seed_seat_baseline(behavior_env):
-    result, _cfg = behavior_env("behavior.profiles", PROFILE)
-    rel = _table(result, "profile_relative")
-    # Seat 0 baseline: seed 1 → mean(1, 3) = 2, seed 2 → 2. LLM: T1 = 5, T2 = 2.
-    assert _cell(rel, LLM, "wars_declared") == pytest.approx(((5 - 2) + (2 - 2)) / 2)
-    assert _cell(rel, LLM, "wars_declared", "n_players") == 2
-    # Treatment AI seats: T1 seat 1 is 1 vs 0, seat 2 is 2 vs 2; T2 seats are 2 vs 2.
-    assert _cell(rel, "Vanilla", "wars_declared") == pytest.approx(1 / 4)
-    assert _cell(rel, LLM, "flavor_offense_avg") == pytest.approx(3.0)
+    result, _cfg = behavior_env("behavior.flavors", FLAVORS)
+    rel = _table(result, "flavors_relative")
+    # Seat 0 baseline is 5 on both seeds, the LLM sets 8; AI seats match their own seat.
+    assert _cell(rel, LLM, OFFENSE) == pytest.approx(3.0)
+    assert _cell(rel, LLM, OFFENSE, "n_players") == 2
+    assert _cell(rel, "Vanilla", OFFENSE) == pytest.approx(0.0)
 
-    absolute = _table(result, "profile_absolute")
+    absolute = _table(result, "flavors_absolute")
     # Absolute keeps every filtered row, including the uncontrolled and unmatched games.
-    assert _cell(absolute, LLM, "wars_declared", "n_players") == 4
-    assert _cell(absolute, LLM, "wars_declared") == pytest.approx((5 + 2 + 9 + 4) / 4)
+    assert _cell(absolute, LLM, OFFENSE, "n_players") == 4
+    assert _cell(absolute, LLM, OFFENSE) == pytest.approx(8.0)
 
     meta = result.metadata
     assert meta["n_unmatched_controlled_players"] == 3      # the seed-3 game
     assert meta["n_baseline_players"] == 9
+    assert meta["baseline_experiments"] == [BASELINE]
     assert list(meta["views"]) == ["relative", "absolute"]
-    assert meta["views"]["relative"]["figures"] == ["profile_relative"]
-    assert result.summary.startswith("Against the matched in-game AI")
+    assert meta["views"]["relative"]["tables"] == ["flavors_relative"]
+    assert meta["views"]["relative"]["label"] == f"Relative to matched '{BASELINE}'"
+    assert result.summary.startswith(f"Against the matched '{BASELINE}' on the same map and seat")
+    assert f"**{LLM}** on Offense (**+3**)" in result.summary
+
+
+def test_flavor_heatmaps_carry_layout_and_colors(behavior_env, tmp_path):
+    frame = pd.read_csv(tmp_path / "behavior.csv")
+    frame["flavor_offense_min"] = frame["flavor_offense_avg"] - 2
+    frame["flavor_offense_max"] = frame["flavor_offense_avg"] + 2
+    frame.to_csv(tmp_path / "behavior.csv", index=False)
+    spec = {**BEHAVIOR_SPEC, "stats": ["min", "avg", "max"]}
+    result, _ = behavior_env("behavior.flavors", FLAVORS, behavior_spec=spec)
+    spec = result.metadata["heatmaps"]["flavors_absolute"]
+    assert spec["column_labels"] == {OFFENSE: "Off"}
+    assert spec["column_names"] == {OFFENSE: "Offense"}
+    assert spec["column_tips"][OFFENSE].startswith("Offense: Pivots the military")
+    assert spec["column_group"] == "metric_group"
+    assert spec["range_columns"] == ["mean_min", "mean_max"]
+    absolute = _table(result, "flavors_absolute")
+    # Absolute colors sit on the fixed 0 to 100 flavor scale.
+    assert _cell(absolute, LLM, OFFENSE, "color_position") == pytest.approx(0.08)
+    assert _cell(absolute, LLM, OFFENSE, "mean_min") == pytest.approx(6.0)
+    assert _cell(absolute, LLM, OFFENSE, "mean_max") == pytest.approx(10.0)
+    assert set(absolute["metric_group"]) == {"Military"}
+    rel = _table(result, "flavors_relative")
+    # Relative colors are the difference in pool SDs, full color at 2 SDs.
+    sd = float(pd.Series([5.0, 6.0, 7.0] * 3).std(ddof=1))
+    expected = 0.5 + 0.5 * min(1.0, 3.0 / sd / 2.0)
+    assert _cell(rel, LLM, OFFENSE, "color_position") == pytest.approx(expected)
+    assert "mean_min" not in rel.columns
+    assert result.metadata["heatmaps"]["flavors_relative"]["signed"] is True
+
+
+def test_completed_baseline_averages_complete_strategist_experiments(behavior_env, tmp_path):
+    _add_complete_experiments(tmp_path)
+    result, _ = behavior_env("behavior.flavors", {"bootstrap_n": 20})
+    meta = result.metadata
+    assert meta["baseline"] == "completed-experiment average"
+    # Null's and the AI opponents' rows are not part of the pool.
+    assert meta["n_baseline_experiments"] == 1
+    assert meta["n_baseline_players"] == 4
+    rel = _table(result, "flavors_relative")
+    # Seat-0 cells: (1) mean(40, 60) = 50, (2) 30, (3) 70. The LLM sets 8 on T1, T2, T3.
+    assert _cell(rel, LLM, OFFENSE) == pytest.approx(((8 - 50) + (8 - 30) + (8 - 70)) / 3)
+    # A completed experiment is part of its own baseline.
+    assert _cell(rel, LLM2, OFFENSE) == pytest.approx(0.0)
+    # Null holds 50 against the field: 0, 0, +20, -20.
+    assert _cell(rel, "Null", OFFENSE) == pytest.approx(0.0)
+    assert meta["views"]["relative"]["label"] == "Relative to completed-experiment average"
+    spec = meta["heatmaps"]["flavors_relative"]
+    assert spec["reference_rows"] == ["Null", "Vanilla"]
+    assert spec["row_order"][0] == "Null"
+    assert "Never changes flavors" in spec["row_tips"]["Null"]
+    # The headline leaves Null out.
+    assert "**Null**" not in result.summary
+
+
+def test_condition_pairing_labels_rows_like_matched_maps(behavior_env, tmp_path):
+    _add_complete_experiments(tmp_path)
+    pairing = {"enabled": True, "suffixes": ["-Per-5"]}
+    result, _ = behavior_env("behavior.flavors", {"bootstrap_n": 20, "condition_pairing": pairing})
+    absolute = _table(result, "flavors_absolute")
+    labels = dict(zip(absolute["player_type"], absolute["row_label"]))
+    assert labels[LLM] == f"{LLM} | Base"
+    assert labels["Null"] == "Null"
+    assert list(absolute.columns[:4]) == ["player_type", "strategist", "condition", "row_label"]
+    assert result.metadata["heatmaps"]["flavors_absolute"]["row_order"][0] == "Null"
 
 
 def test_rate_normalizes_counts_by_turns_alive(behavior_env, tmp_path):
     frame = pd.read_csv(tmp_path / "behavior.csv")
     frame["survival_turn"] = 49                                # 50 turns alive
     frame.to_csv(tmp_path / "behavior.csv", index=False)
-    per_100, _ = behavior_env("behavior.profiles", PROFILE, sid="a")
-    per_game, _ = behavior_env("behavior.profiles", {**PROFILE, "rate": "per_game"}, sid="b")
-    a = _table(per_100, "profile_absolute")
-    b = _table(per_game, "profile_absolute")
-    assert _cell(a, LLM, "wars_declared") == pytest.approx(2 * _cell(b, LLM, "wars_declared"))
+    params = {"baseline": BASELINE, "traits": ["Friendliness"], "bootstrap_n": 20}
+    per_100, _ = behavior_env("behavior.diplomacy", params, sid="a")
+    per_game, _ = behavior_env("behavior.diplomacy", {**params, "rate": "per_game"}, sid="b")
+    a = _table(per_100, "diplomacy_absolute")
+    b = _table(per_game, "diplomacy_absolute")
+    count = "relationship_changes"
+    assert _cell(a, LLM, count) == pytest.approx(2 * _cell(b, LLM, count))
     # Levels are never rate-scaled.
-    assert _cell(a, LLM, "flavor_offense_avg") == _cell(b, LLM, "flavor_offense_avg")
+    level = "persona_friendliness_avg"
+    assert _cell(a, LLM, level) == _cell(b, LLM, level)
 
 
 def test_baseline_defaults_to_the_strength_stage(behavior_env):
-    params = {k: v for k, v in PROFILE.items() if k != "baseline_experiment"}
-    result, _ = behavior_env("behavior.profiles", params, adjust_baseline=BASELINE)
-    assert result.metadata["baseline_experiment"] == BASELINE
-    assert "profile_relative" in result.table_paths
+    result, _ = behavior_env("behavior.diplomacy", {"traits": ["Friendliness"], "bootstrap_n": 20},
+                             adjust_baseline=BASELINE)
+    assert result.metadata["baseline_experiments"] == [BASELINE]
+    assert result.metadata["views"]["relative"]["label"] == "Relative to matched in-game AI"
+    assert result.summary.startswith("Against the matched in-game AI")
 
 
-@pytest.mark.parametrize("kwargs, note", [
-    ({}, "no baseline_experiment is configured"),
-    ({"games": False}, "no controlled games"),
+@pytest.mark.parametrize("module, params, kwargs, note", [
+    ("behavior.diplomacy", {}, {}, "no baseline is configured"),
+    ("behavior.diplomacy", {"baseline": BASELINE}, {"games": False}, "no controlled games"),
+    ("behavior.flavors", {}, {}, "no experiment is complete"),
 ])
-def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, kwargs, note):
-    params = {k: v for k, v in PROFILE.items() if k != "baseline_experiment"}
-    if kwargs.get("games") is False:
-        params["baseline_experiment"] = BASELINE
-    result, _ = behavior_env("behavior.profiles", params, **kwargs)
+def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, module, params, kwargs, note):
+    result, _ = behavior_env(module, {**params, "bootstrap_n": 20}, **kwargs)
     assert list(result.metadata["views"]) == ["absolute"]
     assert result.metadata["relative_view"] == note
-    assert "profile_relative" not in result.table_paths
+    assert not any(name.endswith("_relative") for name in result.table_paths)
     assert result.summary.startswith("The most distinctive value")
 
 
 def test_baseline_survives_player_filters(behavior_env):
-    unfiltered, _ = behavior_env("behavior.profiles", PROFILE)
+    unfiltered, _ = behavior_env("behavior.flavors", FLAVORS)
     # Keep only the LLM rows: the baseline pool is still read from the unfiltered table.
-    cfg = behavior_env.make([{"id": "f", "module": "behavior.profiles", "enabled": True,
-                              "params": PROFILE, "filter": {"players": [LLM]}}])
+    cfg = behavior_env.make([{"id": "f", "module": "behavior.flavors", "enabled": True,
+                              "params": FLAVORS, "filter": {"players": [LLM]}}])
     filtered = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
-    rel = _table(filtered, "profile_relative")
+    rel = _table(filtered, "flavors_relative")
     assert set(rel["player_type"]) == {LLM}
-    expected = _cell(_table(unfiltered, "profile_relative"), LLM, "wars_declared")
-    assert _cell(rel, LLM, "wars_declared") == expected
+    expected = _cell(_table(unfiltered, "flavors_relative"), LLM, OFFENSE)
+    assert _cell(rel, LLM, OFFENSE) == expected
 
 
 def test_tables_are_byte_stable(behavior_env):
-    first, _ = behavior_env("behavior.profiles", PROFILE, sid="one")
-    second, _ = behavior_env("behavior.profiles", PROFILE, sid="one")
-    for name in ("profile_relative", "profile_absolute"):
+    first, _ = behavior_env("behavior.flavors", FLAVORS, sid="one")
+    second, _ = behavior_env("behavior.flavors", FLAVORS, sid="one")
+    for name in ("flavors_relative", "flavors_absolute"):
         with open(first.table_paths[name], "rb") as a, open(second.table_paths[name], "rb") as b:
             assert a.read() == b.read()
-    ci = _table(first, "profile_absolute")[["ci_lower", "ci_upper"]]
+    ci = _table(first, "flavors_absolute")[["ci_lower", "ci_upper"]]
     assert ci.notna().all().all()
+
+
+def test_flavors_skip_columns_an_older_extract_lacks(behavior_env):
+    spec = {**BEHAVIOR_SPEC, "flavor": ["Offense", "Science"]}
+    result, _ = behavior_env("behavior.flavors", FLAVORS, behavior_spec=spec)
+    assert result.metadata["flavors"] == ["Offense"]
+    assert result.metadata["flavors_not_extracted"] == [f for f in C.S.FLAVOR_INFO if f != "Offense"]
+
+
+def test_flavor_columns_follow_group_order(behavior_env, tmp_path):
+    frame = pd.read_csv(tmp_path / "behavior.csv")
+    for name in ("naval", "science", "espionage", "use_nuke"):
+        frame[f"flavor_{name}_avg"] = frame["flavor_offense_avg"]
+    frame.to_csv(tmp_path / "behavior.csv", index=False)
+    spec = {**BEHAVIOR_SPEC, "flavor": ["Espionage", "Science", "Naval", "UseNuke", "Offense"]}
+    result, _ = behavior_env("behavior.flavors", FLAVORS, behavior_spec=spec)
+    assert result.metadata["flavors"] == ["Offense", "UseNuke", "Naval", "Science", "Espionage"]
+    groups = _table(result, "flavors_absolute").drop_duplicates("metric")["metric_group"]
+    assert list(groups) == ["Military", "Military", "Naval and air", "Economy", "Other"]
 
 
 # ── diplomacy ──────────────────────────────────────────────────────────────────
 def test_diplomacy_drops_stance_from_the_relative_view(behavior_env):
-    result, _ = behavior_env("behavior.diplomacy", {"baseline_experiment": BASELINE,
+    result, _ = behavior_env("behavior.diplomacy", {"baseline": BASELINE,
                                                      "traits": ["Friendliness", "Loyalty"],
                                                      "bootstrap_n": 20})
     rel = _table(result, "diplomacy_relative")
@@ -280,7 +401,7 @@ def test_turn_metrics_count_switches_and_pivots():
 
 
 def test_commitment_views(behavior_env):
-    result, _ = behavior_env("behavior.commitment", {"baseline_experiment": BASELINE,
+    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE,
                                                       "bootstrap_n": 20})
     rel = _table(result, "commitment_relative")
     assert _cell(rel, LLM, "decision_rate") == pytest.approx(1.0)
@@ -300,7 +421,7 @@ def test_earliest_branch_uses_turns_and_none():
 
 
 def test_policies_views(behavior_env):
-    result, _ = behavior_env("behavior.policies", {"baseline_experiment": BASELINE,
+    result, _ = behavior_env("behavior.policies", {"baseline": BASELINE,
                                                     "bootstrap_n": 20})
     rel = _table(result, "adoption_relative")
     # Seat 0 in the baseline always adopts order and never freedom.
@@ -321,12 +442,15 @@ def test_policies_views(behavior_env):
 
 # ── config validation ──────────────────────────────────────────────────────────
 @pytest.mark.parametrize("module, params, match", [
-    ("behavior.profiles", {}, "params.metrics: required"),
-    ("behavior.profiles", {"metrics": ["wars_received"]}, "not columns of the behavior table"),
-    ("behavior.profiles", {"metrics": ["wars_declared"], "rate": "per_turn"}, "must be one of"),
-    ("behavior.profiles", {"metrics": ["wars_declared"], "bogus": 1}, "unknown key"),
+    ("behavior.flavors", {"flavors": ["Charm"]}, "unknown flavor"),
+    ("behavior.flavors", {"flavors": ["Science"]}, "need data.extract.behavior.flavor"),
+    ("behavior.flavors", {"rate": "per_game"}, "unknown key"),
+    ("behavior.flavors", {"baseline": 3}, "must be \"completed\""),
+    ("behavior.flavors", {"baseline": []}, "baseline"),
     ("behavior.diplomacy", {"traits": ["Charm"]}, "unknown persona trait"),
     ("behavior.diplomacy", {"traits": ["Boldness"]}, "need data.extract.behavior.persona"),
+    ("behavior.diplomacy", {"rate": "per_turn"}, "must be one of"),
+    ("behavior.diplomacy", {"baseline_experiment": BASELINE}, "unknown key"),
     ("behavior.policies", {"branches": ["artistry"]}, "not selected"),
     ("behavior.policies", {"rate": "per_game"}, "unknown key"),
     ("behavior.commitment", {"bootstrap_n": 0}, "integer >= 1"),
@@ -336,7 +460,11 @@ def test_config_rejects_bad_behavior_params(behavior_env, module, params, match)
         behavior_env.make([{"id": "x", "module": module, "enabled": True, "params": params}])
 
 
-def test_profiles_metrics_are_not_prediction_metrics(behavior_env):
-    cfg = behavior_env.make([{"id": "x", "module": "behavior.profiles", "enabled": True,
-                              "params": {"metrics": ["wars_declared", "tradition"]}}])
-    assert cfg.analyses[0].raw["params"]["metrics"] == ["wars_declared", "tradition"]
+def test_baseline_accepts_a_list_of_experiments(behavior_env):
+    result, _ = behavior_env("behavior.flavors", {"baseline": [BASELINE, TREATMENT],
+                                                  "bootstrap_n": 20})
+    assert result.metadata["baseline"] == "matched average of 2 experiments"
+    # Both named experiments leave the relative view, so no player is left to compare.
+    assert result.metadata["relative_view"] == (
+        "no controlled player has a matched average of 2 experiments cell"
+    )
