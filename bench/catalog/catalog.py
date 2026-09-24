@@ -253,7 +253,9 @@ class Catalog:
                 return model_id
         name = normalized.rsplit("/", 1)[-1]
         return "-".join(
-            part.upper() if part.upper() in self._model_acronyms else part.capitalize()
+            part.upper()
+            if part.isupper() or part.upper() in self._model_acronyms
+            else part.capitalize()
             for part in name.split("-")
         )
 
