@@ -86,8 +86,6 @@ PANEL_FIELD_MAPPINGS = {
     "persona_changes": None,
     "research_changes": None,
     "policy_changes": None,
-    "nuke": None,
-    "use_nuke": None,
     "domination_ratio": None,
     "culture_ratio": None,
     "diplomatic_ratio": None,
@@ -122,34 +120,6 @@ def calculate_score_ranks(cursor):
     """)
     final_scores = cursor.fetchall()
     return {player_key: rank for rank, (player_key, _score) in enumerate(final_scores, start=1)}
-
-
-def extract_flavor_max(cursor, player_id, column_name, default=50):
-    """Max of a flavor column from the first non-default row onward (or ``default``)."""
-    try:
-        cursor.execute(f"""
-            SELECT {column_name}
-            FROM FlavorChanges
-            WHERE Key = ?
-            ORDER BY Turn
-        """, (player_id,))
-        rows = cursor.fetchall()
-    except sqlite3.DatabaseError as exc:
-        # Tolerate only an older DB missing FlavorChanges; corruption/locking must
-        # surface (→ recorded + game skipped), not silently become the default.
-        if is_schema_mismatch(exc):
-            return default
-        raise
-
-    first_changed_idx = None
-    for i, (value,) in enumerate(rows):
-        if value != default:
-            first_changed_idx = i
-            break
-
-    if first_changed_idx is None:
-        return default
-    return max(row[0] for row in rows[first_changed_idx:])
 
 
 def _has_real_changes(changes_json) -> bool:
@@ -343,22 +313,6 @@ def extract_player_data(cursor, player_id, player_info_cache, highest_score, vic
             player_data["decisions"] = sum(
                 1 for row in all_strategy_changes if row[2] not in (None, "[]")
             )
-
-        cursor.execute("""
-            SELECT COUNT(*) FROM PlayerSummaries
-            WHERE Key = ? AND (
-                CurrentResearch LIKE 'Nuclear Fission%'
-                OR CurrentResearch LIKE 'Satellites%'
-                OR CurrentResearch LIKE 'Advanced Ballistics%'
-            )
-        """, (player_id,))
-        has_nuke_research = cursor.fetchone()[0] > 0
-        if has_nuke_research:
-            player_data["nuke"] = extract_flavor_max(cursor, player_id, "Nuke")
-            player_data["use_nuke"] = extract_flavor_max(cursor, player_id, "UseNuke")
-        else:
-            player_data["nuke"] = "N/A"
-            player_data["use_nuke"] = "N/A"
 
         strategy_turns = {strategy: 0 for strategy in STRATEGY_MAPPINGS.keys()}
         if all_strategy_changes:

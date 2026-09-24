@@ -1,6 +1,6 @@
 """Extract-stage orchestrator: raw game DBs under ``runs_dir`` → canonical CSVs.
 
-Wires ``data.extract`` / ``data.tables`` (benchmark.md §3) to the four exporters,
+Wires ``data.extract`` / ``data.tables`` (benchmark.md §3) to the five exporters,
 applies the **skip-if-newer** shortcut, and threads a single :class:`Catalog` (for
 the orthodox ``player_type`` composition) through panel / turn / token extraction.
 """
@@ -12,13 +12,15 @@ from typing import Optional
 
 from ..catalog import Catalog
 from ..config import RunConfig
+from ..config.behavior import resolve_behavior_spec
 from .errors import ExtractError
-from .extract_games import export_game_data
-from .extract_model_tokens import export_model_token_data
-from .extract_panel import export_panel_data
-from .extract_turns import export_turn_data
+from .extract_behavior import behavior_fieldnames, export_behavior_data
+from .extract_games import GAME_FIELDNAMES, export_game_data
+from .extract_model_tokens import MODEL_TOKEN_FIELDNAMES, export_model_token_data
+from .extract_panel import PANEL_FIELD_MAPPINGS, export_panel_data
+from .extract_turns import TURN_FIELD_MAPPINGS, export_turn_data
 from .issues import DEFAULT_ISSUES_PATH, ImportIssueLog
-from .utilities import find_all_databases, outputs_are_fresh
+from .utilities import csv_header_matches, find_all_databases, outputs_are_fresh
 
 
 # Canonical table key → default CSV path (used when `data.tables` omits a key).
@@ -27,7 +29,20 @@ DEFAULT_TABLE_PATHS = {
     "panel": "runs/panel_data.csv",
     "games": "runs/game_data.csv",
     "tokens": "runs/model_token_usage.csv",
+    "behavior": "runs/behavior_data.csv",
 }
+
+
+def _expected_fieldnames(key: str, behavior_spec: dict) -> list[str]:
+    if key == "games":
+        return GAME_FIELDNAMES
+    if key == "panel":
+        return list(PANEL_FIELD_MAPPINGS)
+    if key == "turns":
+        return list(TURN_FIELD_MAPPINGS)
+    if key == "tokens":
+        return MODEL_TOKEN_FIELDNAMES
+    return behavior_fieldnames(behavior_spec)
 
 
 @dataclass
@@ -76,6 +91,7 @@ def run_extract(
         prune_only = bool(prune_missing)
     force_rebuild = force_rebuild or bool(extract_cfg.get("force_rebuild", False))
     issues_path = extract_cfg.get("issues_path", DEFAULT_ISSUES_PATH)
+    behavior_spec = resolve_behavior_spec(extract_cfg.get("behavior"))
 
     output_paths = {key: _table_path(cfg, key) for key in outputs}
 
@@ -102,9 +118,15 @@ def run_extract(
     # would strand the remaining games permanently. Only trust the skip when
     # the run would process every discovered DB. The issues report is one of the
     # outputs: a missing/stale report forces a (re)build so it is never stranded
-    # behind already-fresh tables.
+    # behind already-fresh tables. An output whose header no longer matches its
+    # schema (a changed behavior selection, a dropped column) is stale too, since
+    # mtimes cannot see a config change.
     freshness_paths = list(output_paths.values()) + [issues_path]
-    if not force_rebuild and not prune_only and not capped \
+    headers_current = all(
+        csv_header_matches(path, _expected_fieldnames(key, behavior_spec))
+        for key, path in output_paths.items()
+    )
+    if not force_rebuild and not prune_only and not capped and headers_current \
             and outputs_are_fresh(freshness_paths, db_files):
         return ExtractResult(
             skipped=True,
@@ -137,6 +159,8 @@ def run_extract(
             new_rows[key] = export_turn_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues)
         elif key == "tokens":
             new_rows[key] = export_model_token_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only, issues=issues)
+        elif key == "behavior":
+            new_rows[key] = export_behavior_data(selected_db_files, available_game_ids, path, behavior_spec, catalog=catalog, prune_only=prune_only, issues=issues)
 
     # Reconcile this run's findings with the prior report (carry forward issues for
     # games no stage re-examined; drop those whose DB is gone) and persist. This

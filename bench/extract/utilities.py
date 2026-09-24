@@ -49,8 +49,6 @@ PLAYER_CORE_FIELDS = [
     "survival_turn",
     "score_ratio",
     "is_winner",
-    "nuke",
-    "use_nuke",
 ]
 
 # Uncontrolled sentinel for `seed` / `seating_rotation` (rule 14). Controlled
@@ -376,6 +374,15 @@ def append_csv_file(filepath, fieldnames, data_rows):
 
 
 # ── skip-if-newer (§3) ───────────────────────────────────────────────────────
+def csv_header_matches(path, fieldnames) -> bool:
+    """True when ``path`` is missing or its header equals ``fieldnames``."""
+    if not os.path.exists(path):
+        return True
+    with open(path, "r", newline="", encoding="utf-8") as csvfile:
+        header = next(csv.reader(csvfile), None)
+    return header == list(fieldnames)
+
+
 def newest_mtime(paths) -> float | None:
     """Newest modification time over ``paths`` (missing paths ignored)."""
     times = [os.path.getmtime(p) for p in paths if os.path.exists(p)]

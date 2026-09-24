@@ -75,7 +75,7 @@ Modules are selected by registry name from your config. The implemented **core**
 - **performance:** `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `game_log` *(implemented core)*; `permutation_importance` *(reserved optional, the construct-validity feature analysis)*.
 - **exploratory:** `model_token_costs` *(implemented core)*; `panel`, `turn`, `strategy_profiles` *(reserved optional)*.
 
-> The behavioral analysis family (flavor-change clusters, strategy-pivot and nuke rationale, victory commitment) is **deferred**. It scores no strategist, so it is not built yet. It may return later as an opt-in extension.
+> Behavior data (flavor and personality ranges, war, nuke, and raze counts) is now extracted into the `behavior` table. The behavioral analysis family (flavor-change clusters, strategy-pivot and nuke rationale, victory commitment) is still **deferred**; it may return later as an opt-in extension.
 
 ---
 

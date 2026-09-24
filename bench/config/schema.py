@@ -49,8 +49,47 @@ EXTRACT_KEYS = {
     "force_rebuild",
     "auto_fix",
     "issues_path",
+    "behavior",
 }
-TABLE_NAMES = ("turns", "panel", "games", "tokens")
+TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior")
+
+# ── data.extract.behavior (§3.0) ───────────────────────────────────────────
+# Game-DB column names each behavior family may summarize. The extract layer
+# builds its SQL from these, so they are the only names that reach a query.
+FLAVOR_NAMES = (
+    "Offense", "Defense", "Mobilization", "CityDefense", "MilitaryTraining",
+    "Recon", "Ranged", "Mobile", "Nuke", "UseNuke", "Naval", "NavalRecon",
+    "NavalGrowth", "NavalTileImprovement", "Air", "AirCarrier", "Antiair",
+    "Airlift", "Expansion", "Growth", "TileImprovement", "Infrastructure",
+    "Production", "WaterConnection", "Gold", "Science", "Culture", "Happiness",
+    "GreatPeople", "Wonder", "Religion", "Diplomacy", "Spaceship", "Espionage",
+)
+PERSONA_NAMES = (
+    "VictoryCompetitiveness", "WonderCompetitiveness", "MinorCivCompetitiveness",
+    "Boldness", "WarBias", "HostileBias", "WarmongerHate", "NeutralBias",
+    "FriendlyBias", "GuardedBias", "AfraidBias", "DiplomaticBalance",
+    "Friendliness", "WorkWithWillingness", "WorkAgainstWillingness", "Loyalty",
+    "MinorCivFriendlyBias", "MinorCivNeutralBias", "MinorCivHostileBias",
+    "MinorCivWarBias", "DenounceWillingness", "Forgiveness", "Meanness",
+    "Neediness", "Chattiness", "DeceptiveBias",
+)
+BEHAVIOR_EVENTS = ("wars_declared", "wars_received", "cities_nuked", "cities_razed")
+BEHAVIOR_STATS = ("min", "avg", "max")
+# Family key → allowed selections. `stats` is the only non-family key.
+BEHAVIOR_FAMILIES = {
+    "flavor": FLAVOR_NAMES,
+    "persona": PERSONA_NAMES,
+    "events": BEHAVIOR_EVENTS,
+}
+BEHAVIOR_DEFAULTS = {
+    "stats": ["min", "avg", "max"],
+    "flavor": ["UseNuke", "Nuke", "Offense", "Defense", "Mobilization",
+               "Expansion", "Diplomacy", "Spaceship"],
+    "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness",
+                "DeceptiveBias", "Forgiveness", "DenounceWillingness",
+                "MinorCivWarBias", "VictoryCompetitiveness"],
+    "events": list(BEHAVIOR_EVENTS),
+}
 
 # ── filters (§3.1) ─────────────────────────────────────────────────────────
 FILTER_KEYS = {

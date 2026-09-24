@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterable
 
+from .behavior import resolve_behavior_spec
 from .dependencies import resolve_stage_graph
 from .errors import ConfigError
 from .filters import (
@@ -200,6 +201,8 @@ def _validate_data(data: dict, presets: dict) -> dict:
                 raise ConfigError(
                     "data.extract.max_dbs: must be null or an integer >= 1."
                 )
+        if "behavior" in extract:
+            extract["behavior"] = resolve_behavior_spec(extract["behavior"])
     tables = data.get("tables")
     if tables is not None:
         _require_mapping(tables, "data.tables")

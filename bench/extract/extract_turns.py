@@ -16,6 +16,8 @@ import sqlite3
 from typing import Optional
 
 from ..catalog import Catalog
+from ..config.schema import FLAVOR_NAMES
+from .behavior import snake_case
 from .errors import ExtractError
 from .export_common import run_table_export
 from .identity import compose_identities
@@ -28,42 +30,7 @@ from .utilities import (
 )
 
 # Mapping from FlavorChanges DB column (PascalCase) to CSV column (snake_case)
-FLAVOR_COLUMNS = [
-    ("Offense", "flavor_offense"),
-    ("Defense", "flavor_defense"),
-    ("Mobilization", "flavor_mobilization"),
-    ("CityDefense", "flavor_city_defense"),
-    ("MilitaryTraining", "flavor_military_training"),
-    ("Recon", "flavor_recon"),
-    ("Ranged", "flavor_ranged"),
-    ("Mobile", "flavor_mobile"),
-    ("Nuke", "flavor_nuke"),
-    ("UseNuke", "flavor_use_nuke"),
-    ("Naval", "flavor_naval"),
-    ("NavalRecon", "flavor_naval_recon"),
-    ("NavalGrowth", "flavor_naval_growth"),
-    ("NavalTileImprovement", "flavor_naval_tile_improvement"),
-    ("Air", "flavor_air"),
-    ("AirCarrier", "flavor_air_carrier"),
-    ("Antiair", "flavor_antiair"),
-    ("Airlift", "flavor_airlift"),
-    ("Expansion", "flavor_expansion"),
-    ("Growth", "flavor_growth"),
-    ("TileImprovement", "flavor_tile_improvement"),
-    ("Infrastructure", "flavor_infrastructure"),
-    ("Production", "flavor_production"),
-    ("WaterConnection", "flavor_water_connection"),
-    ("Gold", "flavor_gold"),
-    ("Science", "flavor_science"),
-    ("Culture", "flavor_culture"),
-    ("Happiness", "flavor_happiness"),
-    ("GreatPeople", "flavor_great_people"),
-    ("Wonder", "flavor_wonder"),
-    ("Religion", "flavor_religion"),
-    ("Diplomacy", "flavor_diplomacy"),
-    ("Spaceship", "flavor_spaceship"),
-    ("Espionage", "flavor_espionage"),
-]
+FLAVOR_COLUMNS = [(name, f"flavor_{snake_case(name)}") for name in FLAVOR_NAMES]
 
 # Define field mappings for turn-based data
 TURN_FIELD_MAPPINGS = {

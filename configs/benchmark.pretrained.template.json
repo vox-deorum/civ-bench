@@ -27,7 +27,7 @@
     "extract": {
       "enabled": false,
       "runs_dir": "runs/",
-      "outputs": ["turns", "panel", "games", "tokens"],
+      "outputs": ["turns", "panel", "games", "tokens", "behavior"],
       "max_dbs": null,
       "prune_missing": false,
       "force_rebuild": false,
@@ -37,7 +37,8 @@
       "turns": "runs/turn_data.csv",
       "panel": "runs/panel_data.csv",
       "games": "runs/game_data.csv",
-      "tokens": "runs/model_token_usage.csv"
+      "tokens": "runs/model_token_usage.csv",
+      "behavior": "runs/behavior_data.csv"
     },
     "filter": "staff_recent"
   },

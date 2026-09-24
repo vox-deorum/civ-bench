@@ -1,0 +1,250 @@
+"""Behavior table extraction (benchmark.md §3.0) on small synthetic game DBs."""
+
+from __future__ import annotations
+
+import csv
+import json
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from bench.catalog import Catalog
+from bench.config import schema as S
+from bench.config.behavior import resolve_behavior_spec
+from bench.config.errors import ConfigError
+from bench.config.models import OutputConfig, RunConfig
+from bench.extract import run_extract
+from bench.extract.behavior import EVENT_COUNTERS, FAMILIES, snake_case
+from bench.extract.extract_behavior import (
+    behavior_fieldnames,
+    export_behavior_data,
+    extract_game_behavior_data,
+)
+from bench.extract.extract_panel import PANEL_FIELD_MAPPINGS
+
+SPEC = {
+    "stats": ["min", "avg", "max"],
+    "flavor": ["Offense", "UseNuke"],
+    "persona": ["Boldness"],
+    "events": list(S.BEHAVIOR_EVENTS),
+}
+
+
+def _event(event_type, turn, payload):
+    return (turn, event_type, json.dumps(payload, sort_keys=True))
+
+
+def _make_db(path: Path, *, flavor=None, persona=None, events=(), with_index=True,
+             with_team=True) -> Path:
+    """Players 0 and 1 are majors on teams 0 and 1; player 22 is a city-state."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE GameMetadata (Key TEXT, Value TEXT)")
+    cur.execute("INSERT INTO GameMetadata VALUES ('gameId', ?)", (path.stem.split("_")[0],))
+    if with_team:
+        cur.execute("CREATE TABLE PlayerInformations (Key INTEGER, Civilization TEXT, TeamID INTEGER, IsMajor INTEGER)")
+        cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, ?, ?)",
+                        [(0, "Rome", 0, 1), (1, "Greece", 1, 1), (22, "Ife", 22, 0)])
+    else:
+        cur.execute("CREATE TABLE PlayerInformations (Key INTEGER, Civilization TEXT, IsMajor INTEGER)")
+        cur.executemany("INSERT INTO PlayerInformations VALUES (?, ?, ?)",
+                        [(0, "Rome", 1), (1, "Greece", 1), (22, "Ife", 0)])
+    cur.execute("CREATE TABLE PlayerSummaries (ID INTEGER, Key INTEGER, Turn INTEGER)")
+    cur.executemany("INSERT INTO PlayerSummaries VALUES (?, ?, ?)",
+                    [(1, 0, 0), (2, 0, 9), (3, 1, 0), (4, 1, 5)])
+    if flavor is not None:
+        cur.execute("CREATE TABLE FlavorChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Offense INTEGER, UseNuke INTEGER)")
+        cur.executemany("INSERT INTO FlavorChanges VALUES (?, ?, ?, ?, ?)", flavor)
+    if persona is not None:
+        cur.execute("CREATE TABLE PersonaChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Boldness INTEGER)")
+        cur.executemany("INSERT INTO PersonaChanges VALUES (?, ?, ?, ?)", persona)
+    cur.execute("CREATE TABLE GameEvents (ID INTEGER PRIMARY KEY, Turn INTEGER, Type TEXT, Payload TEXT, Player0 INTEGER)")
+    if with_index:
+        cur.execute('CREATE INDEX "idx_gameevents_player0" ON "GameEvents" ("ID", "Turn", "Type", "Player0")')
+    cur.executemany("INSERT INTO GameEvents (Turn, Type, Payload, Player0) VALUES (?, ?, ?, 0)", events)
+    conn.commit()
+    conn.close()
+    return path
+
+
+def _rows_by_player(db: Path, spec=SPEC) -> dict:
+    return {r["player_id"]: r for r in extract_game_behavior_data(str(db), resolve_behavior_spec(spec))}
+
+
+# ── config ───────────────────────────────────────────────────────────────────
+def test_spec_defaults_fill_missing_keys():
+    spec = resolve_behavior_spec({"flavor": ["Offense"]})
+    assert spec["flavor"] == ["Offense"]
+    assert spec["persona"] == S.BEHAVIOR_DEFAULTS["persona"]
+    assert spec["stats"] == ["min", "avg", "max"]
+    assert resolve_behavior_spec(None) == resolve_behavior_spec({})
+
+
+@pytest.mark.parametrize("raw, match", [
+    ({"mood": []}, "unknown key"),
+    ({"flavor": ["Offence"]}, "unknown name"),
+    ({"persona": ["Offense"]}, "unknown name"),
+    ({"events": ["wars_started"]}, "unknown name"),
+    ({"stats": ["median"]}, "unknown name"),
+    ({"flavor": ["Nuke", "Nuke"]}, "duplicate"),
+    ({"flavor": "Nuke"}, "list of strings"),
+    ([], "expected an object"),
+])
+def test_spec_rejects_bad_selection(raw, match):
+    with pytest.raises(ConfigError, match=match):
+        resolve_behavior_spec(raw)
+
+
+def test_registries_match_schema():
+    assert list(FAMILIES) == list(S.BEHAVIOR_FAMILIES)
+    assert set(EVENT_COUNTERS) == set(S.BEHAVIOR_EVENTS)
+
+
+def test_fieldnames_follow_selection():
+    names = behavior_fieldnames(SPEC)
+    assert names[:6] == ["experiment", "game_id", "player_id", "player_type", "civilization", "survival_turn"]
+    assert names[6:] == [
+        "flavor_offense_min", "flavor_offense_avg", "flavor_offense_max",
+        "flavor_use_nuke_min", "flavor_use_nuke_avg", "flavor_use_nuke_max",
+        "persona_boldness_min", "persona_boldness_avg", "persona_boldness_max",
+        "wars_declared", "wars_received", "cities_nuked", "cities_razed",
+    ]
+    assert snake_case("MinorCivWarBias") == "minor_civ_war_bias"
+
+
+def test_panel_no_longer_has_nuke_columns():
+    assert "nuke" not in PANEL_FIELD_MAPPINGS
+    assert "use_nuke" not in PANEL_FIELD_MAPPINGS
+
+
+# ── state families ───────────────────────────────────────────────────────────
+def test_state_stats_use_last_row_per_turn_and_weight_by_turns(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", flavor=[
+        # Turn 0 has two rows: the later one (Offense 30) is the state in effect.
+        (1, 0, 0, 10, 50),
+        (2, 0, 0, 30, 50),
+        (3, 0, 4, 60, 80),   # holds turns 4..9 (survival turn 9)
+    ], persona=[(1, 0, 0, 5), (2, 1, 0, 7)])
+    row = _rows_by_player(db)[0]
+    # Offense: 30 for turns 0-3 (4 turns), 60 for turns 4-9 (6 turns).
+    assert row["flavor_offense_min"] == 30
+    assert row["flavor_offense_max"] == 60
+    assert row["flavor_offense_avg"] == pytest.approx((30 * 4 + 60 * 6) / 10)
+    assert row["flavor_use_nuke_avg"] == pytest.approx((50 * 4 + 80 * 6) / 10)
+    assert row["persona_boldness_min"] == row["persona_boldness_max"] == 5
+    assert row["survival_turn"] == 9
+
+
+def test_state_blank_without_rows_or_table(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", flavor=[(1, 0, 0, 10, 50)], persona=None)
+    rows = _rows_by_player(db)
+    assert rows[1]["flavor_offense_min"] == ""      # no FlavorChanges rows for player 1
+    assert rows[0]["persona_boldness_avg"] == ""    # no PersonaChanges table at all
+    assert 22 not in rows                            # city-states get no row
+
+
+def test_state_missing_column_preserves_other_selected_values(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", persona=[(1, 0, 0, 7)])
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE FlavorChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Offense INTEGER)"
+        )
+        conn.execute("INSERT INTO FlavorChanges VALUES (1, 0, 0, 30)")
+        conn.execute("INSERT INTO FlavorChanges VALUES (2, 0, 4, 60)")
+
+    spec = {
+        "stats": ["min", "avg", "max"],
+        "flavor": ["UseNuke", "Offense"],
+        "persona": ["WarBias", "Boldness"],
+        "events": [],
+    }
+    row = _rows_by_player(db, spec)[0]
+    assert row["flavor_offense_avg"] == pytest.approx((30 * 4 + 60 * 6) / 10)
+    assert row["flavor_use_nuke_avg"] == ""
+    assert row["persona_boldness_avg"] == 7
+    assert row["persona_war_bias_avg"] == ""
+
+
+# ── event family ─────────────────────────────────────────────────────────────
+def _war(turn, origin, target, aggressor=True):
+    return _event("DeclareWar", turn, {"OriginatingPlayerID": origin, "TargetTeamID": target,
+                                       "IsAggressor": aggressor})
+
+
+EVENTS = [
+    _war(3, 0, 1),
+    _war(3, 0, 1),                      # exact duplicate: counted once
+    _war(4, 0, 22),                     # on a city-state: still Rome's declaration
+    _war(5, 1, 0, aggressor=False),     # joined as a vassal: not a declaration
+    _war(6, 22, 1, aggressor=False),    # city-state follows its ally: Greece receives it
+    _event("NuclearDetonation", 7, {"PlayerID": 0, "Plot": {"City": "Athens", "CityID": 9}}),
+    _event("NuclearDetonation", 7, {"PlayerID": 0, "Plot": {"PlotType": "Land"}}),   # no city
+    _event("CityRazed", 8, {"PlayerID": 1, "City": {"CityID": 3}}),
+    _event("CityRazed", 8, {"PlayerID": 22, "City": {"CityID": 4}}),                # minor
+    _event("UnitMoved", 8, {"PlayerID": 0}),
+]
+
+
+@pytest.mark.parametrize("with_index", [True, False])
+def test_event_counts(tmp_path, with_index):
+    db = _make_db(tmp_path / "exp" / "g_1.db", events=EVENTS, with_index=with_index)
+    rows = _rows_by_player(db)
+    assert {k: rows[0][k] for k in S.BEHAVIOR_EVENTS} == {
+        "wars_declared": 2, "wars_received": 1, "cities_nuked": 1, "cities_razed": 0,
+    }
+    assert {k: rows[1][k] for k in S.BEHAVIOR_EVENTS} == {
+        "wars_declared": 0, "wars_received": 2, "cities_nuked": 0, "cities_razed": 1,
+    }
+
+
+def test_wars_received_without_team_column_uses_player_id(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", events=EVENTS, with_team=False)
+    assert _rows_by_player(db)[1]["wars_received"] == 2
+
+
+def test_empty_family_selection_adds_no_columns(tmp_path):
+    spec = {"flavor": [], "persona": [], "events": ["cities_razed"]}
+    assert behavior_fieldnames(spec)[6:] == ["cities_razed"]
+    db = _make_db(tmp_path / "exp" / "g_1.db", events=EVENTS)
+    assert _rows_by_player(db, spec)[1]["cities_razed"] == 1
+
+
+# ── export + runner ──────────────────────────────────────────────────────────
+def test_export_is_byte_stable(tmp_path):
+    db = _make_db(tmp_path / "exp" / "g_1.db", flavor=[(1, 0, 0, 10, 50)], events=EVENTS)
+    first, second = tmp_path / "a.csv", tmp_path / "b.csv"
+    export_behavior_data([str(db)], {"g"}, str(first), SPEC)
+    export_behavior_data([str(db)], {"g"}, str(second), SPEC)
+    assert first.read_bytes() == second.read_bytes()
+    rows = list(csv.DictReader(first.open(encoding="utf-8")))
+    assert [r["player_id"] for r in rows] == ["0", "1"]
+
+
+def _run_config(tmp_path: Path, behavior: dict) -> RunConfig:
+    extract = {
+        "runs_dir": str(tmp_path / "runs"),
+        "outputs": ["behavior"],
+        "issues_path": str(tmp_path / "import_issues.csv"),
+        "behavior": behavior,
+    }
+    return RunConfig(
+        name="test", seed=1, config_path=tmp_path / "benchmark.json", raw={},
+        output=OutputConfig(),
+        data={"extract": extract, "tables": {"behavior": str(tmp_path / "behavior.csv")}},
+    )
+
+
+def test_changed_selection_forces_rebuild(tmp_path, configs_dir):
+    catalog = Catalog.from_paths(configs_dir / "models.json", configs_dir / "experiments.json")
+    _make_db(tmp_path / "runs" / "exp" / "g_1.db", events=EVENTS)
+    first = run_extract(_run_config(tmp_path, {"events": ["cities_razed"]}), catalog=catalog)
+    assert not first.skipped
+    again = run_extract(_run_config(tmp_path, {"events": ["cities_razed"]}), catalog=catalog)
+    assert again.skipped
+
+    changed = run_extract(_run_config(tmp_path, {"events": ["cities_razed", "cities_nuked"]}), catalog=catalog)
+    assert not changed.skipped
+    header = (tmp_path / "behavior.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert header.endswith("cities_razed,cities_nuked")

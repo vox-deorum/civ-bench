@@ -64,7 +64,7 @@ def _make_dev_spec() -> dict:
             "extract": {
                 "enabled": True,
                 "runs_dir": "runs_source/",
-                "outputs": ["turns", "panel", "games", "tokens"],
+                "outputs": ["turns", "panel", "games", "tokens", "behavior"],
                 "max_dbs": None,
                 "prune_missing": False,
                 "force_rebuild": False,
@@ -74,6 +74,7 @@ def _make_dev_spec() -> dict:
                 "panel": "runs/panel_data.csv",
                 "games": "runs/game_data.csv",
                 "tokens": "runs/model_token_usage.csv",
+                "behavior": "runs/behavior_data.csv",
             },
             "filter": "staff_recent",
         },

@@ -131,19 +131,26 @@ render the matrix instead.
   "extract": {
     "enabled": true,                     // false → reuse existing CSVs, never touch runs/ DBs
     "runs_dir": "runs/",                 // root searched for *.db game DBs
-    "outputs": ["turns", "panel", "games", "tokens"],  // which canonical CSVs to (re)build
+    "outputs": ["turns", "panel", "games", "tokens", "behavior"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract
     "force_rebuild": false,              // true → rebuild even if outputs exist & are newer
     "auto_fix": true,                    // true → repair malformed DBs & re-import (--no-fix disables)
-    "issues_path": "runs/import_issues.csv"  // where malformed/locked-DB import issues are recorded
+    "issues_path": "runs/import_issues.csv",  // where malformed/locked-DB import issues are recorded
+    "behavior": {                        // optional; omitted keys use these defaults
+      "stats":   ["min", "avg", "max"],
+      "flavor":  ["UseNuke", "Nuke", "Offense", "Defense", "Mobilization", "Expansion", "Diplomacy", "Spaceship"],
+      "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness"],
+      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed"]
+    }
   },
 
   "tables": {                            // canonical CSV locations (extract writes / loaders read)
     "turns":      "runs/turn_data.csv",          // per-player per-turn panel (prediction features); carries player_type, NOT seed
     "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategies/strength (+ player_type/model/strategist/config_slot)
     "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
-    "tokens":     "runs/model_token_usage.csv"  // token use plus failed strategist turns per player trace
+    "tokens":     "runs/model_token_usage.csv",  // token use plus failed strategist turns per player trace
+    "behavior":   "runs/behavior_data.csv"     // per-player per-game behavior summary (flavor/persona min/avg/max, war/nuke/raze counts)
   },
 
   "filter": "llm_only"                   // GLOBAL selector: inline object OR a preset name (§3.1)
@@ -155,6 +162,26 @@ render the matrix instead.
 - The `extract` stage is **skipped automatically** when every `outputs` CSV already exists and is newer than the DBs, unless `force_rebuild: true`.
 - When a fresh extract records malformed DBs, they are **auto-repaired and re-imported** in place (extract → `fix` → re-import) before the rest of the DAG runs. Disable with `auto_fix: false` or the CLI `--no-fix` flag; games that recovery cannot save stay flagged and are excluded downstream, exactly as before.
 - When the selected stages need experiment ids or player-type names, they resolve through `catalogs.experiments` + `catalogs.models`. **`player_type` is composed at extract from the per-player game metadata** (`model-{id}` + `strategist-{id}`) via the catalog's template + aliases + unified label map (§3.3); the old seat→model mapping is only an optional fallback; never spell out seat→model mappings here.
+
+### 3.0 `data.extract.behavior`: behavior summary table
+
+The `behavior` table has one row per major player per game. Its key columns are `experiment`, `game_id`, `player_id`, `player_type`, `civilization`, and `survival_turn` (the player's last recorded turn). The remaining columns follow `data.extract.behavior`:
+
+| Key | Allowed values | Columns produced |
+| --- | --- | --- |
+| `stats` | `min`, `avg`, `max` | applied to every `flavor` and `persona` entry |
+| `flavor` | any `FlavorChanges` column (for example `Offense`, `UseNuke`) | `flavor_<snake_name>_<stat>`, for example `flavor_use_nuke_max` |
+| `persona` | any `PersonaChanges` personality column (for example `Boldness`, `WarBias`) | `persona_<snake_name>_<stat>`, for example `persona_war_bias_avg` |
+| `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed` | one count column per name |
+
+- Each key is optional and falls back to the default shown above. An empty list turns that family off. Unknown names, stats, and duplicates are config errors.
+- Flavor and persona values are the state in effect on each turn: the last row of a turn wins, and it carries forward until the next row. `min` and `max` range over the states in effect from the player's first row to `survival_turn`. `avg` is turn-weighted. Rows written by the in-game AI (`Tweaked by In-Game AI`) count, because the game used them. A player with no rows (for example an in-game AI player with no `FlavorChanges`) gets blank cells. If an older DB lacks a selected column, only that column's cells are blank.
+- Event counts come from `GameEvents`, with exact duplicate events (same type, turn, and payload) counted once:
+  - `wars_declared`: `DeclareWar` events the player originated as aggressor. This includes the automatic declarations on the target's defensive-pact partners and excludes wars joined as a vassal.
+  - `wars_received`: every `DeclareWar` event whose target team is the player's team, from any originator.
+  - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
+  - `cities_razed`: `CityRazed` events by the player.
+- Changing the selection changes the CSV header, so the next extract rebuilds the whole table.
 
 ### 3.1 `filters`: named, reusable filter presets
 
@@ -771,7 +798,7 @@ and `na_games` count distinct games with complete or incomplete cost records.
   "uses": { "tables": ["strength"] }, "params": { "by": "player_type" } }
 ```
 
-> **`behavior.*` is deferred.** The whole behavioral family (flavor-change clusters/decomposition, pivot/nuke rationale, victory commitment) scores no strategist, so it is **not in this schema**. We will revisit how to bring behavioral profiling back as an opt-in extension later.
+> **Behavior analyses are deferred.** The `behavior` table (§3.0) is extracted, but no analysis module consumes it yet. Behavioral profiling may return later as an opt-in analysis extension.
 
 ### 6.3 Module friendly names and descriptions
 
