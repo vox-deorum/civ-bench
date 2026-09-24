@@ -22,13 +22,6 @@ from .errors import ExtractError
 
 
 # ── domain constants (ported verbatim) ──────────────────────────────────────
-POLICY_BRANCHES = [
-    "tradition", "authority", "progress",      # Ancient era
-    "fealty", "statecraft", "artistry",        # Classical/Medieval era
-    "industry", "imperialism", "rationalism",  # Renaissance/Industrial era
-    "freedom", "autocracy", "order",           # Modern era
-]
-
 STRATEGY_MAPPINGS = {
     "Conquest": "domination_ratio",
     "Culture": "culture_ratio",
@@ -40,7 +33,6 @@ CHANGE_FIELDS = [
     "strategy_changes",
     "persona_changes",
     "research_changes",
-    "policy_changes",
 ]
 
 PLAYER_CORE_FIELDS = [

@@ -28,6 +28,7 @@ SPEC = {
     "flavor": ["Offense", "UseNuke"],
     "persona": ["Boldness"],
     "events": list(S.BEHAVIOR_EVENTS),
+    "policies": list(S.BEHAVIOR_POLICIES),
 }
 
 
@@ -35,7 +36,7 @@ def _event(event_type, turn, payload):
     return (turn, event_type, json.dumps(payload, sort_keys=True))
 
 
-def _make_db(path: Path, *, flavor=None, persona=None, events=(), with_index=True,
+def _make_db(path: Path, *, flavor=None, persona=None, policy_rows=(), events=(), with_index=True,
              with_team=True) -> Path:
     """Players 0 and 1 are majors on teams 0 and 1; player 22 is a city-state."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +61,8 @@ def _make_db(path: Path, *, flavor=None, persona=None, events=(), with_index=Tru
     if persona is not None:
         cur.execute("CREATE TABLE PersonaChanges (ID INTEGER, Key INTEGER, Turn INTEGER, Boldness INTEGER)")
         cur.executemany("INSERT INTO PersonaChanges VALUES (?, ?, ?, ?)", persona)
+    cur.execute("CREATE TABLE PolicyChanges (ID INTEGER, Key INTEGER, Changes TEXT)")
+    cur.executemany("INSERT INTO PolicyChanges VALUES (?, ?, ?)", policy_rows)
     cur.execute("CREATE TABLE GameEvents (ID INTEGER PRIMARY KEY, Turn INTEGER, Type TEXT, Payload TEXT, Player0 INTEGER)")
     if with_index:
         cur.execute('CREATE INDEX "idx_gameevents_player0" ON "GameEvents" ("ID", "Turn", "Type", "Player0")')
@@ -79,6 +82,7 @@ def test_spec_defaults_fill_missing_keys():
     assert spec["flavor"] == ["Offense"]
     assert spec["persona"] == S.BEHAVIOR_DEFAULTS["persona"]
     assert spec["stats"] == ["min", "avg", "max"]
+    assert spec["policies"] == S.BEHAVIOR_DEFAULTS["policies"]
     assert resolve_behavior_spec(None) == resolve_behavior_spec({})
 
 
@@ -110,13 +114,42 @@ def test_fieldnames_follow_selection():
         "flavor_use_nuke_min", "flavor_use_nuke_avg", "flavor_use_nuke_max",
         "persona_boldness_min", "persona_boldness_avg", "persona_boldness_max",
         "wars_declared", "wars_received", "cities_nuked", "cities_razed",
+        *S.BEHAVIOR_POLICIES,
     ]
     assert snake_case("MinorCivWarBias") == "minor_civ_war_bias"
 
 
-def test_panel_no_longer_has_nuke_columns():
+def test_panel_omits_behavior_and_token_columns():
     assert "nuke" not in PANEL_FIELD_MAPPINGS
     assert "use_nuke" not in PANEL_FIELD_MAPPINGS
+    assert "input_tokens" not in PANEL_FIELD_MAPPINGS
+    assert "reasoning_tokens" not in PANEL_FIELD_MAPPINGS
+    assert "output_tokens" not in PANEL_FIELD_MAPPINGS
+    assert not set(S.BEHAVIOR_POLICIES) & set(PANEL_FIELD_MAPPINGS)
+
+
+def test_policy_counts_and_first_adoption_turns_live_in_behavior(tmp_path):
+    db = _make_db(
+        tmp_path / "exp" / "g_1.db",
+        policy_rows=[
+            (1, 0, '["Policy"]'),
+            (2, 0, '["Rationale"]'),
+            (3, 0, "[]"),
+        ],
+        events=[
+            _event("PlayerAdoptPolicyBranch", 8, {"PlayerID": 0, "BranchType": "Tradition"}),
+            _event("PlayerAdoptPolicyBranch", 3, {"PlayerID": 0, "BranchType": "Tradition"}),
+            _event("IdeologyAdopted", 7, {"PlayerID": 1, "BranchType": "Freedom"}),
+        ],
+    )
+
+    rows = _rows_by_player(db)
+    assert rows[0]["policy_changes"] == 1
+    assert rows[0]["tradition"] == 3
+    assert rows[0]["authority"] == "N/A"
+    assert rows[1]["policy_changes"] == 0
+    assert rows[1]["freedom"] == 7
+    assert rows[1]["tradition"] == "N/A"
 
 
 # ── state families ───────────────────────────────────────────────────────────
@@ -205,7 +238,7 @@ def test_wars_received_without_team_column_uses_player_id(tmp_path):
 
 
 def test_empty_family_selection_adds_no_columns(tmp_path):
-    spec = {"flavor": [], "persona": [], "events": ["cities_razed"]}
+    spec = {"flavor": [], "persona": [], "events": ["cities_razed"], "policies": []}
     assert behavior_fieldnames(spec)[6:] == ["cities_razed"]
     db = _make_db(tmp_path / "exp" / "g_1.db", events=EVENTS)
     assert _rows_by_player(db, spec)[1]["cities_razed"] == 1
@@ -247,4 +280,4 @@ def test_changed_selection_forces_rebuild(tmp_path, configs_dir):
     changed = run_extract(_run_config(tmp_path, {"events": ["cities_razed", "cities_nuked"]}), catalog=catalog)
     assert not changed.skipped
     header = (tmp_path / "behavior.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert header.endswith("cities_razed,cities_nuked")
+    assert "cities_razed,cities_nuked," in header

@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from .context import GameContext, build_game_context, snake_case
 from .events import EVENT_COUNTERS, EventCounter, EventFamily
+from .policies import PolicyFamily
 from .state import StateFamily
 
 FAMILIES = {
     "flavor": StateFamily(table="FlavorChanges", prefix="flavor"),
     "persona": StateFamily(table="PersonaChanges", prefix="persona"),
     "events": EventFamily(),
+    "policies": PolicyFamily(),
 }
 
 __all__ = [
@@ -25,6 +27,7 @@ __all__ = [
     "EventCounter",
     "EventFamily",
     "GameContext",
+    "PolicyFamily",
     "StateFamily",
     "build_game_context",
     "snake_case",

@@ -141,16 +141,17 @@ render the matrix instead.
       "stats":   ["min", "avg", "max"],
       "flavor":  ["UseNuke", "Nuke", "Offense", "Defense", "Mobilization", "Expansion", "Diplomacy", "Spaceship"],
       "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness"],
-      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed"]
+      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed"],
+      "policies": ["policy_changes", "tradition", "authority", "progress", "fealty", "statecraft", "artistry", "industry", "imperialism", "rationalism", "freedom", "autocracy", "order"]
     }
   },
 
   "tables": {                            // canonical CSV locations (extract writes / loaders read)
     "turns":      "runs/turn_data.csv",          // per-player per-turn panel (prediction features); carries player_type, NOT seed
-    "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategies/strength (+ player_type/model/strategist/config_slot)
+    "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategy summaries (+ player_type/model/strategist/config_slot)
     "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
     "tokens":     "runs/model_token_usage.csv",  // token use plus failed strategist turns per player trace
-    "behavior":   "runs/behavior_data.csv"     // per-player per-game behavior summary (flavor/persona min/avg/max, war/nuke/raze counts)
+    "behavior":   "runs/behavior_data.csv"     // per-player per-game behavior and policy summaries
   },
 
   "filter": "llm_only"                   // GLOBAL selector: inline object OR a preset name (§3.1)
@@ -173,14 +174,16 @@ The `behavior` table has one row per major player per game. Its key columns are 
 | `flavor` | any `FlavorChanges` column (for example `Offense`, `UseNuke`) | `flavor_<snake_name>_<stat>`, for example `flavor_use_nuke_max` |
 | `persona` | any `PersonaChanges` personality column (for example `Boldness`, `WarBias`) | `persona_<snake_name>_<stat>`, for example `persona_war_bias_avg` |
 | `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed` | one count column per name |
+| `policies` | `policy_changes`, `tradition`, `authority`, `progress`, `fealty`, `statecraft`, `artistry`, `industry`, `imperialism`, `rationalism`, `freedom`, `autocracy`, `order` | real policy-change count plus first-adoption turn for each selected branch |
 
-- Each key is optional and falls back to the default shown above. An empty list turns that family off. Unknown names, stats, and duplicates are config errors.
+- Each key is optional and falls back to the default shown above. An empty list turns that family off. Unknown names, stats, and duplicates are config errors. Policy fields have no `stats`; only flavor and persona use the `stats` selection.
 - Flavor and persona values are the state in effect on each turn: the last row of a turn wins, and it carries forward until the next row. `min` and `max` range over the states in effect from the player's first row to `survival_turn`. `avg` is turn-weighted. Rows written by the in-game AI (`Tweaked by In-Game AI`) count, because the game used them. A player with no rows (for example an in-game AI player with no `FlavorChanges`) gets blank cells. If an older DB lacks a selected column, only that column's cells are blank.
 - Event counts come from `GameEvents`, with exact duplicate events (same type, turn, and payload) counted once:
   - `wars_declared`: `DeclareWar` events the player originated as aggressor. This includes the automatic declarations on the target's defensive-pact partners and excludes wars joined as a vassal.
   - `wars_received`: every `DeclareWar` event whose target team is the player's team, from any originator.
   - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
   - `cities_razed`: `CityRazed` events by the player.
+- `policy_changes` counts `PolicyChanges` rows containing a real field mutation, excluding rationale-only and empty rows. Each branch column records its first adoption turn from `PlayerAdoptPolicyBranch` or `IdeologyAdopted`; branches the player never adopted contain `N/A`.
 - Changing the selection changes the CSV header, so the next extract rebuilds the whole table.
 
 ### 3.1 `filters`: named, reusable filter presets

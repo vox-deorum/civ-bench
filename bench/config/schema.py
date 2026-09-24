@@ -74,12 +74,20 @@ PERSONA_NAMES = (
     "Neediness", "Chattiness", "DeceptiveBias",
 )
 BEHAVIOR_EVENTS = ("wars_declared", "wars_received", "cities_nuked", "cities_razed")
+BEHAVIOR_POLICIES = (
+    "policy_changes",
+    "tradition", "authority", "progress",
+    "fealty", "statecraft", "artistry",
+    "industry", "imperialism", "rationalism",
+    "freedom", "autocracy", "order",
+)
 BEHAVIOR_STATS = ("min", "avg", "max")
 # Family key → allowed selections. `stats` is the only non-family key.
 BEHAVIOR_FAMILIES = {
     "flavor": FLAVOR_NAMES,
     "persona": PERSONA_NAMES,
     "events": BEHAVIOR_EVENTS,
+    "policies": BEHAVIOR_POLICIES,
 }
 BEHAVIOR_DEFAULTS = {
     "stats": ["min", "avg", "max"],
@@ -89,6 +97,7 @@ BEHAVIOR_DEFAULTS = {
                 "DeceptiveBias", "Forgiveness", "DenounceWillingness",
                 "MinorCivWarBias", "VictoryCompetitiveness"],
     "events": list(BEHAVIOR_EVENTS),
+    "policies": list(BEHAVIOR_POLICIES),
 }
 
 # ── filters (§3.1) ─────────────────────────────────────────────────────────
