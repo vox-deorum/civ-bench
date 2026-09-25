@@ -1,6 +1,7 @@
 """``civ-bench`` command-line entrypoint.
 
     civ-bench extract|run|report --config <path> [--only ID] [--skip ID] [--dry-run]
+                                 [--no-publish]
 
 Stage 0 implements config loading + validation + DAG resolution + dry-run
 printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs);
@@ -62,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         p = sub.add_parser(cmd, help=help_text)
         _add_common(p)
+        if cmd in ("run", "report"):
+            p.add_argument(
+                "--no-publish", dest="no_publish", action="store_true",
+                help="do not offer to commit and push the report "
+                     "(overrides report.publish.enabled)",
+            )
         if cmd in ("extract", "run"):
             p.add_argument(
                 "--force-rebuild", "--force_rebuild", "-f",
@@ -140,6 +147,47 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
     return result
 
 
+def _confirm_publish(summary: str, question: str) -> bool:
+    """Show the publish summary and ask for approval; a non-TTY stdin declines."""
+    print()
+    print(summary)
+    if not sys.stdin.isatty():
+        print("civ-bench: publish: no interactive console; nothing was staged.")
+        return False
+    try:
+        answer = input(question)
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _publish_after_report(cfg, report_dir: str, no_publish: bool) -> int:
+    """Offer to release the rendered report when ``report.publish`` is enabled."""
+    from .publish import PublishError, publish_enabled, run_publish
+
+    if no_publish or not publish_enabled(cfg):
+        return 0
+    try:
+        result = run_publish(cfg, report_dir, _confirm_publish)
+    except PublishError as exc:
+        print(f"civ-bench: publish error: {exc}", file=sys.stderr)
+        return 2
+    if result.created_repo:
+        print(f"civ-bench: publish: initialized a git repository in {result.repo_dir}")
+    if result.status == "nothing_to_publish":
+        print("civ-bench: publish: no changes to commit.")
+    elif result.status == "declined":
+        print("civ-bench: publish: declined; the changes stay unstaged in the report directory.")
+    elif result.status == "pushed":
+        print(f"civ-bench: publish: pushed earlier commits to {result.push_target}")
+    else:
+        target = f", pushed to {result.push_target}" if result.push_target else ""
+        print(f"civ-bench: publish: committed {result.commit}{target}")
+    for note in result.notes:
+        print(f"civ-bench: publish: {note}")
+    return 0
+
+
 def _is_dry(args: argparse.Namespace) -> bool:
     # `--skip all` is the documented equivalent of a dry run (Done criterion).
     return bool(args.dry_run) or any(s.lower() == "all" for s in args.skip)
@@ -179,7 +227,10 @@ def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
     return [nid for nid in dag.order if nid in keep]
 
 
-def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fix: bool) -> int:
+def _run_pipeline(
+    cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fix: bool,
+    no_publish: bool = False,
+) -> int:
     """Execute every stage in ``subset`` (topo order).
 
     Every stage kind is now implemented (extract → estimators → adjust → analyses
@@ -189,6 +240,7 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fi
     """
     catalog: Optional[Catalog] = None
     skipped: list[tuple[str, str]] = []
+    report_dir: Optional[str] = None
     for nid in subset:
         node = dag.nodes[nid]
         if node.kind not in _IMPLEMENTED_KINDS:
@@ -242,6 +294,12 @@ def _run_pipeline(cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fi
                 print(f"           wrote {path}")
             for warning in result.warnings:
                 print(f"civ-bench: report WARN: {warning}", file=sys.stderr)
+            report_dir = result.report_dir
+
+    if report_dir is not None:
+        code = _publish_after_report(cfg, report_dir, no_publish)
+        if code:
+            return code
 
     if skipped:
         kinds = ", ".join(sorted({k for _, k in skipped}))
@@ -323,7 +381,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"           wrote {path}")
         for warning in result.warnings:
             print(f"civ-bench: report WARN: {warning}", file=sys.stderr)
-        return 0
+        return _publish_after_report(cfg, result.report_dir, args.no_publish)
 
     # `run`: execute the implemented prefix of the resolved DAG.
     try:
@@ -333,7 +391,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
-        return _run_pipeline(cfg, dag, subset, force_rebuild, auto_fix)
+        return _run_pipeline(cfg, dag, subset, force_rebuild, auto_fix, args.no_publish)
     except (ConfigError, ExtractError) as exc:
         print(f"civ-bench: run error: {exc}", file=sys.stderr)
         return 2

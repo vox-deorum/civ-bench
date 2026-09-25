@@ -234,6 +234,7 @@
     "title": null,
     "footer": null,
     "include_disabled": false,
-    "replay": null
+    "replay": null,
+    "publish": {"enabled": false}
   }
 }

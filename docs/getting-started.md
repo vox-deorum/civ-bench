@@ -58,6 +58,7 @@ Handy flags:
 - `--only <stage-id>` runs just that stage and its dependencies. Repeatable.
 - `--skip <stage-id>` drops a stage. `--skip all` is equivalent to a dry run. Repeatable.
 - `--force-rebuild` (or `-f`) re-extracts even when the CSVs are newer than the game DBs.
+- `--no-publish` (with `run` or `report`) skips the post-report offer to commit and push the rendered report. See [Release the report](#release-the-report).
 
 Your finished report lands in `reports/<run-name>/`. It contains `index.html`, a compact overview; `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html` for represented analysis families; `report.md`; and a self-contained `assets/` tree with `report.css`, figures, and full-table CSVs. Rendering is **deterministic** (no timestamps), so re-running `civ-bench report` reproduces every document byte-for-byte.
 
@@ -143,6 +144,25 @@ civ-bench report --config configs/benchmark.dev.json
 ```
 
 This reads the existing artifacts and re-renders, deterministically and in seconds.
+
+### Release the report
+
+Once the report looks right, you can publish it as a GitHub Pages site. Set `report.publish` in your config:
+
+```jsonc
+"publish": { "enabled": true }
+```
+
+Now every `civ-bench run` or `civ-bench report` ends by offering to release the rendered report. The tool prepares a git repository in the report directory, writes the GitHub Pages deploy workflow, prints the changes and a generated commit message, and asks `Stage, commit, and push? [y/N]`. Answer `y` to stage, commit, and push. Any other answer, or a non-interactive terminal, stages nothing and leaves every file in place. Pass `--no-publish` to skip the offer for a single run. Re-renders keep `.git` and `.github`, so the report history and workflow survive.
+
+The tool does not create the GitHub repository. Do this once by hand:
+
+1. Create an empty repository on GitHub.
+2. Point the report repository at it: `git -C reports/<run-name> remote add origin <url>`.
+3. In the repository's Settings > Pages, set the source to "GitHub Actions".
+4. Set `report.replay.base_url` to `https://<owner>.github.io/<repo>/` when replay links must work without JavaScript.
+
+After a successful push, GitHub Pages deploys the site from the workflow. You need `git` on your `PATH` with `user.name` and `user.email` configured. For the full behavior, see [configs/benchmark.md](../configs/benchmark.md), [section 7.3](../configs/benchmark.md#73-publishing-to-github-pages).
 
 ### Common recipes
 

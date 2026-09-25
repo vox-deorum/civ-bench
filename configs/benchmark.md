@@ -974,7 +974,8 @@ identity; they cannot run, so they never appear on a report.
   "footer": null,                        // optional markdown footer; null uses the default, empty hides it
   "benchmark_citation": null,             // optional object with required `title` and `url` strings
   "include_disabled": false,             // never render skipped/disabled stages
-  "replay": null                          // optional replay saves and viewer links
+  "replay": null,                         // optional replay saves and viewer links
+  "publish": null                         // optional GitHub Pages publishing (§7.3); omitted or null = off
 }
 ```
 
@@ -1013,7 +1014,7 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 
 **Sorting.** Every HTML report table under `.table-scroll` can be sorted by a numeric column. Clicking a numeric column heading sorts descending, then ascending, then back to the original order. A column counts as numeric when at least two cells hold numbers and no non-empty cell is text; heatmap cells sort by `data-value`, other cells by their text (percent signs, commas, a leading plus, and the unicode minus are handled). Blank cells sort last, pinned reference rows (VPAI, the baseline row) never move, and each table body sorts on its own. The Game Log keeps its own sorting (`no-auto-sort`). Sorting happens in the browser, so the generated HTML is unchanged.
 
-**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. When publishing (§7.3) has run, the directory also holds `.git/` and `.github/`, and a re-render keeps both. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
 The overview shows a compact announcement for the most recently completed rated condition, using the first overall Bradley-Terry or Plackett-Luce section in report order. A second announcement lists incomplete conditions as `Model (20/24)` when the global `min_condition_completeness` filter is configured. It disappears when all conditions are complete. Both use the coverage analysis's saved `condition_progress` table; rerun that analysis to add announcements to older artifacts. Completion dates use game timestamps in UTC, taking the earliest accepted game in each required slot and then the latest slot date. Missing dates or ratings omit the score announcement; missing coverage artifacts omit both announcements.
 
@@ -1146,12 +1147,38 @@ publishing without relying on JavaScript.
 
 **The manifest.** Each analysis persists a `result.json` beside its artifacts (`<root>/analyses/<id>/result.json`: id, module, `module_name`/`module_description`, summary, metadata, ordered table/figure filenames, `empty` flag). `module_name`/`module_description` carry the module instance's resolved friendly identity, including the grouped BT or PL identity selected from `group_by`, so the report renders it without importing the analysis registry; the report combines them with any current per-stage `name`/`description` override. This is what the report reads, so a plain `civ-bench report` reproduces the document from disk without re-running any analysis (a manifest from before friendly names simply falls back to the stage id). An analysis that legitimately produced nothing renders as an explicit empty section (it is not mistaken for a never-run stage).
 
+### 7.3 Publishing to GitHub Pages
+
+`publish` is omitted or `null` by default, which keeps publishing off. When present it must be an object, and its only key is `enabled`, a boolean that defaults to `true` when the object is there. Any other key fails validation.
+
+```jsonc
+"publish": {"enabled": true}
+```
+
+When enabled, `civ-bench run` and `civ-bench report` offer to release the report after it renders. The tool works on the report directory (`<root><suffix>/<name>/`):
+
+1. When the directory has no `.git`, it runs `git init -b main` there. When the directory resolves to an enclosing git repository rather than a repository of its own, publishing stops with an error. It then sets `core.autocrlf=false` in the report repository, so commits hold the rendered bytes.
+2. It writes `.github/workflows/pages.yml`, a GitHub Pages deploy workflow that publishes the repository root on every push to `main`.
+3. It lists the working-tree changes. When the tree is clean, it offers to push any local commits an earlier push left behind (`Push? [y/N]`), and otherwise ends with a `no changes to commit` note. When there are changes, it prints a generated commit message: the subject `Update <report title>` (the resolved page title), totals of added, modified, and deleted files, and the changed areas grouped by path.
+4. Before prompting, it stops with an error, staging nothing, when a report file matches a gitignore rule (for example from a global `core.excludesFile`) and would be left out of the site, when git has no `user.name` and `user.email`, or when any added or modified file is over 100 MB, the size limit GitHub enforces on pushes.5. It asks `Stage, commit, and push? [y/N]`. Answering `y` stages everything (`git add -A`), commits with the generated message, and pushes: to the branch's upstream when one exists (`git push <remote> HEAD:<upstream-ref>`, so a local branch name that differs from the upstream's, or a `push.default` setting, cannot redirect it), otherwise with `git push -u <remote> HEAD` to `origin` or to the only configured remote, otherwise the push is skipped with a note that the commit stays local. Any other answer declines, and a non-interactive stdin or end of input counts as no. A decline stages nothing and leaves every file in place.
+
+A failed push keeps the local commit, and a publish error exits with code 2 after the report files are already written. `--no-publish` on `run` or `report` skips the offer once, whatever the config says. A `--only <id>` run that does not include the report stage never publishes. Re-renders always keep `.git` and `.github` in the report directory, so the history and the workflow survive.
+
+The tool never creates the GitHub repository. Setting up the first release is a one-time manual step:
+
+1. Create an empty repository on GitHub.
+2. Point the report repository at it: `git -C <report-dir> remote add origin <url>`.
+3. In the repository's Settings > Pages, set the source to "GitHub Actions".
+4. When replay links must work without JavaScript (§7.2), set `report.replay.base_url` to the Pages URL, `https://<owner>.github.io/<repo>/`.
+
+Publishing shells out to `git`, so `git` must be on `PATH` with `user.name` and `user.email` configured.
+
 ---
 
 ## 8. Validation rules (enforced on load)
 
 1. **Required keys present**: `name`, `seed`, `data`, `analyses`, `report`. `catalogs`, `estimators`, and `adjust` are optional. `catalogs` defaults to sibling paths but is loaded lazily; a catalog must resolve to a readable file only if an enabled stage needs it.
-2. **No unknown keys** at any level: typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, report `overview_sections`, and report override artifact lists) must be JSON arrays of strings; a bare string is an error. Text fields (`friendly_name`, `analyses[].name`, `analyses[].description`) are null or strings. `report.section_overrides` is a mapping of stage ids to objects whose only optional keys are `tables` and `figures`.
+2. **No unknown keys** at any level: typos fail loud. Fields documented as arrays of ids/names (`needs`, `uses.estimators`, `uses.tables`, `uses.analyses`, `group_by`, extract `outputs`, report `formats`, report `overview_sections`, and report override artifact lists) must be JSON arrays of strings; a bare string is an error. Text fields (`friendly_name`, `analyses[].name`, `analyses[].description`) are null or strings. `report.section_overrides` is a mapping of stage ids to objects whose only optional keys are `tables` and `figures`. `report.publish`, when present, accepts only `enabled`, a boolean (§7.3).
 3. **Unique ids** across `estimators` + `adjust` + `analyses`; explicit `needs`/`uses` must reference existing, enabled ids. `uses.analyses` additionally rejects self references. These checks apply to disabled stages too, so optional template stages cannot contain stale references. Omitted or empty `uses.estimators` on analyses that opt in to the all-estimator default resolves to all enabled estimators. The config loader resolves and caches this graph once, and the pipeline consumes that resolved graph directly.
 4. **Acyclic** after edge resolution; a cycle is an error naming the cycle.
 5. **Estimator consistency**: `fit` matches exactly the one sub-block present (`train`/`pretrained`); `predict: cross_val` and `tune` are valid only with `fit: train`.

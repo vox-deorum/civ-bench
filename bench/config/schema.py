@@ -441,7 +441,9 @@ REPORT_KEYS = {
     "benchmark_citation",
     "include_disabled",
     "replay",
+    "publish",
 }
+REPORT_PUBLISH_KEYS = {"enabled"}
 REPORT_REPLAY_KEYS = {"enabled", "viewer_url", "saves", "base_url", "latest_game"}
 REPORT_REPLAY_SAVES = {"all", "controlled"}
 REPORT_DEFAULT_VIEWER_URL = "https://vox-deorum.github.io/vox-deorum-replay/"

@@ -34,7 +34,13 @@ from bench.reports import (
     run_report,
 )
 from bench.reports.model import FamilyGroup
-from bench.reports.runner import _analyses_dir, _resolve_section_ids, report_dir
+from bench.reports.runner import (
+    _analyses_dir,
+    _publish_in_place,
+    _replace_report_dir,
+    _resolve_section_ids,
+    report_dir,
+)
 from bench.reports.templates import _summarize_family
 
 _FAKE_PNG = b"\x89PNG\r\n\x1a\n-- not a real image, copied verbatim --"
@@ -284,6 +290,42 @@ def test_replay_cached_hardlinks_allow_in_place_publish(replay_env, monkeypatch)
     assert any("updated its files in place" in warning for warning in result.warnings)
     assert not any("could not update report file" in warning for warning in result.warnings)
     assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
+
+
+def _staging_with_repo_dirs(tmp_path):
+    """A staged site (index.html) plus a published dir holding a report repo."""
+    out_dir = tmp_path / "site"
+    (out_dir / ".git").mkdir(parents=True)
+    (out_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (out_dir / ".github" / "workflows").mkdir(parents=True)
+    (out_dir / ".github" / "workflows" / "pages.yml").write_text(
+        "name: Deploy report to GitHub Pages\n", encoding="utf-8"
+    )
+    (out_dir / "old.html").write_text("<p>previous report</p>\n", encoding="utf-8")
+    staging = tmp_path / "site.staging"
+    staging.mkdir()
+    (staging / "index.html").write_text("<!doctype html><title>new</title>\n", encoding="utf-8")
+    return staging, out_dir
+
+
+def _assert_repo_entries_survive(out_dir):
+    assert (out_dir / "index.html").is_file()
+    assert (out_dir / ".git" / "HEAD").is_file()
+    assert (out_dir / ".github" / "workflows" / "pages.yml").is_file()
+    assert not (out_dir / "old.html").exists()  # obsolete file dropped
+
+
+def test_replace_report_dir_keeps_published_repo_entries(tmp_path):
+    staging, out_dir = _staging_with_repo_dirs(tmp_path)
+    _replace_report_dir(staging, out_dir)
+    _assert_repo_entries_survive(out_dir)
+
+
+def test_publish_in_place_keeps_published_repo_entries(tmp_path):
+    staging, out_dir = _staging_with_repo_dirs(tmp_path)
+    warnings = _publish_in_place(staging, out_dir, reason="test")
+    assert any("updated its files in place" in warning for warning in warnings)
+    _assert_repo_entries_survive(out_dir)
 
 
 def test_run_report_writes_md_and_html(report_env):

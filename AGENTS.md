@@ -82,6 +82,6 @@ civ-bench fix --config configs/benchmark.dev.json --dry-run
 pytest
 ```
 
-Use `--only <stage-id>` to run one stage with its dependencies. Use `--skip <stage-id>` to omit a stage. After `civ-bench fix`, run extraction with `--force-rebuild` to refresh the canonical tables.
+Use `--only <stage-id>` to run one stage with its dependencies. Use `--skip <stage-id>` to omit a stage. After `civ-bench fix`, run extraction with `--force-rebuild` to refresh the canonical tables. Use `--no-publish` with `run` or `report` to skip the offer to commit and push the rendered report.
 
 All dependencies are installed up front. Use `scripts/install.sh` on Linux or macOS. `Rscript` must be on `PATH` or set through `CIV_BENCH_RSCRIPT`.

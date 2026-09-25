@@ -49,6 +49,10 @@ MAX_TABLE_ROWS = 100
 # Formats we ship today. `pdf` is reserved in the schema but not yet rendered.
 _SUPPORTED_FORMATS = {"md", "html"}
 
+# Repository entries that survive a re-render, so a published report directory
+# keeps its git history and GitHub Pages workflow (see bench.publish).
+_PRESERVED_ENTRIES = (".git", ".github")
+
 
 @dataclass
 class ReportRunResult:
@@ -682,6 +686,13 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
     )
 
 
+def _move_preserved(src: Path, dst: Path) -> None:
+    """Move the preserved repository entries from ``src`` into ``dst``."""
+    for name in _PRESERVED_ENTRIES:
+        if (src / name).exists() and not (dst / name).exists():
+            (src / name).replace(dst / name)
+
+
 def _replace_report_dir(staging: Path, out_dir: Path) -> list[str]:
     """Publish the staged report site, replacing any previous report.
 
@@ -690,7 +701,8 @@ def _replace_report_dir(staging: Path, out_dir: Path) -> list[str]:
     directory that another program holds open (an Explorer window, an editor,
     a terminal), so a denied rename falls back to copying the staged files over
     the previous report in place and removing obsolete ones. A file that stays
-    locked becomes a warning, never a failed run.
+    locked becomes a warning, never a failed run. A git repository in the
+    report directory (``.git`` and ``.github``) carries over to the new site.
     """
     backup = staging.with_name(staging.name + ".bak")
 
@@ -701,9 +713,12 @@ def _replace_report_dir(staging: Path, out_dir: Path) -> list[str]:
         except OSError as exc:
             return _publish_in_place(staging, out_dir, reason=str(exc))
     try:
+        if had_previous:
+            _move_preserved(backup, staging)
         staging.replace(out_dir)
     except BaseException:
         if had_previous and backup.exists() and not out_dir.exists():
+            _move_preserved(staging, backup)
             backup.replace(out_dir)
         raise
     warnings: list[str] = []
@@ -739,7 +754,8 @@ def _publish_in_place(staging: Path, out_dir: Path, reason: str) -> list[str]:
         except OSError as exc:
             warnings.append(f"could not update report file '{dst}': {exc}")
     for existing in sorted(p for p in out_dir.rglob("*") if p.is_file()):
-        if existing.relative_to(out_dir) in keep:
+        rel = existing.relative_to(out_dir)
+        if rel in keep or rel.parts[0] in _PRESERVED_ENTRIES:
             continue
         try:
             existing.unlink()
@@ -748,6 +764,8 @@ def _publish_in_place(staging: Path, out_dir: Path, reason: str) -> list[str]:
     # Children sort after their parents, so reverse order removes a directory
     # only after obsolete files have left it empty.
     for directory in sorted((p for p in out_dir.rglob("*") if p.is_dir()), reverse=True):
+        if directory.relative_to(out_dir).parts[0] in _PRESERVED_ENTRIES:
+            continue
         try:
             directory.rmdir()
         except OSError:

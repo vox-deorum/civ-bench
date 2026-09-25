@@ -694,6 +694,13 @@ def _validate_report(report: dict) -> None:
         _validate_absolute_http_url(
             replay["base_url"], f"{where}.base_url", allow_none=True
         )
+    publish = report.get("publish")
+    if publish is not None:
+        where = "report.publish"
+        _require_mapping(publish, where)
+        _check_keys(publish, S.REPORT_PUBLISH_KEYS, where)
+        publish.setdefault("enabled", True)
+        publish["enabled"] = coerce_bool(publish["enabled"], f"{where}.enabled")
     sections = report.get("sections")
     if sections is not None:
         _check_string_list(sections, "report.sections")

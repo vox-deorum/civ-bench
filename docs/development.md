@@ -23,6 +23,7 @@ The installable package is `bench/`. Each subpackage owns one stage kind or one 
 | `bench/analyses/` | The pluggable analysis modules, in six families. The descriptive `behavior/` modules share their baseline, view, and heatmap-table helpers in `behavior/common.py`. |
 | `bench/stats/` | The statistics layer: OLS/logistic wrappers, clustered/weighted fits, heatmaps. |
 | `bench/reports/` | Assemble analysis artifacts into Markdown and HTML. `heatmap.py` holds the shared HTML heatmap tables and RdYlBu color scale used by Matched Maps and the behavior pages; `content.py` holds the shared tab switch (`render_view_group`), `curves.py` the interactive victory-probability chart shared by Matched Maps and Win-probability trends (an analysis opts in through `metadata["curve_chart"]`), and `assets.py` the browser script for tooltips, tabs, and click-to-sort. |
+| `bench/publish/` | Release the rendered report: set up the report git repository, write the GitHub Pages workflow, and commit and push on approval. |
 | `bench/plotting/` | Shared styles, colors, and figure helpers. |
 
 Tests live in `tests/` at the repo root, one file per area. Roadmap and implementation notes live in `plans/`.
@@ -47,6 +48,7 @@ Tests live in `tests/` at the repo root, one file per area. Roadmap and implemen
 2. `build_dag` turns the kind ordering, the explicit `needs`, and the referential `uses` edges into a single topological order.
 3. The CLI resolves `--only` / `--skip` into the subset to run, then executes each stage in topo order. Each stage kind has a runner (`run_extract`, `run_estimator`, `run_adjust`, `run_analysis`, `run_report`).
 4. Each analysis persists a `result.json` plus its tables and figures under the resolved output root. The report stage reads those manifests, which is why `civ-bench report` reproduces the document from disk without recomputation.
+5. When the report stage ran and `report.publish.enabled` is on, the CLI offers to release the report through `bench/publish/`. `--no-publish` skips the offer for that run.
 
 The dry-run printer (`--dry-run` or `--skip all`) shares the exact same resolved graph as the runner, so what it prints is what would run.
 

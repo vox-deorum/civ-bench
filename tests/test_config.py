@@ -355,6 +355,30 @@ def test_config_rejects_multiple_enabled_game_logs(dev_spec, write_spec):
         load_config(write_spec(dev_spec))
 
 
+def test_report_publish_coerces_string_true(dev_spec, write_spec):
+    dev_spec["report"]["publish"] = {"enabled": "true"}
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["publish"]["enabled"] is True
+
+
+def test_report_publish_defaults_enabled(dev_spec, write_spec):
+    dev_spec["report"]["publish"] = {}
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["publish"] == {"enabled": True}
+
+
+def test_report_publish_accepts_null(dev_spec, write_spec):
+    dev_spec["report"]["publish"] = None
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["publish"] is None
+
+
+def test_report_publish_rejects_unknown_key(dev_spec, write_spec):
+    dev_spec["report"]["publish"] = {"enabled": True, "remote": "x"}
+    with pytest.raises(ConfigError, match=r"report\.publish"):
+        load_config(write_spec(dev_spec))
+
+
 @pytest.mark.parametrize("footer", [None, "", "Copyright **Example**\n\n[Site](https://example.com)"])
 def test_report_footer_loads(dev_spec, write_spec, footer):
     dev_spec["report"]["footer"] = footer
