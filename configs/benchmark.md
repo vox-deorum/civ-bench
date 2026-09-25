@@ -502,7 +502,7 @@ A list of analysis stages. Every entry shares a common envelope; the `params` bl
 }
 ```
 
-- `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, `calibration.loss_by_progress`, and `performance.turn_predicted`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way.
+- `uses.estimators` is how estimator-consuming modules get win-probabilities. For implemented modules whose analysis class opts in to the all-estimator default (`prediction.*`, `calibration.reliability`, and `calibration.loss_by_progress`), omit it (or set an empty list) to consume every enabled estimator; provide ids only to narrow to a subset. The DAG adds edges to the resolved estimators either way. `performance.turn_predicted` is the exception: it reads the strength stage's estimator unless `uses.estimators` names one override.
 - `name` and `description` are optional per-stage identity overrides. Every analysis module ships a coded friendly name and one-line description (§6.3). Rating module instances resolve a distinct coded identity from `params.group_by`, so `bt_main` and `bt_strategy` receive different headings without config name fields. A supplied stage `name` or `description` still replaces the resolved identity for that section. When omitted, the resolved module identity is used.
 - `uses.tables` names a canonical table (`data.tables`) or one an `adjust` stage emits (§5). Strength-based ratings consume the derived `strength` table this way; referencing it adds the edge to the `adjust` stage (and transitively to its estimator). Observed matchup analyses can consume canonical tables such as `panel`.
 - `uses.analyses` names analysis stages whose persisted artifacts are inputs. It creates a strict dependency edge; unknown, disabled, and self references are errors even on disabled consumers. `performance.usage_efficiency`, for example, reads `ratings.csv` from the first declared ratings stage.
@@ -663,8 +663,10 @@ Two single-purpose views of how well estimator probabilities are calibrated: one
   "uses": { "tables": ["strength", "tokens"] },
   "params": {} }
 
-// performance.turn_predicted: P(win) / strength trajectory over the game, per estimator
+// performance.turn_predicted: predicted win probability over the game,
+//   from the strength stage's estimator
 { "module": "performance.turn_predicted",
+  "uses": { "tables": ["strength"] },
   "params": { "aggregate": "mean", "by": "player_type" } }
 
 // performance.controlled_seed_report: report-ready tables for the controlled-seed chapter
@@ -695,6 +697,28 @@ also records ordering metadata and the latest game for the report renderer.
 The stage is required when `report.replay.enabled` is true. It has no figures
 or default inline tables. Set `params.condition_pairing` to override the
 shared presentation pairing for this stage.
+
+**`performance.turn_predicted` in detail.** The module plots predicted win
+probability over the game from exactly one estimator: the one listed in the
+strength adjust stage's `uses.estimators` (for example `attention`). An
+optional `uses.estimators` on the analysis may name at most one estimator to
+override that choice; it does not default to all enabled estimators. The
+entry must reference exactly one strength table in `uses.tables`, or config
+validation rejects it. Key behavior:
+
+- **Splitting.** When `by` is `player_type` and condition pairing is enabled
+  (§2.2), each player_type splits into strategist and condition, like the
+  Matched Maps pages; the stage accepts `params.condition_pairing` as an
+  override. The strength stage's `params.baseline_experiment` games form the
+  VPAI reference curve (without one, every Vanilla seat does).
+- **Curves.** Each run is interpolated onto a fixed 101-point turn-progress
+  grid (0 to 1), and each grid point averages the runs that cover it.
+- **Tables.** `over_progress` (strategist, condition, turn_progress,
+  mean_predicted_win_probability, n_runs) and `by_identity` (`<by>`,
+  strategist, condition, mean_predicted, n_rows, n_games).
+- **Rendering.** The report renders the same interactive chart as the Matched
+  Maps seat pages (strategist checkboxes, thick VPAI line) inline on the
+  Performance page. There is no figure file.
 
 **`performance.controlled_seed_report` in detail.** The module aggregates the
 controlled design by `(seed, player_id)` cell so the report can expose

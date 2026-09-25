@@ -440,6 +440,16 @@ def _validate_analysis(
                 f"exactly one estimator reference (got {est})."
             )
 
+    # Win-probability trends read one estimator: the strength stage's, or the
+    # single override named here.
+    if module == "performance.turn_predicted":
+        est = (entry.get("uses") or {}).get("estimators") or []
+        if len(est) > 1:
+            raise ConfigError(
+                f"{where}.uses.estimators: performance.turn_predicted reads one "
+                f"estimator; list at most one override (got {est})."
+            )
+
     if "enabled" in entry:
         entry["enabled"] = coerce_bool(entry["enabled"], f"{where}.enabled")
 

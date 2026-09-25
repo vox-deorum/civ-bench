@@ -38,7 +38,7 @@ from ..pipeline import build_dag
 from .context import ReportBuildContext
 from .errors import ReportError
 from .heatmap import heatmap_spec, spec_fits
-from .model import Download, Figure, GameLogDocument, Section, Table, View
+from .model import CurveChart, Download, Figure, GameLogDocument, Section, Table, View
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
 
@@ -315,7 +315,44 @@ def _build_section(
         if copied is not None:
             section.downloads.append(Download(label=Path(copied).name, rel_path=copied))
     _assign_views(section, inline_by_name)
+    section.curve_chart = _curve_chart(section, table_entries, src_dir, warnings)
     return section
+
+
+def _curve_chart(
+    section: Section, table_entries: list[dict], src_dir: Path, warnings: list[str]
+) -> Optional[CurveChart]:
+    """The interactive curve chart a section declares in ``metadata["curve_chart"]``.
+
+    The declaration names one emitted table plus the chart's ordering and
+    colors; the full table is loaded so every curve point renders. A malformed
+    declaration is skipped with a warning.
+    """
+    declared = section.metadata.get("curve_chart")
+    if declared is None:
+        return None
+    files = {str(entry["name"]): entry["file"] for entry in table_entries}
+    table = declared.get("table") if isinstance(declared, dict) else None
+    path = src_dir / files[table] if isinstance(table, str) and table in files else None
+    if path is None or not path.exists():
+        warnings.append(
+            f"section '{section.id}': metadata.curve_chart names no emitted table; "
+            "its chart is skipped."
+        )
+        return None
+    frame = pd.read_csv(
+        path, keep_default_na=False, dtype={"strategist": str, "condition": str}
+    )
+    return CurveChart(
+        frame=frame,
+        vanilla_label=str(declared.get("vanilla_label") or "Vanilla"),
+        strategist_order=[str(v) for v in declared.get("strategist_order") or []],
+        condition_order=[str(v) for v in declared.get("condition_order") or []],
+        strategist_colors={
+            str(k): str(v) for k, v in (declared.get("strategist_colors") or {}).items()
+        },
+        help=str(declared.get("help") or ""),
+    )
 
 
 def _assign_views(section: Section, inline_by_name: dict) -> None:

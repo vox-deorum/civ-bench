@@ -374,6 +374,13 @@ STRENGTH_RATING_MODULES = {
     "ratings.matchups",
 }
 
+# Analyses that consume exactly one strength table through uses.tables. The
+# turn_predicted module also takes its estimator from that strength stage.
+SINGLE_STRENGTH_TABLE_MODULES = {
+    "performance.controlled_seed_report",
+    "performance.turn_predicted",
+}
+
 # Modules the controlled-seed report may list in uses.analyses: each one adds a
 # tab to the Matched Maps overview and seat pages (§7.1).
 MATCHED_MAPS_TAB_MODULES = {
@@ -406,7 +413,7 @@ ANALYSIS_PARAM_KEYS = {
         "metric", "by", "min_games_preliminary", "bootstrap_n", "ci_level",
         "condition_pairing",
     },
-    "performance.turn_predicted": {"aggregate", "by"},
+    "performance.turn_predicted": {"aggregate", "by", "condition_pairing"},
     "performance.controlled_seed_report": {"condition_pairing"},
     "performance.game_log": {"condition_pairing"},
     "performance.usage_efficiency": {

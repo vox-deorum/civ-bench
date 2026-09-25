@@ -75,8 +75,9 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_analysis_ref(stage, analysis_id, analysis_ids, enabled_ids)
         if stage.enabled and stage.module in S.STRENGTH_RATING_MODULES:
             _check_ratings_strength_ref(stage, strength_table_ids)
+        if stage.enabled and stage.module in S.SINGLE_STRENGTH_TABLE_MODULES:
+            _check_single_strength_ref(stage, strength_table_ids)
         if stage.enabled and stage.module == "performance.controlled_seed_report":
-            _check_controlled_seed_strength_ref(stage, strength_table_ids)
             _check_controlled_seed_tabs(stage, {s.id: s.module for s in cfg.analyses})
 
     _check_single_controlled_seed_report(cfg)
@@ -228,12 +229,16 @@ def _check_ratings_strength_ref(stage: Stage, strength_table_ids: set[str]) -> N
         )
 
 
-def _check_controlled_seed_strength_ref(stage: Stage, strength_table_ids: set[str]) -> None:
-    """The controlled-seed report consumes exactly one configured strength table."""
+def _check_single_strength_ref(stage: Stage, strength_table_ids: set[str]) -> None:
+    """The analysis consumes exactly one configured strength table.
+
+    The reference also orders the analysis after that strength stage and,
+    through it, after the estimator whose predictions it reads.
+    """
     refs = sorted(strength_table_ids.intersection(stage.uses_tables))
     if len(refs) != 1:
         raise ConfigError(
-            f"analysis '{stage.id}' (performance.controlled_seed_report) must reference "
+            f"analysis '{stage.id}' ({stage.module}) must reference "
             f"exactly one strength table via uses.tables (one of "
             f"{sorted(strength_table_ids)}; got {refs})."
         )

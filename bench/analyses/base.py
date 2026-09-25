@@ -250,6 +250,20 @@ class AnalysisContext:
                 return stage.id
         return "strength"
 
+    def strength_estimator_id(self, table_id: Optional[str] = None) -> Optional[str]:
+        """The estimator whose P(win) defines a strength adjust table.
+
+        This is the run's primary estimator: the first ``uses.estimators`` entry
+        of the adjust stage named by ``table_id`` (default
+        :meth:`strength_table_id`). ``None`` when that stage is absent or lists
+        no estimator.
+        """
+        stage = self._adjust_stage(table_id or self.strength_table_id())
+        if stage is None:
+            return None
+        estimators = list((stage.raw.get("uses") or {}).get("estimators") or [])
+        return str(estimators[0]) if estimators else None
+
     def table_path(self, name: str) -> str:
         """Resolve a ``uses.tables`` entry: a canonical table key or an adjust id."""
         canonical = self._canonical_path(name)
@@ -322,8 +336,7 @@ class AnalysisContext:
             return {"strength_table": table_id}
 
         params = dict(stage.raw.get("params") or {})
-        estimators = list((stage.raw.get("uses") or {}).get("estimators") or [])
-        estimator_id = estimators[0] if estimators else None
+        estimator_id = self.strength_estimator_id(table_id)
         estimator = next((s for s in self.config.estimators if s.id == estimator_id), None)
         estimator_raw = estimator.raw if estimator is not None else {}
 

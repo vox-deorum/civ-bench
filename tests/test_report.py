@@ -578,6 +578,56 @@ def test_html_family_pages_use_compact_module_defaults(report_env):
     assert 'href="assets/cal_reliability/reliability.csv"' in calibration
 
 
+def _emit_curve_section(cfg):
+    curves = pd.DataFrame({
+        "strategist": ["Vanilla", "Vanilla", "Kimi-K2.5", "Kimi-K2.5"],
+        "condition": ["Vanilla", "Vanilla", "", ""],
+        "turn_progress": [0.0, 1.0, 0.0, 1.0],
+        "mean_predicted_win_probability": [0.2, 0.1, 0.3, 0.6],
+        "n_runs": [2, 2, 3, 3],
+    })
+    _emit(cfg, "perf_usage_efficiency", "performance.usage_efficiency",
+          summary="Curves.", tables={"over_progress": curves},
+          metadata={"estimator": "attention", "curve_chart": {
+              "table": "over_progress", "vanilla_label": "Vanilla",
+              "strategist_order": ["Kimi-K2.5"], "condition_order": [],
+              "strategist_colors": {"Vanilla": "#555555", "Kimi-K2.5": "#aa0000"},
+              "help": "Each curve is a mean.",
+          }})
+
+
+def test_curve_chart_renders_inline_on_the_family_page(report_env):
+    _emit_curve_section(report_env)
+    run_report(report_env)
+    out = report_dir(report_env)
+    html = (out / "performance.html").read_text(encoding="utf-8")
+    assert 'class="curve-chart" data-query-select="false"' in html
+    assert 'value="Kimi-K2.5" checked' in html
+    assert 'src="assets/plotly.min.js"' in html
+    assert 'src="assets/curve-chart.js"' in html
+    assert 'src="assets/report-common.js"' in html
+    assert '"name":"VPAI"' in html and '"name":"Kimi-K2.5"' in html
+    assert "Each curve is a mean." in html
+    assert "curve_chart" not in html  # layout metadata stays out of the tooltip
+    for asset in ("plotly.min.js", "curve-chart.js", "report-common.js"):
+        assert (out / "assets" / asset).exists()
+    # Pages without a chart load no chart script.
+    assert "curve-chart.js" not in (out / "prediction.html").read_text(encoding="utf-8")
+    first = html
+    run_report(report_env)
+    assert (out / "performance.html").read_text(encoding="utf-8") == first
+
+
+def test_curve_chart_with_missing_table_is_skipped_with_a_warning(report_env):
+    _emit(report_env, "perf_usage_efficiency", "performance.usage_efficiency",
+          summary="No curves.", tables={"other": pd.DataFrame({"a": [1]})},
+          metadata={"curve_chart": {"table": "over_progress"}})
+    result = run_report(report_env)
+    html = (report_dir(report_env) / "performance.html").read_text(encoding="utf-8")
+    assert "curve-chart" not in html
+    assert any("curve_chart" in w for w in result.warnings)
+
+
 def test_rerender_is_byte_stable(report_env):
     run_report(report_env)
     out = report_dir(report_env)

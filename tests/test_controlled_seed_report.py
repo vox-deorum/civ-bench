@@ -19,10 +19,8 @@ import pytest
 
 from bench.analyses import run_analysis
 from bench.analyses.errors import AnalysisError
-from bench.analyses.performance.controlled_seed_report import (
-    GRID_POINTS,
-    _interpolate_curves,
-)
+from bench.analyses.performance.controlled_seed_report import CURVE_KEYS
+from bench.analyses.performance.curves import GRID_POINTS, interpolate_curves
 from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.reports import run_report
@@ -370,7 +368,7 @@ def test_interpolation_grid_averages_covering_runs():
         "turn_progress": [0.2, 0.6, 0.4, 1.0],
         "predicted_win_probability": [0.2, 0.6, 0.0, 1.0],
     })
-    curves = _interpolate_curves(runs, grid)
+    curves = interpolate_curves(runs, grid, CURVE_KEYS)
     points = curves[(1, 0, "A", "Every-turn")]
     by_progress = {round(p, 2): (v, n) for p, v, n in points}
     # Run 1 covers [0.2, 0.6] with y = x; run 2 covers [0.4, 1.0] with
@@ -395,7 +393,7 @@ def test_single_point_run_contributes_nothing():
         "condition": ["Every-turn"], "game_id": ["g1"],
         "turn_progress": [0.5], "predicted_win_probability": [0.5],
     })
-    assert _interpolate_curves(runs, grid) == {}
+    assert interpolate_curves(runs, grid, CURVE_KEYS) == {}
 
 
 def test_curves_average_runs_on_the_grid(env):
@@ -561,6 +559,7 @@ def test_controlled_chapter_rides_along_with_the_family_report(rendered):
         "assets/report.css", "assets/report-common.js",
         "assets/report-help.js",
         "assets/plotly.min.js",
+        "assets/curve-chart.js",
         "assets/controlled-seed-report.js",
     }
     written = {
@@ -716,7 +715,7 @@ def test_shared_color_util_and_adaptive_axis(rendered):
     assert common.startswith("/* civ-bench")
     assert "window.civBench" in common
     assert "distinguishColors" in common
-    script = _read(out, "assets/controlled-seed-report.js")
+    script = _read(out, "assets/curve-chart.js")
     assert "distinguishColors" in script  # same-family colors get spread
     assert "Plotly.restyle" in script
     assert '"yaxis.autorange": true' in script
@@ -757,13 +756,15 @@ def test_strategist_checkboxes_replace_the_dropdown(rendered):
     env, result, out = rendered
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert "<select" not in detail
-    assert 'id="strategist-filters"' in detail
+    assert 'class="curve-chart" data-query-select="true"' in detail
+    assert 'id="matched-map-filters"' in detail
+    assert 'src="../assets/curve-chart.js"' in detail
     # Everyone is checked by default.
     assert detail.count('type="checkbox"') == 2
     assert 'value="GPT-OSS-120B-Simple" checked' in detail
     assert 'value="Kimi-K2.5" checked' in detail
-    script = _read(out, "assets/controlled-seed-report.js")
-    # Plotly provides the shared hover comparison while the page script updates
+    script = _read(out, "assets/curve-chart.js")
+    # Plotly provides the shared hover comparison while the chart script updates
     # trace visibility, colors, and the adaptive axis.
     assert "Plotly.restyle" in script
     assert "Plotly.relayout" in script

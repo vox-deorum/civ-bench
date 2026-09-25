@@ -20,13 +20,11 @@ Focus-style Grand strategy from ``behavior.commitment``, and Policies from
 repeats the same tabs for its seat under the probability-curve chart. Every
 table renders through the shared :func:`~bench.reports.heatmap.render_heatmap_html`,
 so tooltips, the pinned VPAI row, and click-to-sort match the rest of the report.
-Static JavaScript assets drive the strategist checkboxes and an offline Plotly
-chart (tooltips, tabs, and sorting come from the shared help script). Every
-value, color, link, and query string is computed server-side, so unchanged
-inputs re-render byte-identically; the browser script only changes trace
-visibility, color, and emphasis. The chart's Y axis fits the visible curves, and
-same-family strategists that share a catalog color are spread through the shared
-:js:func:`civBench.distinguishColors` util in :mod:`bench.reports.assets`.
+The probability-curve chart is the shared one from :mod:`bench.reports.curves`
+(strategist checkboxes over an offline Plotly chart, also used by the
+Win-probability trends section); tooltips, tabs, and sorting come from the
+shared help script. Every value, color, link, and query string is computed
+server-side, so unchanged inputs re-render byte-identically.
 
 Rows are strategist-condition combinations and columns are final ``player_id``
 values, each column heading pairing the position with its seat-bound
@@ -46,8 +44,9 @@ import pandas as pd
 
 from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
 from bench.reports.game_log import games_url, render_seat_games
-from bench.plotting.interactive import figure_html, plotly_javascript
+from bench.plotting.interactive import plotly_javascript
 from .context import ReportBuildContext
+from .curves import CURVE_CHART_JS, VPAI_MIXED_TIP, render_curve_chart_html
 from bench.reports.content import (
     render_footer_html, render_summary_html, resolve_footer, render_help_html,
     render_view_group, report_summary, metadata_text,
@@ -57,7 +56,7 @@ from bench.plotting.styles import VICTORY_COLORS
 from .heatmap import (
     HEATMAP_METADATA_KEY, category_background, plural, render_heatmap_html, tip_row,
 )
-from .model import ControlledSeedDocument, MatchedMapTab
+from .model import ControlledSeedDocument, CurveChart, MatchedMapTab
 
 CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
 CONTROLLED_SEED_TABLES = (
@@ -170,11 +169,6 @@ FOCUS_COLORS = VICTORY_COLORS
 # fixed from 0 to 1 across every seed so the panels compare directly: 0 is red,
 # 0.5 is yellow, 1 is blue.
 
-# Plotly dash styles cycled by condition position, so one strategist's
-# conditions stay distinguishable while sharing its color.
-_DASH_PATTERNS = ("solid", "dash", "dot", "dashdot")
-
-
 # ── small formatting / color helpers ──────────────────────────────────────────
 def _esc(text) -> str:
     return _html.escape(str(text))
@@ -189,10 +183,7 @@ def _vpai_tooltip(doc: ControlledSeedDocument, strategist: str, condition: str) 
         return ""
     if condition == doc.vanilla_label:
         return "VPAI self-play: all players use VPAI."
-    return (
-        "VPAI in games with LLM players. Performance may differ from self-play "
-        "because LLMs can counter VPAI's playstyle."
-    )
+    return VPAI_MIXED_TIP
 
 
 def _focus_background(label: str, pct: float) -> str:
@@ -580,58 +571,18 @@ def _render_overview(
 
 
 # ── detail pages ──────────────────────────────────────────────────────────────
-def _page_series(
-    doc: ControlledSeedDocument, seed: int, player_id: int
-) -> list[dict]:
-    """The chart series for one seed-player page, in deterministic display order."""
-    vanilla = doc.vanilla_label
+def _seat_chart(doc: ControlledSeedDocument, seed: int, player_id: int) -> CurveChart:
+    """The shared curve chart's data for one seed-player page."""
     frame = doc.probability_table
-    if frame.empty:
-        return []
-    page = frame[
-        (frame["seed"] == seed) & (frame["player_id"] == player_id)
-    ]
-    if page.empty:
-        return []
-    strategist_rank = {name: i for i, name in enumerate(doc.strategist_order)}
-    condition_rank = {name: i for i, name in enumerate(doc.condition_order)}
-    colors = doc.strategist_colors
-    series: dict[tuple, dict] = {}
-    for row in page.to_dict("records"):
-        key = (str(row["strategist"]), str(row["condition"]))
-        if key not in series:
-            is_vanilla = key == (vanilla, vanilla)
-            if is_vanilla:
-                color = colors.get(vanilla, "#555555")
-            else:
-                color = colors.get(key[0], colors.get(vanilla, "#555555"))
-            series[key] = {
-                "strategist": key[0],
-                "condition": key[1],
-                "label": "VPAI" if is_vanilla else f"{_strategist_label(doc, key[0])} · {key[1]}",
-                "tooltip": _vpai_tooltip(doc, *key),
-                "vanilla": is_vanilla,
-                "color": color,
-                "dash": _DASH_PATTERNS[condition_rank.get(key[1], 0) % len(_DASH_PATTERNS)],
-                "width": 3.5 if is_vanilla else 2.0,
-                "points": [],
-            }
-        series[key]["points"].append(
-            [round(float(row["turn_progress"]), 2), round(float(row["mean_predicted_win_probability"]), 6)]
-        )
-    ordered = sorted(
-        series.values(),
-        key=lambda s: (
-            s["vanilla"],
-            strategist_rank.get(s["strategist"], len(strategist_rank)),
-            s["strategist"],
-            condition_rank.get(s["condition"], len(condition_rank)),
-            s["condition"],
-        ),
+    if not frame.empty:
+        frame = frame[(frame["seed"] == seed) & (frame["player_id"] == player_id)]
+    return CurveChart(
+        frame=frame,
+        vanilla_label=doc.vanilla_label,
+        strategist_order=doc.strategist_order,
+        condition_order=doc.condition_order,
+        strategist_colors=doc.strategist_colors,
     )
-    for entry in ordered:
-        entry["points"].sort(key=lambda point: point[0])
-    return ordered
 
 
 def _comparison_rows(doc: ControlledSeedDocument, seed: int, player_id: int) -> list[dict]:
@@ -753,47 +704,6 @@ def _seat_focus_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
     return _frame(records), spec
 
 
-def _chart_figure(series: list[dict]):
-    """Build the detail-page probability chart with stable trace metadata."""
-    import plotly.graph_objects as go
-
-    figure = go.Figure()
-    for entry in series:
-        points = entry["points"]
-        figure.add_trace(go.Scatter(
-            x=[point[0] for point in points],
-            y=[point[1] for point in points],
-            mode="lines",
-            name=_esc(entry["label"]),
-            meta={
-                "strategist": entry["strategist"],
-                "condition": entry["condition"],
-                "vanilla": entry["vanilla"],
-                "base_color": entry["color"],
-                "base_width": entry["width"],
-            },
-            line={"color": entry["color"], "dash": entry["dash"], "width": entry["width"]},
-            hovertemplate="%{fullData.name}: %{y:.3f}<extra></extra>",
-        ))
-    figure.update_layout(
-        template="plotly_white",
-        height=420,
-        margin={"l": 60, "r": 20, "t": 18, "b": 56},
-        hovermode="x unified",
-        legend={
-            "orientation": "h", "y": -0.22,
-            "itemclick": False, "itemdoubleclick": False,
-        },
-        xaxis={"title": "Turn progress", "range": [0, 1], "tickformat": ".2f"},
-        yaxis={
-            "title": "Mean predicted win probability", "autorange": True,
-            "autorangeoptions": {"clipmin": 0, "clipmax": 1},
-            "tickformat": ".2f",
-        },
-    )
-    return figure
-
-
 def _render_detail(
     doc: ControlledSeedDocument,
     index_row: dict,
@@ -803,11 +713,7 @@ def _render_detail(
 ) -> str:
     seed = int(index_row["seed"])
     player_id = int(index_row["player_id"])
-    series = _page_series(doc, seed, player_id)
-    strategists = []
-    for entry in series:
-        if not entry["vanilla"] and entry["strategist"] not in strategists:
-            strategists.append(entry["strategist"])
+    chart = _seat_chart(doc, seed, player_id)
     parts = _page_start(
         doc, f"Seed {seed} · Player {player_id} | {doc.title}", navigation
     )
@@ -858,26 +764,8 @@ def _render_detail(
         "at one progress point.", "curves-help",
     )
     parts.append(f'<h2 id="curves-heading">Victory-probability curves{tip}</h2>')
-    if strategists:
-        parts.append(
-            '<div class="chart-controls" id="strategist-filters" role="group" '
-            'aria-label="Strategists">'
-        )
-        parts.append('<span class="controls-label">Strategists</span>')
-        for name in strategists:
-            tooltip = _vpai_tooltip(doc, name, "")
-            tip_attr = f' data-tip="{_esc(tooltip)}"' if tooltip else ""
-            parts.append(
-                f'<label class="strategist-check"{tip_attr}>'
-                f'<input type="checkbox" value="{_esc(name)}" checked> '
-                f"{_esc(_strategist_label(doc, name))}</label>"
-            )
-        parts.append("</div>")
-    parts.append(figure_html(
-        _chart_figure(series),
-        "matched-map",
-        full_html=False,
-        include_plotlyjs="../assets/plotly.min.js",
+    parts.append(render_curve_chart_html(
+        chart, "matched-map", "../assets/plotly.min.js", query_select=True,
     ))
     parts.append("</section>")
 
@@ -904,6 +792,7 @@ def _render_detail(
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
     parts.append('<script src="../assets/report-common.js" defer></script>')
+    parts.append('<script src="../assets/curve-chart.js" defer></script>')
     parts.append('<script src="../assets/controlled-seed-report.js" defer></script>')
     parts.append("</body></html>")
     return "\n".join(parts) + "\n"
@@ -938,107 +827,27 @@ def render_controlled_seed_site(
                 doc, row, prev_row, next_row, navigation
             )
     pages["assets/report-common.js"] = REPORT_COMMON_JS
+    pages["assets/curve-chart.js"] = CURVE_CHART_JS
     pages["assets/controlled-seed-report.js"] = CONTROLLED_SEED_JS
     return pages
 
 
 # ── the static browser script ─────────────────────────────────────────────────
 CONTROLLED_SEED_JS = """/* civ-bench controlled-seed report interactions.
-   Plotly trace controls for seed-player detail pages. Heatmap cell tooltips
-   come from the shared assets/report-help.js, and same-family strategist
-   colors are spread through the shared civBench.distinguishColors util
-   (assets/report-common.js). */
+   The seat page's curve chart (assets/curve-chart.js) announces strategist
+   checkbox changes; this script hides the seat's game rows of unchecked
+   strategists. Heatmap cell tooltips come from the shared
+   assets/report-help.js. */
 (function () {
   "use strict";
 
-  // ── detail page: Plotly chart controls ──────────────────────────────────
-  function readQuery() {
-    var params = {};
-    var search = new URLSearchParams(window.location.search);
-    search.forEach(function (value, key) { params[key] = value; });
-    return params;
-  }
-
-  function initChart() {
-    var filters = document.getElementById("strategist-filters");
-    var chart = document.getElementById("plotly-matched-map");
-    if (!chart || !window.Plotly || !chart.data) {
-      return;
-    }
-    var query = readQuery();
-    var highlightedCondition = query.condition || null;
-
-    var boxes = [];
-    if (filters) {
-      boxes = Array.prototype.slice.call(
-        filters.querySelectorAll('input[type="checkbox"]')
-      );
-      // An overview cell link focuses its strategist (the Vanilla row's cells
-      // match no checkbox and keep everyone checked); direct entry also keeps
-      // everyone checked.
-      if (query.strategist) {
-        var known = boxes.some(function (box) {
-          return box.value === query.strategist;
-        });
-        if (known) {
-          boxes.forEach(function (box) {
-            box.checked = box.value === query.strategist;
-          });
-        }
-      }
-      boxes.forEach(function (box) {
-        box.addEventListener("change", function () {
-          updateChart();
-          updateGames();
-        });
-      });
-    }
-
-    // Same-family strategists can share a catalog color; the shared util
-    // spreads their hues so their curves stay distinguishable.
-    var colorMap = null;
-    if (window.civBench && window.civBench.distinguishColors) {
-      colorMap = window.civBench.distinguishColors(
-        chart.data.map(function (trace) {
-          return { key: trace.meta.strategist, color: trace.meta.base_color };
-        })
-      );
-    }
-    function updateChart() {
-      var checked = {};
-      boxes.forEach(function (box) { checked[box.value] = box.checked; });
-      var visible = [];
-      var colors = [];
-      var widths = [];
-      chart.data.forEach(function (trace) {
-        var meta = trace.meta;
-        visible.push(meta.vanilla || !boxes.length || checked[meta.strategist]);
-        colors.push((colorMap && colorMap[meta.strategist]) || meta.base_color);
-        widths.push(meta.vanilla ? meta.base_width :
-          (highlightedCondition === meta.condition ? 3 : meta.base_width));
-      });
-      window.Plotly.restyle(chart, {visible: visible, "line.color": colors,
-        "line.width": widths}).then(function () {
-          return window.Plotly.relayout(chart, {"yaxis.autorange": true});
-        });
-    }
-
-    function updateGames() {
-      var gameRows = document.querySelectorAll(".seat-games .game-row");
-      if (!gameRows.length) { return; }
-      var checked = {};
-      boxes.forEach(function (box) { checked[box.value] = box.checked; });
-      gameRows.forEach(function (row) {
-        row.hidden = boxes.length > 0 && checked[row.dataset.strategist] !== true;
-      });
-    }
-
-    updateChart();
-    updateGames();
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    initChart();
+  document.addEventListener("curvechart:change", function (event) {
+    var gameRows = document.querySelectorAll(".seat-games .game-row");
+    if (!gameRows.length) { return; }
+    var checked = event.detail.checked;
+    gameRows.forEach(function (row) {
+      row.hidden = event.detail.filtered && checked[row.dataset.strategist] !== true;
+    });
   });
 })();
 """

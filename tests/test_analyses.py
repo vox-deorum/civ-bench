@@ -235,7 +235,9 @@ def test_metrics_match_sklearn():
 # ── config param validation (§6) ────────────────────────────────────────────────
 def _validate(dev_spec, write_spec, module, params):
     dev_spec["analyses"] = [{"id": "x", "module": module, "enabled": True,
-                             "uses": {"tables": ["strength"]} if module.startswith("ratings.") else {},
+                             "uses": {"tables": ["strength"]}
+                             if module.startswith("ratings.") or module == "performance.turn_predicted"
+                             else {},
                              "params": params}]
     return load_config(write_spec(dev_spec))
 
@@ -272,6 +274,31 @@ def test_outcome_matchups_config_accepts_panel(dev_spec, write_spec):
 def test_bad_aggregate_rejected(dev_spec, write_spec):
     with pytest.raises(ConfigError, match="aggregate"):
         _validate(dev_spec, write_spec, "performance.turn_predicted", {"aggregate": "sum"})
+
+
+def test_turn_predicted_requires_one_strength_table(dev_spec, write_spec):
+    dev_spec["analyses"] = [{"id": "x", "module": "performance.turn_predicted",
+                             "enabled": True, "params": {}}]
+    with pytest.raises(ConfigError, match="exactly one strength table"):
+        load_config(write_spec(dev_spec))
+
+
+def test_turn_predicted_rejects_two_estimators(dev_spec, write_spec):
+    dev_spec["analyses"] = [{"id": "x", "module": "performance.turn_predicted",
+                             "enabled": True, "params": {},
+                             "uses": {"tables": ["strength"],
+                                      "estimators": ["attention", "score"]}}]
+    with pytest.raises(ConfigError, match="at most one"):
+        load_config(write_spec(dev_spec))
+
+
+def test_turn_predicted_depends_on_the_strength_stage(dev_spec, write_spec):
+    from bench.pipeline import build_dag
+
+    cfg = load_config(write_spec(dev_spec))
+    deps = build_dag(cfg).nodes["perf_turn_predicted"].deps
+    assert "strength" in deps
+    assert not {"score", "xgboost"} & deps
 
 
 def test_bad_n_bins_rejected(dev_spec, write_spec):
@@ -844,10 +871,35 @@ def test_experiment_completeness_uncontrolled_only_is_empty():
 
 
 def test_performance_turn_predicted(env):
-    r = env("performance.turn_predicted", {"by": "player_type"})
-    assert "by_identity" in r.table_paths and "over_progress" in r.table_paths
+    r = env("performance.turn_predicted", {"by": "player_type"}, {"tables": ["strength"]})
+    assert set(r.table_paths) == {"by_identity", "over_progress"}
+    assert r.figure_paths == {}
+    # The strength stage's estimator is the one read.
+    assert r.metadata["estimator"] == "est"
+    assert r.metadata["strength_table"] == "strength"
     tbl = pd.read_csv(r.table_paths["by_identity"])
-    assert "model" in tbl.columns
+    assert list(tbl.columns) == [
+        "player_type", "strategist", "condition", "mean_predicted", "n_rows", "n_games",
+    ]
+    curves = pd.read_csv(r.table_paths["over_progress"], keep_default_na=False)
+    assert list(curves.columns) == [
+        "strategist", "condition", "turn_progress", "mean_predicted_win_probability", "n_runs",
+    ]
+    assert curves["turn_progress"].between(0, 1).all()
+    assert curves["turn_progress"].round(2).equals(curves["turn_progress"])
+    # Without a baseline experiment every Vanilla seat forms the VPAI reference curve.
+    assert set(zip(curves["strategist"], curves["condition"])) >= {("Vanilla", "Vanilla")}
+    chart = r.metadata["curve_chart"]
+    assert chart["table"] == "over_progress"
+    assert chart["vanilla_label"] == "Vanilla"
+    assert "Vanilla" not in chart["strategist_order"]
+    assert set(chart["strategist_colors"]) == {"Vanilla", *chart["strategist_order"]}
+
+
+def test_performance_turn_predicted_estimator_override(env):
+    r = env("performance.turn_predicted", {},
+            {"tables": ["strength"], "estimators": ["est"]})
+    assert r.metadata["estimator"] == "est"
 
 
 # ── exploratory ──────────────────────────────────────────────────────────────────

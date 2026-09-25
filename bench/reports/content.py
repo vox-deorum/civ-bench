@@ -42,7 +42,7 @@ def report_summary(summary: str, metadata: dict) -> str:
 
 
 # Metadata keys that steer rendering rather than describe provenance.
-LAYOUT_METADATA_KEYS = {"views", "heatmaps", "matched_maps", "tabs"}
+LAYOUT_METADATA_KEYS = {"views", "heatmaps", "matched_maps", "tabs", "curve_chart"}
 
 
 def metadata_text(metadata: dict) -> str:

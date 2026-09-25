@@ -26,10 +26,12 @@ import pandas as pd
 from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
+from .curves import (
+    GRID_POINTS, curve_records, interpolate_curves, load_curve_predictions,
+    progress_grid, split_identities,
+)
 
-# The fixed normalized-progress grid every individual game curve is interpolated
-# onto before averaging (0 to 1 inclusive).
-GRID_POINTS = 101
+CURVE_KEYS = ["seed", "player_id", "strategist", "condition"]
 
 # Final victory-focus labels in tie-break order; the first maximum wins.
 FOCUS_ORDER = ["Domination", "Culture", "Diplomatic", "Science"]
@@ -122,56 +124,6 @@ def _aggregate_summary(rows: pd.DataFrame) -> pd.DataFrame:
         record["dominant_focus_pct"] = dominant_pct
         out.append(record)
     return pd.DataFrame(out, columns=SUMMARY_COLUMNS)
-
-
-def _interpolate_curves(
-    runs: pd.DataFrame, grid: np.ndarray
-) -> dict[tuple, list[tuple[float, float, int]]]:
-    """Mean interpolated curve per ``(seed, player_id, strategist, condition)`` key.
-
-    Each individual game curve is linearly interpolated onto the fixed grid inside
-    its own observed progress range only; no extrapolation and no endpoint
-    holding. Each grid point averages exactly the runs that cover it.
-    """
-    curves: dict[tuple, list[tuple[float, float, int]]] = {}
-    run_groups = runs.groupby(
-        ["seed", "player_id", "strategist", "condition", "game_id"],
-        sort=True,
-    )
-    sums: dict[tuple, np.ndarray] = {}
-    counts: dict[tuple, np.ndarray] = {}
-    for key, grp in run_groups:
-        seed, player_id, strategist, condition = key[0], key[1], key[2], key[3]
-        if grp["turn_progress"].isna().all():
-            continue
-        points = grp.dropna(subset=["turn_progress", "predicted_win_probability"])
-        if points.empty:
-            continue
-        xs = points["turn_progress"].to_numpy(dtype=float)
-        ys = points["predicted_win_probability"].to_numpy(dtype=float)
-        order = np.argsort(xs, kind="stable")
-        xs, ys = xs[order], ys[order]
-        if xs.size < 2:
-            # A single observation has no range to interpolate inside; it cannot
-            # contribute to the grid without extrapolating.
-            continue
-        covered = (grid >= xs[0]) & (grid <= xs[-1])
-        if not covered.any():
-            continue
-        cell = (int(seed), int(player_id), strategist, condition)
-        if cell not in sums:
-            sums[cell] = np.zeros(grid.size)
-            counts[cell] = np.zeros(grid.size, dtype=int)
-        sums[cell][covered] += np.interp(grid[covered], xs, ys)
-        counts[cell][covered] += 1
-    for cell, count in counts.items():
-        mask = count > 0
-        values = sums[cell][mask] / count[mask]
-        curves[cell] = [
-            (float(grid[i]), round(float(v), 6), int(count[i]))
-            for i, v in zip(np.nonzero(mask)[0], values)
-        ]
-    return curves
 
 
 class PerformanceControlledSeedReport(Analysis):
@@ -399,20 +351,10 @@ class PerformanceControlledSeedReport(Analysis):
         Vanilla across condition suffixes, so every row of the baseline experiment
         becomes ``strategist = condition = Vanilla``.
         """
-        strategists: list[str] = []
-        condition_keys: list[str] = []
         baseline_mask = rows["experiment"].astype(str) == baseline_experiment
-        for (_, row), baseline in zip(rows.iterrows(), baseline_mask):
-            if baseline:
-                strategists.append(vanilla_label)
-                condition_keys.append("vanilla")
-                continue
-            base, suffix = ctx.catalog.split_condition_suffix(
-                row["player_type"], list(spec.suffixes)
-            )
-            strategists.append(str(base))
-            condition_keys.append("base" if not suffix else suffix)
-        return strategists, condition_keys
+        return split_identities(
+            ctx.catalog, spec, rows["player_type"], vanilla_label, baseline_mask
+        )
 
     def _attach_baseline(
         self, summary: pd.DataFrame, baseline_rows: pd.DataFrame, vanilla_label: str
@@ -461,57 +403,17 @@ class PerformanceControlledSeedReport(Analysis):
     def _build_curves(
         self, ctx: AnalysisContext, estimator_id: str, rows: pd.DataFrame
     ) -> dict[tuple, list[tuple[float, float, int]]]:
-        stage = self.stage_id
-        pred = ctx.load_predictions(estimator_id)
-        _require_columns(
-            pred,
-            ["game_id", "player_id", "turn_progress", "predicted_win_probability"],
-            f"estimator '{estimator_id}' predictions",
-            stage,
+        pred = load_curve_predictions(
+            ctx, estimator_id, set(rows["game_id"]),
+            f"performance.controlled_seed_report '{self.stage_id}'",
         )
-        pred = pred[["game_id", "player_id", "turn_progress", "predicted_win_probability"]]
-        pred = pred.copy()
-        pred["game_id"] = pred["game_id"].astype(str)
-        pred["player_id"] = pd.to_numeric(pred["player_id"], errors="raise").astype(int)
-        pred["turn_progress"] = pd.to_numeric(pred["turn_progress"], errors="coerce")
-        pred["predicted_win_probability"] = pd.to_numeric(
-            pred["predicted_win_probability"], errors="coerce"
-        )
-        pred = pred.dropna(
-            subset=["turn_progress", "predicted_win_probability"]
-        ).drop_duplicates()
-        pred = pred[pred["game_id"].isin(set(rows["game_id"]))]
-        key = ["game_id", "player_id", "turn_progress"]
-        conflicts = pred[pred.duplicated(key, keep=False)]
-        if not conflicts.empty:
-            bad = conflicts[key].drop_duplicates().head(5)
-            keys = ", ".join(
-                f"({r.game_id}, {r.player_id}, {r.turn_progress})"
-                for r in bad.itertuples(index=False)
-            )
-            raise AnalysisError(
-                f"performance.controlled_seed_report '{stage}': conflicting duplicate "
-                f"prediction points at (game_id, player_id, turn_progress), e.g. {keys}."
-            )
         runs = rows.merge(pred, on=["game_id", "player_id"], how="inner")
-        grid = np.round(np.arange(GRID_POINTS) / (GRID_POINTS - 1), 10)
-        return _interpolate_curves(runs, grid)
+        return interpolate_curves(runs, progress_grid(), CURVE_KEYS)
 
     def _probability_table(
         self, curves: dict[tuple, list[tuple[float, float, int]]]
     ) -> pd.DataFrame:
-        records = []
-        for (seed, player_id, strategist, condition), points in curves.items():
-            for turn_progress, mean_predicted, n_runs in points:
-                records.append({
-                    "seed": seed,
-                    "player_id": player_id,
-                    "strategist": strategist,
-                    "condition": condition,
-                    "turn_progress": round(turn_progress, 2),
-                    "mean_predicted_win_probability": mean_predicted,
-                    "n_runs": n_runs,
-                })
+        records = curve_records(curves, CURVE_KEYS)
         return pd.DataFrame(records, columns=PROBABILITY_COLUMNS).sort_values(
             ["seed", "player_id", "strategist", "condition", "turn_progress"],
             kind="mergesort",

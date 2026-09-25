@@ -1,12 +1,20 @@
-"""``performance.turn_predicted``: per-identity predicted win-probability over time.
+"""``performance.turn_predicted``: predicted win probability over the game.
 
-Ported from ``performance/turn_predicted.ipynb`` (Part A): aggregate an
-estimator's per-turn ``predicted_win_probability`` per identity (``by``, default
-``player_type``). When ``uses.estimators`` is omitted, every enabled estimator is
-included. ``player_type`` is not in ``predictions.csv``, so it is joined from
-``panel_data`` by ``(game_id, player_id)``. Reports both the per-identity mean
-and the mean trajectory over ``turn_progress`` (the "victory probability over
-time" curve).
+The pooled counterpart of the Matched Maps seat chart. It reads one estimator's
+per-turn ``predicted_win_probability``: ``uses.estimators`` when it names one,
+otherwise the estimator of the strength stage (the one whose P(win) defines
+adjusted strength). ``player_type`` is not in ``predictions.csv``, so the
+identity (``by``, default ``player_type``) is joined from ``panel`` by
+``(game_id, player_id)``.
+
+With ``by = player_type`` and condition pairing enabled, each identity splits
+into a strategist and a condition exactly as on the Matched Maps pages, and the
+strength stage's ``baseline_experiment`` games form the VPAI reference curve
+(without one, every Vanilla seat does). Every run is interpolated onto the
+shared 101-point progress grid (:mod:`bench.analyses.performance.curves`) and
+each grid point averages the runs that cover it. The result declares the
+curve table through ``metadata["curve_chart"]``, which the report renders as
+the same interactive chart the Matched Maps pages use.
 """
 
 from __future__ import annotations
@@ -14,8 +22,30 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
+from .curves import (
+    GRID_POINTS, clean_curve_predictions, curve_records, interpolate_curves,
+    progress_grid, split_identities,
+)
+
+CURVE_KEYS = ["strategist", "condition"]
+CURVE_COLUMNS = [*CURVE_KEYS, "turn_progress", "mean_predicted_win_probability", "n_runs"]
+
+# Line colors for identities that are not player types (``by`` other than
+# ``player_type``), which have no catalog color.
+_FALLBACK_COLORS = (
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+)
+
+_CHART_HELP = (
+    "Each curve is the mean of every run's interpolated victory probability on "
+    "the fixed 0 to 1 progress grid, pooled over all games. The VPAI reference "
+    "curve is drawn thicker when present. The vertical axis fits the visible "
+    "curves. Hover the chart to compare every checked curve at one progress point."
+)
 
 
 class PerformanceTurnPredicted(Analysis):
@@ -25,124 +55,168 @@ class PerformanceTurnPredicted(Analysis):
         "Shows how each player identity's predicted chance of winning changes "
         "from the opening turns through the end of the game."
     )
-    report_defaults = {"tables": [], "figures": ["over_progress"]}
-    default_all_estimators = True
+    report_defaults = {"tables": [], "figures": []}
 
     def run(self, ctx: AnalysisContext) -> AnalysisResult:
-        estimators = ctx.uses_estimators()
-        if not estimators:
+        where = f"performance.turn_predicted '{self.stage_id}'"
+        table_id = ctx.strength_table_id()
+        explicit = ctx.uses_estimators()
+        estimator_id = explicit[0] if explicit else ctx.strength_estimator_id(table_id)
+        if not estimator_id:
             raise AnalysisError(
-                f"performance.turn_predicted '{self.stage_id}': requires at least one "
-                f"enabled estimator or uses.estimators override."
+                f"{where}: no estimator to read. Set uses.estimators, or list the "
+                f"estimator in the uses.estimators of strength stage '{table_id}'."
             )
         by = self.params.get("by", "player_type")
         aggregate = self.params.get("aggregate", "mean")
+        agg = aggregate if aggregate in {"mean", "median"} else "mean"
+        vanilla = ctx.catalog.vanilla_label
 
-        panel = ctx.load_table("panel")[["game_id", "player_id", by]].drop_duplicates(
-            ["game_id", "player_id"]
+        points = self._load_points(ctx, estimator_id, by, where)
+        spec = ctx.condition_pairing() if by == "player_type" else None
+        baseline = self._baseline_experiment(ctx, table_id) if by == "player_type" else None
+        if by != "player_type":
+            reference = pd.Series(False, index=points.index)
+        elif baseline and "experiment" in points.columns:
+            reference = points["experiment"].astype(str) == baseline
+        else:
+            reference = points["player_type"].astype(str) == vanilla
+        strategists, keys = split_identities(
+            ctx.catalog, spec, points[by].astype(str), vanilla, reference
         )
-        frames = []
-        for est in estimators:
-            pred = ctx.load_predictions(est)
-            # Inner join: both inputs already exclude flagged problem games, so a
-            # prediction row with no panel identity is a genuine gap, so drop it rather
-            # than resurrect a fake ``Player <id>`` player_type that would pollute the
-            # per-identity aggregation.
-            df = pred.merge(panel, on=["game_id", "player_id"], how="inner")
-            df = ctx.apply_filter(df)
-            if df.empty:
-                continue
-            df.insert(0, "model", est)
-            frames.append(df)
-        if not frames:
-            raise AnalysisError(
-                f"performance.turn_predicted '{self.stage_id}': no rows after filtering."
-            )
-        df = pd.concat(frames, ignore_index=True)
+        points["strategist"] = strategists
+        points["condition"] = [_condition(spec, key, vanilla) for key in keys]
 
-        agg = "mean" if aggregate not in {"mean", "median"} else aggregate
+        over_progress = pd.DataFrame(
+            curve_records(interpolate_curves(points, progress_grid(), CURVE_KEYS), CURVE_KEYS),
+            columns=CURVE_COLUMNS,
+        ).sort_values([*CURVE_KEYS, "turn_progress"], kind="mergesort").reset_index(drop=True)
+
         by_identity = (
-            df.groupby(["model", by])
+            points.groupby([by, *CURVE_KEYS], sort=True)
             .agg(
                 mean_predicted=("predicted_win_probability", agg),
                 n_rows=("predicted_win_probability", "size"),
                 n_games=("game_id", "nunique"),
             )
             .reset_index()
-            .sort_values(["model", "mean_predicted"], ascending=[True, False])
+            .sort_values(
+                ["mean_predicted", by, *CURVE_KEYS],
+                ascending=[False, True, True, True], kind="mergesort",
+            )
+            .reset_index(drop=True)
         )
 
-        if "turn_progress" not in df.columns:
-            df["turn_progress"] = (df["turn"] / df["max_turn"]).round(2)
+        observed = [s for s in over_progress["strategist"].unique() if s != vanilla]
+        if by == "player_type":
+            strategist_order = order_strategists(ctx.catalog, observed)
+            colors = self._strategist_colors(ctx, strategist_order, vanilla)
         else:
-            df["turn_progress"] = df["turn_progress"].round(2)
-        over_progress = (
-            df.groupby(["model", by, "turn_progress"])["predicted_win_probability"]
-            .mean()
-            .reset_index(name="mean_predicted")
+            strategist_order = sorted(observed)
+            colors = {
+                name: _FALLBACK_COLORS[i % len(_FALLBACK_COLORS)]
+                for i, name in enumerate(strategist_order)
+            }
+        condition_order = (
+            order_conditions(spec, {k for k in keys if k}, vanilla) if spec is not None else []
         )
 
-        fig = self._plot(over_progress, by, estimators, ctx)
-        finite = by_identity[np.isfinite(by_identity["mean_predicted"])]
-        aggregate_label = "median" if agg == "median" else "mean"
-        if finite.empty:
-            summary = f"No finite {aggregate_label} predicted win probabilities are available."
-        else:
-            highest = finite.loc[finite["mean_predicted"].idxmax()]
-            lowest = finite.loc[finite["mean_predicted"].idxmin()]
-            if len(finite) == 1:
-                summary = (
-                    f"{aggregate_label.capitalize()} predicted win probability: **{highest[by]}** with "
-                    f"**{highest['model']}** at **{highest['mean_predicted'] * 100:.1f}%**."
-                )
-            else:
-                summary = (
-                    f"Highest observed {aggregate_label} predicted win probability: **{highest[by]}** with "
-                    f"**{highest['model']}** at **{highest['mean_predicted'] * 100:.1f}%**. "
-                    f"Observed {aggregate_label}s range from **{lowest['mean_predicted'] * 100:.1f}%** to "
-                    f"**{highest['mean_predicted'] * 100:.1f}%**."
-                )
+        metadata = {
+            "estimator": estimator_id,
+            "strength_table": table_id,
+            "by": by,
+            "aggregate": agg,
+            "games": int(points["game_id"].nunique()),
+            "curve_chart": {
+                "table": "over_progress",
+                "vanilla_label": vanilla,
+                "strategist_order": strategist_order,
+                "condition_order": condition_order,
+                "strategist_colors": colors,
+                "grid_points": GRID_POINTS,
+                "help": _CHART_HELP,
+            },
+        }
+        if baseline:
+            metadata["baseline_experiment"] = baseline
         return AnalysisResult(
             tables={"by_identity": by_identity, "over_progress": over_progress},
-            figures={"over_progress": fig} if fig is not None else {},
-            summary=summary,
-            metadata={
-                "estimators": estimators,
-                "by": by,
-                "aggregate": agg,
-                "models_with_results": int(df["model"].nunique()),
-                "identity_games": int(by_identity["n_games"].sum()),
-            },
+            summary=_summary(by_identity, by, agg, estimator_id, vanilla),
+            metadata=metadata,
         )
 
-    def _plot(self, over_progress: pd.DataFrame, by: str, estimators: list[str], ctx: AnalysisContext):
-        import matplotlib.pyplot as plt
+    # ── input preparation ──────────────────────────────────────────────────────
+    def _load_points(
+        self, ctx: AnalysisContext, estimator_id: str, by: str, where: str
+    ) -> pd.DataFrame:
+        """Filtered prediction points of one estimator, each with its identity."""
+        panel = ctx.load_table("panel")
+        if by not in panel.columns:
+            raise AnalysisError(f"{where}: panel has no '{by}' column to group by.")
+        panel = panel[["game_id", "player_id", by]].drop_duplicates(["game_id", "player_id"])
+        panel["game_id"] = panel["game_id"].astype(str)
+        pred = ctx.load_predictions(estimator_id)
+        pred["game_id"] = pred["game_id"].astype(str)
+        if "turn_progress" not in pred.columns and {"turn", "max_turn"} <= set(pred.columns):
+            pred["turn_progress"] = pred["turn"] / pred["max_turn"]
+        # Inner join: both inputs already exclude flagged problem games, so a
+        # prediction row with no panel identity is a genuine gap, so drop it rather
+        # than resurrect a fake ``Player <id>`` player_type that would pollute the
+        # per-identity aggregation.
+        df = ctx.apply_filter(pred.merge(panel, on=["game_id", "player_id"], how="inner"))
+        keep = tuple(dict.fromkeys(c for c in (by, "experiment") if c in df.columns))
+        points = clean_curve_predictions(df, estimator_id, where, keep)
+        if points.empty:
+            raise AnalysisError(f"{where}: no rows after filtering.")
+        return points.reset_index(drop=True)
 
-        from ...plotting.styles import get_player_color, sort_player_types
+    def _baseline_experiment(self, ctx: AnalysisContext, table_id: str):
+        stage = next((s for s in ctx.config.adjust if s.id == table_id), None)
+        value = ((stage.raw.get("params") or {}).get("baseline_experiment")
+                 if stage is not None else None)
+        return str(value) if value else None
 
-        fig, axes = plt.subplots(
-            1, len(estimators), figsize=(max(7, 4.8 * len(estimators)), 6),
-            squeeze=False, sharey=True,
-        )
-        legend_ax = None
-        for ax, est in zip(axes[0], estimators):
-            sub = over_progress[over_progress["model"] == est]
-            idents = sort_player_types(sub[by].unique()) if by == "player_type" \
-                else sorted(sub[by].unique())
-            for ident in idents:
-                grp = sub[sub[by] == ident].sort_values("turn_progress")
-                color = get_player_color(ctx.catalog, str(ident)) if by == "player_type" else None
-                ax.plot(grp["turn_progress"], grp["mean_predicted"], marker="o", markersize=3,
-                        color=color, label=str(ident))
-            ax.set_xlabel("Turn progress")
-            ax.set_title(str(est), fontsize=11, fontweight="bold")
-            ax.grid(True, alpha=0.3)
-            if legend_ax is None and idents:
-                legend_ax = ax
-        axes[0][0].set_ylabel("Predicted win probability")
-        if legend_ax is not None:
-            legend_ax.legend(fontsize=8, loc="upper left", ncol=2)
-        fig.suptitle(f"Predicted victory probability over time by {by}",
-                     fontsize=12, fontweight="bold")
-        fig.tight_layout()
-        return fig
+    def _strategist_colors(
+        self, ctx: AnalysisContext, strategist_order: list[str], vanilla_label: str
+    ) -> dict[str, str]:
+        from ...plotting.styles import get_player_color
+
+        colors = {vanilla_label: get_player_color(ctx.catalog, vanilla_label)}
+        for name in strategist_order:
+            colors[name] = get_player_color(ctx.catalog, name)
+        return colors
+
+
+def _condition(spec, key: str, vanilla_label: str) -> str:
+    """The display condition; identities without pairing have none."""
+    if spec is not None:
+        return condition_display(spec, key, vanilla_label)
+    return vanilla_label if key == "vanilla" else ""
+
+
+def _identity_label(row: dict, vanilla_label: str) -> str:
+    strategist, condition = str(row["strategist"]), str(row["condition"])
+    name = "VPAI" if strategist == vanilla_label else strategist
+    if condition and condition != vanilla_label:
+        return f"{name} | {condition}"
+    return name
+
+
+def _summary(by_identity: pd.DataFrame, by: str, agg: str, estimator_id: str,
+             vanilla_label: str) -> str:
+    finite = by_identity[np.isfinite(by_identity["mean_predicted"])]
+    if finite.empty:
+        return f"No finite {agg} predicted win probabilities are available."
+    highest = finite.iloc[0].to_dict()
+    lowest = finite.iloc[-1].to_dict()
+    lead = (
+        f"Highest {agg} predicted win probability from **{estimator_id}**: "
+        f"**{_identity_label(highest, vanilla_label)}** at "
+        f"**{highest['mean_predicted'] * 100:.1f}%**."
+    )
+    if len(finite) == 1:
+        return lead
+    return (
+        f"{lead} {agg.capitalize()}s range from **{lowest['mean_predicted'] * 100:.1f}%** "
+        f"to **{highest['mean_predicted'] * 100:.1f}%**."
+    )

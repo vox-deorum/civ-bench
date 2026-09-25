@@ -22,7 +22,7 @@ The installable package is `bench/`. Each subpackage owns one stage kind or one 
 | `bench/adjust/` | Derived-table producers (the `strength` panel). |
 | `bench/analyses/` | The pluggable analysis modules, in six families. The descriptive `behavior/` modules share their baseline, view, and heatmap-table helpers in `behavior/common.py`. |
 | `bench/stats/` | The statistics layer: OLS/logistic wrappers, clustered/weighted fits, heatmaps. |
-| `bench/reports/` | Assemble analysis artifacts into Markdown and HTML. `heatmap.py` holds the shared HTML heatmap tables and RdYlBu color scale used by Matched Maps and the behavior pages; `content.py` holds the shared tab switch (`render_view_group`), and `assets.py` the browser script for tooltips, tabs, and click-to-sort. |
+| `bench/reports/` | Assemble analysis artifacts into Markdown and HTML. `heatmap.py` holds the shared HTML heatmap tables and RdYlBu color scale used by Matched Maps and the behavior pages; `content.py` holds the shared tab switch (`render_view_group`), `curves.py` the interactive victory-probability chart shared by Matched Maps and Win-probability trends (an analysis opts in through `metadata["curve_chart"]`), and `assets.py` the browser script for tooltips, tabs, and click-to-sort. |
 | `bench/plotting/` | Shared styles, colors, and figure helpers. |
 
 Tests live in `tests/` at the repo root, one file per area. Roadmap and implementation notes live in `plans/`.

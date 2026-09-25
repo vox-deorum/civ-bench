@@ -206,6 +206,7 @@
       "id": "perf_turn_predicted",
       "module": "performance.turn_predicted",
       "enabled": true,
+      "uses": { "tables": ["strength"] },
       "params": { "aggregate": "mean", "by": "player_type" }
     },
     {

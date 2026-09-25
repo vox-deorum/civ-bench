@@ -75,6 +75,27 @@ class View:
 
 
 @dataclass
+class CurveChart:
+    """The data behind one interactive victory-probability curve chart.
+
+    ``frame`` holds one row per curve point (``strategist``, ``condition``,
+    ``turn_progress``, ``mean_predicted_win_probability``). The ordering and
+    color fields come from the producing analysis, so the renderer needs no
+    catalog. A curve whose strategist and condition both equal
+    ``vanilla_label`` is the VPAI reference curve. Rendered by
+    :func:`bench.reports.curves.render_curve_chart_html` on family pages and on
+    the Matched Maps seat pages.
+    """
+
+    frame: pd.DataFrame
+    vanilla_label: str = "Vanilla"
+    strategist_order: list[str] = field(default_factory=list)
+    condition_order: list[str] = field(default_factory=list)
+    strategist_colors: dict[str, str] = field(default_factory=dict)
+    help: str = ""
+
+
+@dataclass
 class Section:
     """One analysis stage's contribution to the report."""
 
@@ -88,6 +109,7 @@ class Section:
     tables: list[Table] = field(default_factory=list)
     downloads: list[Download] = field(default_factory=list)
     views: list[View] = field(default_factory=list)  # alternative presentations, default first
+    curve_chart: Optional[CurveChart] = None  # declared by metadata["curve_chart"]
     empty: bool = False
 
     @property

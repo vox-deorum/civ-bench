@@ -233,6 +233,7 @@ def _make_dev_spec() -> dict:
                 "id": "perf_turn_predicted",
                 "module": "performance.turn_predicted",
                 "enabled": True,
+                "uses": {"tables": ["strength"]},
                 "params": {"aggregate": "mean", "by": "player_type"},
             },
             {

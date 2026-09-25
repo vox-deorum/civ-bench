@@ -15,6 +15,7 @@ from __future__ import annotations
 import html as _html
 from datetime import date
 
+from bench.plotting.interactive import plotly_javascript
 from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
 from bench.reports.game_log import GAME_LOG_JS, game_log_markdown, latest_game_card_html, render_game_log_page
 from bench.reports.content import (
@@ -28,6 +29,7 @@ from bench.reports.content import (
     report_summary,
 )
 
+from .curves import CURVE_CHART_JS, render_curve_chart_html
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
@@ -580,7 +582,16 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         for section in group.sections:
             _render_section_html(section, parts, anchors[id(section)])
         parts.append(render_footer_html(doc.footer))
-        parts.append("</main></body></html>")
+        parts.append("</main>")
+        if any(section.curve_chart is not None for section in group.sections):
+            # report-common.js is already in the head when the report has a game log.
+            if doc.game_log is None:
+                parts.append('<script src="assets/report-common.js" defer></script>')
+            parts.append('<script src="assets/curve-chart.js" defer></script>')
+            pages["assets/plotly.min.js"] = plotly_javascript()
+            pages["assets/report-common.js"] = REPORT_COMMON_JS
+            pages["assets/curve-chart.js"] = CURVE_CHART_JS
+        parts.append("</body></html>")
         pages[filenames[id(group)]] = "\n".join(parts) + "\n"
     if doc.game_log is not None:
         pages["assets/report-common.js"] = REPORT_COMMON_JS
@@ -613,6 +624,10 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         )
         parts.append("</section>")
         return
+    if section.curve_chart is not None:
+        parts.append(render_curve_chart_html(section.curve_chart, anchor, "assets/plotly.min.js"))
+        if section.curve_chart.help:
+            parts.append(f'<p class="caption">{_html.escape(section.curve_chart.help)}</p>')
     _render_artifacts_html(section.figures, section.tables, parts, anchor)
     if section.views:
         _render_views_html(section, parts, anchor)
