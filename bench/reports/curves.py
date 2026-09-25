@@ -334,15 +334,18 @@ CURVE_CHART_JS = """/* civ-bench victory-probability curve charts.
     function updateChart() {
       var checked = checkedMap();
       var visible = [];
+      var inLegend = [];
       var colors = [];
       var widths = [];
       var opacities = [];
       chart.data.forEach(function (trace, index) {
         var meta = trace.meta;
         var focused = inFocus(meta, index);
-        // A hovered checkbox previews its unchecked curves.
-        visible.push(!boxes.length || checked[meta.strategist] === true ||
-          (focused && focus.strategist !== undefined));
+        // A hovered checkbox previews its unchecked curves. Previews stay out
+        // of the legend so its entries do not reflow on every hover.
+        var shown = !boxes.length || checked[meta.strategist] === true;
+        visible.push(shown || (focused && focus.strategist !== undefined));
+        inLegend.push(shown);
         colors.push((colorMap && colorMap[meta.strategist]) || meta.base_color);
         var width = !meta.vanilla && highlightedCondition === meta.condition ?
           3 : meta.base_width;
@@ -350,7 +353,8 @@ CURVE_CHART_JS = """/* civ-bench victory-probability curve charts.
         opacities.push(focus && !focused ? DIMMED_OPACITY : 1);
       });
       var key = visible.join(",");
-      window.Plotly.restyle(chart, {visible: visible, "line.color": colors,
+      window.Plotly.restyle(chart, {visible: visible, showlegend: inLegend,
+        "line.color": colors,
         "line.width": widths, opacity: opacities}).then(function () {
           // Refit the Y axis only when the visible curves change.
           if (key === lastVisible) { return null; }

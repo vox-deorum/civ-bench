@@ -30,9 +30,18 @@
       "pricing": { "input_per_million": 0.039, "output_per_million": 0.19 }
     },
     {
-      "id": "Opus-5",
+      "id": "Opus-5.5",
       "aliases": [
         "opus",
+        "opus-5.5",
+        "claude-opus-5.5"
+      ],
+      "color": "#377EB8",
+      "pricing": { "input_per_million": 4.0, "output_per_million": 20.0 }
+    },
+    {
+      "id": "Opus-5",
+      "aliases": [
         "opus-5",
         "claude-opus-5"
       ],

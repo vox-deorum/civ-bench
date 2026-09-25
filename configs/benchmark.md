@@ -1070,7 +1070,9 @@ The chapter lives in its own directory beside the family pages:
   most two others; an **All** button checks everyone and **Best and worst**
   restores the default. A `?strategist=` link checks that strategist and VPAI.
   Hovering a checkbox temporarily shows that strategist's curves, or
-  highlights them if already shown, dimming the rest; hovering a legend entry
+  highlights them if already shown, dimming the rest; previewed curves stay out
+  of the legend, so its entries only change with the checkboxes. Hovering a
+  legend entry
   highlights its curve. The legend sits beside the plot and scrolls when long,
   so the plot keeps its height. The vertical axis fits the visible curves; and
   hovering the chart snaps to the nearest grid progress and lists every
