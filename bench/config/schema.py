@@ -129,6 +129,37 @@ PERSONA_NAMES = (
     "MinorCivWarBias", "DenounceWillingness", "Forgiveness", "Meanness",
     "Neediness", "Chattiness", "DeceptiveBias",
 )
+# Persona trait → (short name, group, description of the set-persona tool). Every
+# trait runs 1 to 10 (the tool clamps to that range).
+PERSONA_INFO = {
+    'VictoryCompetitiveness': ('Vic', 'Competitiveness', 'How aggressively the AI reacts to others pursuing victories.'),
+    'WonderCompetitiveness': ('Won', 'Competitiveness', 'How aggressively the AI reacts to others competing for wonders.'),
+    'MinorCivCompetitiveness': ('CS', 'Competitiveness', 'How aggressively the AI reacts to others competing for city-state influence.'),
+    'Boldness': ('Bold', 'Competitiveness', 'Military risk-taking, territorial claim, and conquest desire.'),
+    'WarBias': ('War', 'War and peace', 'Likelihood to plan for or declare offensive war.'),
+    'HostileBias': ('Host', 'War and peace', 'Tendency toward hostile relationships without direct wars.'),
+    'WarmongerHate': ('WmH', 'War and peace', 'How negatively the AI reacts to warlike behaviors.'),
+    'NeutralBias': ('Neu', 'War and peace', 'Tendency toward neutral relationships.'),
+    'FriendlyBias': ('Fbi', 'War and peace', 'Tendency toward friendly relationships.'),
+    'GuardedBias': ('Grd', 'War and peace', 'Tendency to be guarded or cautiously defensive in diplomacy.'),
+    'AfraidBias': ('Afr', 'War and peace', 'Tendency to be afraid of stronger civs.'),
+    'DiplomaticBalance': ('Bal', 'Diplomacy', 'Increases relationship with non-competitive civilizations and peaceful resolution of wars.'),
+    'Friendliness': ('Frd', 'Diplomacy', 'Desire for friendship declarations and increases maximum DoFs.'),
+    'WorkWithWillingness': ('With', 'Diplomacy', 'Tendency to support or collaborate with allies. Increases opinions of shared friends.'),
+    'WorkAgainstWillingness': ('Agst', 'Diplomacy', 'Tendency to bond over shared enemies and jointly act against them.'),
+    'Loyalty': ('Loy', 'Diplomacy', 'Loyalty to allies. Lower values allow for backstabbing.'),
+    'MinorCivFriendlyBias': ('CS F', 'City-states', 'Tendency to be friendly with city-states.'),
+    'MinorCivNeutralBias': ('CS N', 'City-states', 'Tendency to be neutral with city-states.'),
+    'MinorCivHostileBias': ('CS H', 'City-states', 'Tendency to be hostile with city-states.'),
+    'MinorCivWarBias': ('CS W', 'City-states', 'Likelihood to attack city-states.'),
+    'DenounceWillingness': ('Den', 'Personality', 'Readiness to denounce other civs.'),
+    'Forgiveness': ('Fgv', 'Personality', 'How quickly to forgive past transgressions.'),
+    'Meanness': ('Mean', 'Personality', 'Aggressiveness in general. Demanding and bullying more while less likely to accept peace.'),
+    'Neediness': ('Need', 'Personality', 'Desire for support from friends.'),
+    'Chattiness': ('Chat', 'Personality', 'How often the AI initiates diplomatic contact.'),
+    'DeceptiveBias': ('Dec', 'Personality', 'Tendency to be deceptively friendly.'),
+}
+PERSONA_RANGE = (1.0, 10.0)
 BEHAVIOR_EVENTS = ("wars_declared", "wars_received", "cities_nuked", "cities_razed")
 BEHAVIOR_POLICIES = (
     "policy_changes",
@@ -320,7 +351,7 @@ STRENGTH_RATING_MODULES = {
 
 # Modules the controlled-seed report may list in uses.analyses: each one adds a
 # tab to the Matched Maps overview and seat pages (§7.1).
-MATCHED_MAPS_TAB_MODULES = {"behavior.flavors"}
+MATCHED_MAPS_TAB_MODULES = {"behavior.flavors", "behavior.diplomacy"}
 
 # Params every behavior.* module accepts (§6.2). `baseline` is "completed", one
 # experiment id, or a list of experiment ids.

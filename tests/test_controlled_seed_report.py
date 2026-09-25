@@ -505,11 +505,13 @@ def test_config_tabs_must_offer_a_matched_maps_tab(tmp_path, write_spec, dev_spe
     spec = _make_spec(dev_spec, paths, tmp_path)
     spec["analyses"].append({"id": "flavors", "module": "behavior.flavors", "enabled": True,
                              "params": {}})
+    spec["analyses"].append({"id": "diplomacy", "module": "behavior.diplomacy", "enabled": True,
+                             "params": {}})
     spec["analyses"].append({"id": "coverage", "module": "performance.experiment_completeness",
                              "enabled": True, "uses": {"tables": ["strength"]}, "params": {}})
-    spec["analyses"][0]["uses"]["analyses"] = ["flavors"]
+    spec["analyses"][0]["uses"]["analyses"] = ["flavors", "diplomacy"]
     cfg = load_config(write_spec(spec))
-    assert cfg.analyses[0].uses_analyses == ["flavors"]
+    assert cfg.analyses[0].uses_analyses == ["flavors", "diplomacy"]
     spec["analyses"][0]["uses"]["analyses"] = ["flavors", "coverage"]
     with pytest.raises(ConfigError, match="offer a Matched Maps tab"):
         load_config(write_spec(spec))
@@ -1042,7 +1044,7 @@ def test_each_seed_offers_strength_and_focus_tabs(rendered):
 
 
 def _strategic_tab() -> MatchedMapTab:
-    """A Strategic tab like behavior.flavors writes it, for seed 1 seat 0."""
+    """A Strategy tab like behavior.flavors writes it, for seed 1 seat 0."""
     def rows(keys):
         base = [
             {"row_kind": "baseline", "row_label": "Completed-experiment average",
@@ -1070,7 +1072,7 @@ def _strategic_tab() -> MatchedMapTab:
         }
 
     return MatchedMapTab(
-        name="beh_flavors", label="Strategic", tip="Strategic settings",
+        name="beh_flavors", label="Strategy", tip="Strategic settings",
         seed_table=rows({"seed": 1}), seat_table=rows({"seed": 1, "player_id": 0}),
         seed_spec=spec("Seed flavors"), seat_spec=spec("Seat flavors"),
     )
@@ -1083,7 +1085,7 @@ def test_strategic_tab_renders_on_overview_and_seat_pages():
     overview = pages["controlled-seed/index.html"]
     detail = pages["controlled-seed/seed-1-player-0.html"]
     for page, title in ((overview, "Seed flavors"), (detail, "Seat flavors")):
-        assert 'data-tip="Strategic settings">Strategic</button>' in page
+        assert 'data-tip="Strategic settings">Strategy</button>' in page
         assert f"<figcaption>{title}" in page
         # The baseline row is pinned; the tooltip carries the difference.
         assert '<tbody class="vanilla-body"><tr class="vanilla-row"><th scope="row" ' \
@@ -1100,7 +1102,19 @@ def test_strategic_tab_without_rows_for_a_seat_says_so():
     tab.seat_table = tab.seat_table.assign(player_id=5)
     doc.tabs = [tab]
     detail = render_controlled_seed_site(doc)["controlled-seed/seed-1-player-0.html"]
-    assert "No strategic data for this seat." in detail
+    assert "No strategy data for this seat." in detail
+
+
+def test_strategy_and_diplomacy_tabs_follow_strength_and_focus():
+    doc = _tiny_doc()
+    diplomacy = _strategic_tab()
+    diplomacy.name, diplomacy.label, diplomacy.tip = "beh_diplomacy", "Diplomacy", "Diplomatic persona"
+    doc.tabs = [_strategic_tab(), diplomacy]
+    pages = render_controlled_seed_site(doc)
+    for page in (pages["controlled-seed/index.html"], pages["controlled-seed/seed-1-player-0.html"]):
+        labels = [">Strength</button>", ">Focus</button>", ">Strategy</button>", ">Diplomacy</button>"]
+        positions = [page.index(label) for label in labels]
+        assert positions == sorted(positions)
 
 
 def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
@@ -1112,7 +1126,7 @@ def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
     tab.seed_table.to_csv(tmp_path / "flavors_by_seed.csv", index=False)
     tab.seat_table.to_csv(tmp_path / "flavors_by_seat.csv", index=False)
     flavors = Section(id="beh_flavors", module="behavior.flavors", metadata={
-        "matched_maps": {"label": "Strategic", "tip": "Strategic settings",
+        "matched_maps": {"label": "Strategy", "tip": "Strategic settings",
                          "seed_table": "flavors_by_seed", "seat_table": "flavors_by_seat"},
         "heatmaps": {"flavors_by_seed": tab.seed_spec, "flavors_by_seat": tab.seat_spec},
     })
@@ -1122,7 +1136,7 @@ def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
         ctx.record_table("beh_flavors", name, tmp_path, f"{name}.csv")
     tabs = _matched_map_tabs(ctx, ["beh_flavors", "beh_other", "gone"])
     assert [t.name for t in tabs] == ["beh_flavors"]
-    assert tabs[0].label == "Strategic" and tabs[0].seed_spec["title"] == "Seed flavors"
+    assert tabs[0].label == "Strategy" and tabs[0].seed_spec["title"] == "Seed flavors"
     assert list(tabs[0].seat_table["player_id"]) == [0, 0]
     assert ctx.warnings == [
         "Matched Maps: analysis 'beh_other' offers no Matched Maps tab; its tab is skipped.",

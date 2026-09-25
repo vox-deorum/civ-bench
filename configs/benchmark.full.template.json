@@ -474,7 +474,8 @@
           "strength"
         ],
         "analyses": [
-          "beh_flavors"
+          "beh_flavors",
+          "beh_diplomacy"
         ]
       },
       "params": {}

@@ -16,12 +16,14 @@ five groups, with the full name and the tool's description in the header
 tooltip (:data:`bench.config.schema.FLAVOR_INFO`). In controlled runs the module
 also writes ``flavors_by_seed`` and ``flavors_by_seat``, the absolute settings
 per controlled seed and per seed and seat, for the Matched Maps chapter's
-Strategic tab (list this stage in the controlled-seed report's
+Strategy tab (list this stage in the controlled-seed report's
 ``uses.analyses``). The Null strategist, which
 never moves off 50, is left out. In controlled runs both views pin the baseline
 average as the top row, in absolute terms on the 0 to 100 scale. Flavors gated
 by ``data.extract.behavior.flavor_gates`` (nuclear and air) count only from the
-turn a player gains access, and their header tooltip says so.
+turn a player gains access, and their header tooltip says so. Cell tooltips
+show each player's in-game range (mean min to max), in the relative view as a
+difference from the baseline.
 """
 
 from __future__ import annotations
@@ -80,13 +82,13 @@ class BehaviorFlavors(BehaviorAnalysis):
 
         metrics = [flavor_column(f) for f in flavors]
         cells = C.controlled_cells(ctx)
-        views = C.build_views(rows, pool, metrics, cells, baseline)
-        names = {flavor_column(f): f for f in flavors}
         ranges = {
             flavor_column(f): (flavor_column(f, "min"), flavor_column(f, "max"))
             for f in flavors
             if flavor_column(f, "min") in rows.columns and flavor_column(f, "max") in rows.columns
         }
+        views = C.build_views(rows, pool, metrics, cells, baseline, companions=ranges)
+        names = {flavor_column(f): f for f in flavors}
         baseline_label = baseline.label if baseline is not None else "baseline"
         gates = resolve_behavior_spec((ctx.config.data.get("extract") or {}).get("behavior"))["flavor_gates"]
         tips = {}
@@ -142,7 +144,7 @@ class BehaviorFlavors(BehaviorAnalysis):
         )
         matched_maps = self.add_matched_map_tables(
             ctx, views, pool, cells, out, "flavors",
-            label="Strategic",
+            label="Strategy",
             tip="Strategic settings: average flavor settings",
             title="Average flavor setting",
             help_text=(

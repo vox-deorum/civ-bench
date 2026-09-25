@@ -245,8 +245,14 @@ def test_flavor_heatmaps_carry_layout_and_colors(behavior_env, tmp_path):
     sd = float(pd.Series([5.0, 6.0, 7.0] * 3).std(ddof=1))
     expected = 0.5 + 0.5 * min(1.0, 3.0 / sd / 2.0)
     assert _cell(rel, LLM, OFFENSE, "color_position") == pytest.approx(expected)
-    assert "mean_min" not in rel.columns
-    assert result.metadata["heatmaps"]["flavors_relative"]["signed"] is True
+    # The relative range is the player's min and max minus the baseline cell (5 at seat 0).
+    assert _cell(rel, LLM, OFFENSE, "mean_min") == pytest.approx(1.0)
+    assert _cell(rel, LLM, OFFENSE, "mean_max") == pytest.approx(5.0)
+    rel_spec = result.metadata["heatmaps"]["flavors_relative"]
+    assert rel_spec["signed"] is True
+    assert rel_spec["range_columns"] == ["mean_min", "mean_max"]
+    assert rel_spec["range_note"] == "mean min to max, vs. baseline"
+    assert "range_note" not in spec
 
 
 def test_completed_baseline_averages_complete_strategist_experiments(behavior_env, tmp_path):
@@ -317,12 +323,12 @@ def test_rate_normalizes_counts_by_turns_alive(behavior_env, tmp_path):
     params = {"baseline": BASELINE, "traits": ["Friendliness"], "bootstrap_n": 20}
     per_100, _ = behavior_env("behavior.diplomacy", params, sid="a")
     per_game, _ = behavior_env("behavior.diplomacy", {**params, "rate": "per_game"}, sid="b")
-    a = _table(per_100, "diplomacy_absolute")
-    b = _table(per_game, "diplomacy_absolute")
     count = "relationship_changes"
+    a, b = _table(per_100, "stance_signals_absolute"), _table(per_game, "stance_signals_absolute")
     assert _cell(a, LLM, count) == pytest.approx(2 * _cell(b, LLM, count))
     # Levels are never rate-scaled.
     level = "persona_friendliness_avg"
+    a, b = _table(per_100, "diplomacy_absolute"), _table(per_game, "diplomacy_absolute")
     assert _cell(a, LLM, level) == _cell(b, LLM, level)
 
 
@@ -334,14 +340,16 @@ def test_baseline_defaults_to_the_strength_stage(behavior_env):
     assert result.summary.startswith("Against the matched in-game AI")
 
 
-@pytest.mark.parametrize("module, params, kwargs, note", [
-    ("behavior.diplomacy", {}, {}, "no baseline is configured"),
-    ("behavior.diplomacy", {"baseline": BASELINE}, {"games": False}, "no controlled games"),
-    ("behavior.flavors", {}, {}, "no experiment is complete"),
+@pytest.mark.parametrize("module, params, kwargs, note, declared", [
+    ("behavior.diplomacy", {}, {}, "no baseline is configured", ["absolute", "stance"]),
+    ("behavior.diplomacy", {"baseline": BASELINE}, {"games": False}, "no controlled games",
+     ["absolute", "stance"]),
+    ("behavior.flavors", {}, {}, "no experiment is complete", ["absolute"]),
 ])
-def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, module, params, kwargs, note):
+def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, module, params, kwargs,
+                                                               note, declared):
     result, _ = behavior_env(module, {**params, "bootstrap_n": 20}, **kwargs)
-    assert list(result.metadata["views"]) == ["absolute"]
+    assert list(result.metadata["views"]) == declared
     assert result.metadata["relative_view"] == note
     assert not any(name.endswith("_relative") for name in result.table_paths)
     assert result.summary.startswith("The most distinctive value")
@@ -380,7 +388,7 @@ def test_flavors_write_matched_map_tables_per_seed_and_seat(behavior_env, tmp_pa
     _add_complete_experiments(tmp_path)
     result, _ = behavior_env("behavior.flavors", {"bootstrap_n": 20})
     assert result.metadata["matched_maps"] == {
-        "label": "Strategic", "tip": "Strategic settings: average flavor settings",
+        "label": "Strategy", "tip": "Strategic settings: average flavor settings",
         "seed_table": "flavors_by_seed", "seat_table": "flavors_by_seat",
     }
     pinned = "Completed-experiment average"
@@ -466,25 +474,105 @@ def test_gated_flavor_tips_carry_the_gate_sentence(behavior_env, tmp_path):
 
 
 # ── diplomacy ──────────────────────────────────────────────────────────────────
-def test_diplomacy_drops_stance_from_the_relative_view(behavior_env):
-    result, _ = behavior_env("behavior.diplomacy", {"baseline": BASELINE,
-                                                     "traits": ["Friendliness", "Loyalty"],
-                                                     "bootstrap_n": 20})
-    rel = _table(result, "diplomacy_relative")
-    assert _cell(rel, LLM, "persona_friendliness_avg") == pytest.approx(-3.0)
-    assert not rel["metric"].str.startswith("stance_").any()
-    dropped = result.metadata["relative_metrics_without_baseline"]
-    assert "stance_net_avg" in dropped and "stance_masked_hostility_share" in dropped
-    # relationship_changes is 0 for the AI, so it is a valid relative metric.
-    assert _cell(rel, LLM, "relationship_changes") == pytest.approx(4.0)
+def _add_persona_ranges(tmp_path):
+    """Per-player persona min and max: the LLM ranges 2 to 4 on Friendliness."""
+    frame = pd.read_csv(tmp_path / "behavior.csv")
+    llm = frame["player_type"] == LLM
+    for trait in ("friendliness", "loyalty"):
+        avg = frame[f"persona_{trait}_avg"]
+        frame[f"persona_{trait}_min"] = avg.where(~llm, avg - 1.0)
+        frame[f"persona_{trait}_max"] = avg.where(~llm, avg + 1.0)
+    frame.to_csv(tmp_path / "behavior.csv", index=False)
+    return {**BEHAVIOR_SPEC, "stats": ["min", "avg", "max"]}
 
-    mix = _table(result, "stance_mix_absolute")
-    assert list(mix["player_type"]) == [LLM]
-    row = mix.iloc[0]
-    assert row["masked hostility"] == pytest.approx(0.25)
-    assert row["aligned"] == pytest.approx(0.70)
-    assert "stance_mix_absolute" in result.metadata["views"]["absolute"]["figures"]
-    assert "masked hostility" in result.summary
+
+def test_diplomacy_persona_views_are_heatmaps_against_the_in_game_ai(behavior_env, tmp_path):
+    spec = _add_persona_ranges(tmp_path)
+    result, _ = behavior_env("behavior.diplomacy", {"bootstrap_n": 20},
+                             behavior_spec=spec, adjust_baseline=BASELINE)
+    pinned = "Matched in-game AI"
+    rel = _table(result, "diplomacy_relative")
+    assert set(rel["metric"]) == {"persona_friendliness_avg", "persona_loyalty_avg"}
+    # Against the in-game AI, Vanilla players leave the views; the pinned row stands for them.
+    assert set(rel.loc[rel["row_kind"] == "group", "player_type"]) == {LLM}
+    base = rel[(rel["row_kind"] == "baseline") & (rel["metric"] == "persona_friendliness_avg")]
+    assert base["row_label"].iloc[0] == pinned and base["mean"].iloc[0] == pytest.approx(6.0)
+    assert _cell(rel, LLM, "persona_friendliness_avg") == pytest.approx(-3.0)
+    # The relative range is the player's min and max minus the matched AI's average.
+    assert _cell(rel, LLM, "persona_friendliness_avg", "mean_min") == pytest.approx(-4.0)
+    assert _cell(rel, LLM, "persona_friendliness_avg", "mean_max") == pytest.approx(-2.0)
+    heat = result.metadata["heatmaps"]["diplomacy_relative"]
+    assert heat["range_note"] == "mean min to max, vs. baseline"
+    assert heat["column_labels"] == {"persona_friendliness_avg": "Frd", "persona_loyalty_avg": "Loy"}
+    assert heat["column_tips"]["persona_loyalty_avg"] == "Loyalty\n" + C.S.PERSONA_INFO["Loyalty"][2]
+    assert heat["column_group"] == "metric_group" and heat["baseline_rows"] == [pinned]
+    absolute = _table(result, "diplomacy_absolute")
+    assert set(absolute["metric_group"]) == {"Diplomacy"}
+    # Absolute colors sit on the fixed 1 to 10 persona scale.
+    assert _cell(absolute, LLM, "persona_friendliness_avg", "color_position") == pytest.approx(2 / 9, abs=1e-6)
+    assert _cell(absolute, LLM, "persona_friendliness_avg", "mean_min") == pytest.approx(2.0)
+    assert result.metadata["heatmaps"]["diplomacy_absolute"]["decimals"] == 1
+    assert not result.figure_paths
+
+
+def test_diplomacy_keeps_vanilla_players_against_another_baseline(behavior_env):
+    result, _ = behavior_env("behavior.diplomacy", {"baseline": BASELINE, "bootstrap_n": 20})
+    absolute = _table(result, "diplomacy_absolute")
+    assert "Vanilla" in set(absolute["player_type"])
+
+
+def test_diplomacy_leaves_out_the_null_strategist(behavior_env, tmp_path):
+    frame = pd.read_csv(tmp_path / "behavior.csv")
+    null = (frame["game_id"] == "T2") & (frame["player_id"] == 0)
+    frame.loc[null, ["player_type", "persona_friendliness_avg", "persona_loyalty_avg"]] = ["Null", 5.0, 5.0]
+    frame.to_csv(tmp_path / "behavior.csv", index=False)
+    result, _ = behavior_env("behavior.diplomacy", {"bootstrap_n": 20}, adjust_baseline=BASELINE)
+    for name in ("diplomacy_relative", "diplomacy_absolute", "diplomacy_by_seed", "diplomacy_by_seat"):
+        assert "Null" not in set(_table(result, name)["player_type"]), name
+    assert "Null strategist" in result.metadata["heatmaps"]["diplomacy_absolute"]["help"]
+
+
+def test_diplomacy_stance_view_holds_the_relationship_columns(behavior_env):
+    result, _ = behavior_env("behavior.diplomacy", {"baseline": BASELINE, "bootstrap_n": 20})
+    views = result.metadata["views"]
+    assert list(views) == ["relative", "absolute", "stance"]
+    assert views["stance"]["label"] == "Stance"
+    assert views["stance"]["tables"] == ["stance_absolute", "stance_signals_absolute"]
+    assert all(not v["figures"] for v in views.values())
+    for name in ("diplomacy_relative", "diplomacy_absolute"):
+        assert set(_table(result, name)["metric"]) == {"persona_friendliness_avg", "persona_loyalty_avg"}
+    levels = _table(result, "stance_absolute")
+    # The in-game AI sets no stances, so only the LLM appears.
+    assert set(levels["player_type"]) == {LLM}
+    assert _cell(levels, LLM, "stance_public_avg") == pytest.approx(10.0)
+    assert _cell(levels, LLM, "stance_private_avg", "color_position") == pytest.approx(0.45)
+    signals = _table(result, "stance_signals_absolute")
+    assert set(signals["metric"]) == {"relationship_changes", "stance_masked_hostility_share",
+                                      "stance_masked_goodwill_share"}
+    # Masked shares read as percents.
+    assert _cell(signals, LLM, "stance_masked_hostility_share") == pytest.approx(25.0)
+    assert _cell(signals, LLM, "relationship_changes") == pytest.approx(4.0)
+    assert not any("relationship_targets" in set(_table(result, n)["metric"])
+                   for n in result.table_paths if n.startswith(("stance", "diplomacy_")))
+    assert result.metadata["heatmaps"]["stance_signals_absolute"]["column_group"] == "metric_group"
+    assert "masked hostility" in result.summary and "25.0%" in result.summary
+
+
+def test_diplomacy_writes_matched_map_tables(behavior_env):
+    result, _ = behavior_env("behavior.diplomacy", {"bootstrap_n": 20}, adjust_baseline=BASELINE)
+    assert result.metadata["matched_maps"] == {
+        "label": "Diplomacy", "tip": "Diplomatic persona: average trait values",
+        "seed_table": "diplomacy_by_seed", "seat_table": "diplomacy_by_seat",
+    }
+    seed = _table(result, "diplomacy_by_seed")
+    first = seed[seed["seed"] == 1].iloc[0]
+    assert (first["row_kind"], first["row_label"]) == ("baseline", "Matched in-game AI")
+    # Vanilla players never get a group row: the pinned row is the in-game AI.
+    assert set(seed.loc[seed["row_kind"] == "group", "player_type"]) == {LLM}
+    llm = seed[(seed["seed"] == 1) & (seed["player_type"] == LLM)
+               & (seed["metric"] == "persona_friendliness_avg")].iloc[0]
+    assert llm["difference"] == pytest.approx(-3.0)
+    assert result.metadata["heatmaps"]["diplomacy_by_seat"]["decimals"] == 1
 
 
 # ── commitment ─────────────────────────────────────────────────────────────────

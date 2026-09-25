@@ -9,7 +9,9 @@ summarizes both views through one of two paths:
 * :meth:`BehaviorAnalysis.metric_views` draws matplotlib heatmaps (the pages
   not yet moved to HTML tables).
 
-Either way the declared views render behind the relative/absolute toggle.
+Either way the declared views render behind the relative/absolute toggle; a
+module may declare more views (the diplomacy page's Stance view) through
+``view_names``.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ class MetricViews:
     heatmaps: dict = field(default_factory=dict)
 
     def add(self, view: str, name: str, table=None, figure=None) -> None:
+        self.declared.setdefault(view, {"tables": [], "figures": []})
         if table is not None:
             self.tables[name] = table
             self.declared[view]["tables"].append(name)
@@ -124,6 +127,7 @@ class BehaviorAnalysis(Analysis):
         ranges: dict | None = None,
         range_label: str = "",
         baseline_row: bool = False,
+        view_names: dict | None = None,
     ) -> None:
         """Write ``<slug>_relative`` / ``<slug>_absolute`` and their heatmap specs.
 
@@ -132,9 +136,13 @@ class BehaviorAnalysis(Analysis):
         tooltip; ``groups`` names a spanning header per metric. ``fixed`` maps a
         metric to its absolute ``(low, high)`` color range. ``ranges`` maps a
         metric to its per-player ``(min, max)`` columns, averaged into
-        ``mean_min`` / ``mean_max`` for the absolute tooltip. The per-view
-        dictionaries (``titles``, ``help_texts``, ``legends``,
-        ``value_labels``) are keyed by :data:`C.RELATIVE` / :data:`C.ABSOLUTE`.
+        ``mean_min`` / ``mean_max`` for the tooltip; in the relative view they
+        are differences from the baseline when :func:`C.build_views` shifted
+        them (its ``companions``). The per-view dictionaries (``titles``,
+        ``help_texts``, ``legends``, ``value_labels``) are keyed by
+        :data:`C.RELATIVE` / :data:`C.ABSOLUTE`. ``view_names`` maps a view to
+        the page view that shows its table (by default the same name), so a
+        table can sit in a view of its own.
 
         With ``baseline_row``, both views pin a row with the baseline pool's absolute
         mean per metric (``row_kind == "baseline"``), colored like the absolute
@@ -160,8 +168,12 @@ class BehaviorAnalysis(Analysis):
                 continue
             summary.insert(summary.columns.get_loc("metric") + 1, "metric_group",
                            summary["metric"].map(lambda m: (groups or {}).get(m, "")))
-            if view == C.ABSOLUTE and ranges:
-                summary = _attach_ranges(summary, frame, self.by, ranges)
+            # A relative range needs min and max shifted by the baseline too.
+            view_ranges = ranges if view == C.ABSOLUTE else {
+                m: pair for m, pair in (ranges or {}).items() if set(pair) <= views.shifted
+            }
+            if view_ranges:
+                summary = _attach_ranges(summary, frame, self.by, view_ranges)
             summary["color_position"] = C.color_positions(summary, view, views, fixed)
             table, order = C.heatmap_rows(ctx, summary, self.by)
             table.insert(0, "row_kind", "group")
@@ -171,7 +183,7 @@ class BehaviorAnalysis(Analysis):
             leading = ["row_kind", self.by, "strategist", "condition", "row_label"]
             table = table[leading + [c for c in table.columns if c not in leading]]
             name = f"{slug}_{view}"
-            out.add(view, name, table=table)
+            out.add((view_names or {}).get(view, view), name, table=table)
             out.summaries[(slug, view)] = table
             present = set(table["row_label"])
             out.heatmaps[name] = C.heatmap_spec(
@@ -190,7 +202,8 @@ class BehaviorAnalysis(Analysis):
                 value_label=value_labels[view],
                 ci_level=self.ci_level,
                 legend=legends[view],
-                range_label=range_label if view == C.ABSOLUTE and ranges else "",
+                range_label=range_label if view_ranges else "",
+                range_note="mean min to max, vs. baseline" if view == C.RELATIVE else "",
                 baseline_rows=[pinned] if pinned else None,
             )
 
@@ -219,7 +232,8 @@ class BehaviorAnalysis(Analysis):
 
         Both are absolute heatmap tables over controlled games, one keyed by
         ``seed`` and one by ``seed`` and ``player_id``, each pinning the
-        baseline pool's average for that seed or seat as its top row. A cell's
+        baseline pool's average for that seed or seat as its top row. Vanilla
+        players are left out: the chapter's pinned row is the reference. A cell's
         ``difference`` is the mean relative value there (the player minus the
         baseline at its own seed and seat), shown in the tooltip. No bootstrap:
         the Matched Maps tables report plain means. Returns the
@@ -232,7 +246,8 @@ class BehaviorAnalysis(Analysis):
             return None
         label_text = views.baseline.label
         pinned = label_text[:1].upper() + label_text[1:]
-        rows = views.absolute.merge(cells, on="game_id", how="inner")
+        rows = views.absolute[views.absolute["player_type"].astype(str) != ctx.catalog.vanilla_label]
+        rows = rows.merge(cells, on="game_id", how="inner")
         base = pool.merge(cells, on="game_id", how="inner")
         declared = {"label": label, "tip": tip}
         for keys, name, key in ((["seed"], f"{slug}_by_seed", "seed_table"),

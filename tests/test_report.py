@@ -1071,9 +1071,9 @@ def views_env(tmp_path, write_spec, dev_spec):
     spec["analyses"] = [
         {"id": "perf_usage_efficiency", "module": "performance.usage_efficiency",
          "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
-        {"id": "beh_two", "module": "behavior.diplomacy", "enabled": True,
+        {"id": "beh_two", "module": "behavior.commitment", "enabled": True,
          "params": {}},
-        {"id": "beh_one", "module": "behavior.diplomacy", "enabled": True,
+        {"id": "beh_one", "module": "behavior.commitment", "enabled": True,
          "params": {}},
     ]
     spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
@@ -1085,16 +1085,16 @@ def views_env(tmp_path, write_spec, dev_spec):
     frame = pd.DataFrame({"player_type": ["Kimi"], "metric": ["wars_declared"], "mean": [1.5]})
     views = {
         "relative": {"label": "Relative to matched in-game AI",
-                     "tables": [], "figures": ["diplomacy_relative"]},
-        "absolute": {"label": "Absolute", "tables": [], "figures": ["diplomacy_absolute"]},
+                     "tables": [], "figures": ["commitment_relative"]},
+        "absolute": {"label": "Absolute", "tables": [], "figures": ["commitment_absolute"]},
     }
-    _emit(cfg, "beh_two", "behavior.diplomacy", summary="Two views.",
+    _emit(cfg, "beh_two", "behavior.commitment", summary="Two views.",
           metadata={"baseline_experiment": "vanilla", "views": views},
-          tables={"diplomacy_relative": frame, "diplomacy_absolute": frame},
-          figures=["diplomacy_relative", "diplomacy_absolute"])
-    _emit(cfg, "beh_one", "behavior.diplomacy", summary="One view.",
+          tables={"commitment_relative": frame, "commitment_absolute": frame},
+          figures=["commitment_relative", "commitment_absolute"])
+    _emit(cfg, "beh_one", "behavior.commitment", summary="One view.",
           metadata={"views": {"absolute": views["absolute"]}},
-          tables={"diplomacy_absolute": frame}, figures=["diplomacy_absolute"])
+          tables={"commitment_absolute": frame}, figures=["commitment_absolute"])
     return cfg
 
 
@@ -1109,8 +1109,8 @@ def test_views_render_a_toggle_with_the_first_view_selected(views_env):
     assert 'data-view="relative" aria-controls="section-beh-two-view-relative" aria-pressed="true"' in page
     assert 'aria-pressed="false">Absolute</button>' in page
     assert page.count('class="view-panel"') == 3
-    assert page.index('src="assets/beh_two/diplomacy_relative.png"') < page.index(
-        'src="assets/beh_two/diplomacy_absolute.png"')
+    assert page.index('src="assets/beh_two/commitment_relative.png"') < page.index(
+        'src="assets/beh_two/commitment_absolute.png"')
     assert "views:" not in page                                # layout keys stay out of tooltips
     assert ".views-ready .view-switch" in (out / "assets/report.css").read_text(encoding="utf-8")
     assert "views-ready" in (out / "assets/report-help.js").read_text(encoding="utf-8")
@@ -1120,16 +1120,16 @@ def test_views_render_a_toggle_with_the_first_view_selected(views_env):
     assert md.index("**Relative to matched in-game AI**") < md.index("**Absolute**")
     assert "views:" not in md
     # Tables stay downloads (module defaults inline figures only).
-    assert "assets/beh_two/diplomacy_relative.csv" in md
+    assert "assets/beh_two/commitment_relative.csv" in md
 
 
 def test_malformed_views_fall_back_to_a_single_view(views_env):
-    _emit(views_env, "beh_two", "behavior.diplomacy", summary="Broken.",
-          metadata={"views": ["relative"]}, figures=["diplomacy_relative"])
+    _emit(views_env, "beh_two", "behavior.commitment", summary="Broken.",
+          metadata={"views": ["relative"]}, figures=["commitment_relative"])
     run_report(views_env)
     page = (report_dir(views_env) / "behavior.html").read_text(encoding="utf-8")
     assert page.count('<div class="view-switch"') == 0
-    assert 'src="assets/beh_two/diplomacy_relative.png"' in page
+    assert 'src="assets/beh_two/commitment_relative.png"' in page
 
 
 # ── HTML heatmap tables ────────────────────────────────────────────────────────
@@ -1277,6 +1277,23 @@ def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
     assert md.count(f"| {BASELINE_ROW} | 55 | 55 |") == 2
     assert "+55" not in md
     assert "_Columns: Off = Offense; Sci = Science._" in md
+
+
+def test_heatmap_range_uses_the_table_number_format():
+    from bench.reports.heatmap import render_heatmap_html
+
+    frame = pd.DataFrame([{"row_label": "Kimi", "metric": "persona_loyalty_avg", "mean": -3.0,
+                           "mean_min": -4.0, "mean_max": 0.25, "color_position": 0.2}])
+    spec = {"row": "row_label", "column": "metric", "value": "mean", "decimals": 1,
+            "signed": True, "value_label": "Difference",
+            "range_columns": ["mean_min", "mean_max"], "range_label": "Range",
+            "range_note": "mean min to max, vs. baseline"}
+    # A relative range is signed, in the table's decimals, with its own note.
+    assert "Range		-4.0 to +0.2 (mean min to max, vs. baseline)" in render_heatmap_html(frame, spec)
+    spec = {**spec, "signed": False}
+    del spec["range_note"]
+    frame = frame.assign(mean_min=2.0, mean_max=4.0)
+    assert "Range		2.0 to 4.0 (mean min to max)" in render_heatmap_html(frame, spec)
 
 
 def test_a_heatmap_spec_that_does_not_fit_renders_a_plain_table(heatmap_env):

@@ -32,8 +32,10 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     text, and the header tooltip.
 ``decimals``, ``signed``, ``value_label``, ``ci_level``
     Number format and the tooltip's value line.
-``range_columns``, ``range_label``
-    Optional ``[low, high]`` columns shown as one more tooltip line.
+``range_columns``, ``range_label``, ``range_note``
+    Optional ``[low, high]`` columns shown as one more tooltip line, in the
+    table's number format (signed in a signed table) and followed by
+    ``range_note`` (default ``mean min to max``).
 ``legend``
     ``[[position, label], ...]`` swatches under the table; a ``#rrggbb`` string
     in place of the position gives the swatch color directly.
@@ -266,11 +268,13 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
         lines.append(tip_row("SD", sd, "one legend step"))
     bounds = spec.get("range_columns")
     if isinstance(bounds, list) and len(bounds) == 2:
-        low = _number(rec.get(bounds[0]), 0, False)
-        high = _number(rec.get(bounds[1]), 0, False)
+        places = int(spec.get("decimals", 1))
+        low = _number(rec.get(bounds[0]), places, signed)
+        high = _number(rec.get(bounds[1]), places, signed)
         if low and high:
+            note = str(spec.get("range_note") or "mean min to max")
             lines.append(tip_row(str(spec.get("range_label", "Range")), "",
-                                 f"{low} to {high} (mean min to max)"))
+                                 f"{low} to {high} ({note})"))
     for extra in spec.get("tip_rows") or []:
         if not isinstance(extra, dict) or not extra.get("column"):
             continue

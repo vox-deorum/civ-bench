@@ -64,12 +64,14 @@ class Baseline:
 
     ``kind`` is ``"completed"`` (every strategist in a completed experiment, each
     part of its own baseline) or ``"experiments"`` (the named experiments, whose
-    own rows leave the relative view).
+    own rows leave the relative view). ``in_game_ai`` marks the first strength
+    stage's baseline experiment alone.
     """
 
     kind: str
     experiments: tuple[str, ...]
     label: str
+    in_game_ai: bool = False
 
     @property
     def self_included(self) -> bool:
@@ -94,6 +96,8 @@ class BehaviorViews:
     # in absolute terms (the pinned baseline row of the HTML heatmaps).
     baseline_summary: dict = field(default_factory=dict)
     dropped_metrics: list[str] = field(default_factory=list)
+    # Companion columns the relative rows hold as differences from the baseline.
+    shifted: set = field(default_factory=set)
     n_unmatched: int = 0
     n_baseline_rows: int = 0
     n_baseline_experiments: int = 0
@@ -166,7 +170,7 @@ def resolve_baseline(ctx: AnalysisContext, params: dict, default: Optional[str] 
         label = f"matched '{names[0]}'"
     else:
         label = f"matched average of {len(names)} experiments"
-    return Baseline("experiments", names, label)
+    return Baseline("experiments", names, label, in_game_ai=names == (in_game_ai,))
 
 
 def stage_rng(ctx: AnalysisContext, *parts) -> np.random.Generator:
@@ -248,6 +252,7 @@ def build_views(
     metrics: list[str],
     cells: Optional[pd.DataFrame],
     baseline: Optional[Baseline],
+    companions: Optional[dict] = None,
 ) -> BehaviorViews:
     """Build the absolute rows and, when the design allows, the relative rows.
 
@@ -255,6 +260,9 @@ def build_views(
     both already carrying numeric metric columns. Players with no value for any
     metric (for example in-game AI opponents on the flavor page) are left out
     of both views, so player counts cover only players who were measured.
+    ``companions`` maps a metric to more columns of the same unit (such as its
+    per-player min and max); relative rows shift them by the metric's baseline
+    cell mean too, so a range reads as a difference from the baseline.
     """
     rows = rows[rows[metrics].notna().any(axis=1)] if metrics else rows
     views = BehaviorViews(absolute=rows.reset_index(drop=True), relative=None,
@@ -299,7 +307,12 @@ def build_views(
     views.n_unmatched = int((~has_cell).sum())
     matched = matched[has_cell].copy()
     for metric in usable:
-        matched[metric] = matched[metric] - matched.pop(f"{metric}__baseline")
+        base = matched.pop(f"{metric}__baseline")
+        matched[metric] = matched[metric] - base
+        for column in (companions or {}).get(metric, ()):
+            if column in matched.columns:
+                matched[column] = matched[column] - base
+                views.shifted.add(column)
     for metric in views.dropped_metrics:
         matched = matched.drop(columns=metric)
     if matched.empty:
@@ -450,16 +463,25 @@ def relative_colors(summary: pd.DataFrame, baseline_sd: dict, by: str) -> dict:
     return colors
 
 
-def views_metadata(declared: dict, baseline: Optional[Baseline] = None) -> dict:
-    """``metadata["views"]`` in display order, relative first, skipping empty views."""
+def views_metadata(declared: dict, baseline: Optional[Baseline] = None,
+                   extra: Optional[dict] = None) -> dict:
+    """``metadata["views"]`` in display order, skipping empty views.
+
+    Relative comes first, then absolute, then any other declared view in
+    declaration order, labeled by ``extra[name] = (label, tip)``.
+    """
+    labels = dict(VIEW_LABELS)
     tips = dict(VIEW_TIPS)
     if baseline is not None:
         tips[RELATIVE] = baseline.view_label
+    for name, (label, tip) in (extra or {}).items():
+        labels[name], tips[name] = label, tip
+    order = [RELATIVE, ABSOLUTE] + [n for n in declared if n not in (RELATIVE, ABSOLUTE)]
     out = {}
-    for name in (RELATIVE, ABSOLUTE):
+    for name in order:
         spec = declared.get(name)
         if spec and (spec.get("tables") or spec.get("figures")):
-            out[name] = {"label": VIEW_LABELS[name], "tip": tips[name], **spec}
+            out[name] = {"label": labels.get(name, name), "tip": tips.get(name, ""), **spec}
     return out
 
 
@@ -616,6 +638,7 @@ def heatmap_spec(
     ci_level: float,
     legend: list,
     range_label: str = "",
+    range_note: str = "",
     baseline_rows: Optional[list] = None,
 ) -> dict:
     """The ``metadata["heatmaps"]`` entry for one view's table (layout only)."""
@@ -645,6 +668,8 @@ def heatmap_spec(
     if range_label:
         spec["range_columns"] = ["mean_min", "mean_max"]
         spec["range_label"] = range_label
+        if range_note:
+            spec["range_note"] = range_note
     if baseline_rows:
         spec["baseline_rows"] = list(baseline_rows)
     return spec
