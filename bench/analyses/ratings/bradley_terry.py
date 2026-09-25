@@ -30,7 +30,7 @@ class RatingsBradleyTerry(RatingsAnalysis):
         "from pairwise comparisons of model-adjusted strength within each game "
         "(Bradley-Terry Elo ratings)."
     )
-    report_defaults = {"tables": [], "figures": ["ratings"]}
+    report_defaults = {"tables": ["strategy_ratings"], "figures": ["ratings"]}
 
     def _margin_for(self, strength_df: pd.DataFrame):
         if not bool(self.params.get("weighted", True)):

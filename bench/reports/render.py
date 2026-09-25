@@ -216,11 +216,12 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         )
         lines.append("")
         return
-    _render_artifacts_md(section.figures, section.tables, lines)
+    # Artifacts no view claims follow the views, so a section's tabs lead.
     for view in section.views:
         lines.append(f"**{view.label}**")
         lines.append("")
         _render_artifacts_md(view.figures, view.tables, lines)
+    _render_artifacts_md(section.figures, section.tables, lines)
     if section.downloads:
         lines.append("**Downloads and supporting files**")
         lines.append("")
@@ -631,9 +632,10 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         parts.append(render_curve_views_html(
             section.curve_charts, anchor, "assets/plotly.min.js", captions=True,
         ))
-    _render_artifacts_html(section.figures, section.tables, parts, anchor)
+    # Artifacts no view claims follow the views, so a section's tabs lead.
     if section.views:
         _render_views_html(section, parts, anchor)
+    _render_artifacts_html(section.figures, section.tables, parts, anchor)
     if section.downloads:
         parts.append('<details class="downloads">')
         parts.append(
@@ -654,8 +656,10 @@ def _render_artifacts_html(figures, tables, parts: list[str], anchor: str = "") 
         if figure.interactive:
             escaped_path = _html.escape(figure.rel_path)
             escaped_caption = _html.escape(figure.caption)
+            # A fixed-height chart gets a frame that fits it, so it never scrolls inside.
+            style = f' style="height:{figure.height + 20}px;min-height:0"' if figure.height else ""
             parts.append(
-                f'<figure><iframe class="interactive-figure" src="{escaped_path}" '
+                f'<figure><iframe class="interactive-figure"{style} src="{escaped_path}" '
                 f'title="{escaped_caption}" loading="lazy"></iframe>'
                 f'<figcaption class="caption">{escaped_caption}</figcaption>'
                 f'<p class="interactive-figure-link"><a href="{escaped_path}">'

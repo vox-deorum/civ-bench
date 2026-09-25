@@ -122,3 +122,94 @@ if (tooltip.style.display !== "none") throw new Error("resize did not hide toolt
     )
 
     assert result.returncode == 0, result.stderr
+
+
+# ── interactive forest plot and shared heatmap labels ─────────────────────────
+def _pairing_setup(configs_dir):
+    import bench.analyses  # noqa: F401  (loads the package in its normal order)
+    from bench.catalog import Catalog
+    from bench.plotting.pairing import PairingSpec
+
+    catalog = Catalog.from_paths(configs_dir / "models.json", configs_dir / "experiments.json")
+    return catalog, PairingSpec(("-Per-5",), "base", "Every-turn")
+
+
+def test_interactive_forest_has_one_tooltip_trace_per_point(configs_dir):
+    import pandas as pd
+
+    from bench.plotting.pairing import plot_paired_rows_interactive
+
+    catalog, spec = _pairing_setup(configs_dir)
+    frame = pd.DataFrame([
+        {"player_type": "GPT-OSS-120B-Simple", "elo": 1600.0, "lo": 1570.0, "hi": 1640.0, "tip": "1,600"},
+        {"player_type": "GPT-OSS-120B-Simple-Per-5", "elo": 1580.0, "lo": 1550.0, "hi": 1600.0, "tip": "1,580"},
+        {"player_type": "Opus-5.5-Simple", "elo": 1650.0, "lo": 1600.0, "hi": 1700.0, "tip": "1,650"},
+        {"player_type": "Vanilla", "elo": 1500.0, "lo": None, "hi": None, "tip": "1,500"},
+    ])
+    figure = plot_paired_rows_interactive(
+        frame, catalog=catalog, spec=spec, value_col="elo", identity_col="player_type",
+        lo_col="lo", hi_col="hi", ref_line=1500, tooltip=[("Elo", "tip")], xlabel="Elo",
+    )
+
+    points = [trace for trace in figure.data if trace.meta and trace.meta.get("table_tooltip")]
+    assert len(points) == 4
+    by_name = {trace.name: trace for trace in points}
+    assert list(by_name["GPT-OSS-120B-Simple"].customdata[0]) == ["GPT-OSS-120B-Simple", "Every-turn", "1,600"]
+    assert by_name["GPT-OSS-120B-Simple-Per-5"].marker.symbol == "diamond-open"
+    assert by_name["GPT-OSS-120B-Simple"].error_x.arrayminus == (30.0,)
+    assert by_name["Vanilla"].error_x.type is None
+    # One legend-only trace per plotted condition toggles its points.
+    legend = [trace for trace in figure.data if trace.showlegend and trace.mode == "markers"]
+    assert [(trace.name, trace.legendgroup) for trace in legend] == [
+        ("Every-turn", "base"), ("Per-5", "-Per-5"),
+    ]
+    reference = [trace for trace in figure.data if trace.mode == "lines"]
+    assert len(reference) == 1 and reference[0].x == (1500, 1500)
+    # Rows sort by the base condition, highest first; a missing condition is noted.
+    assert figure.layout.yaxis.ticktext[1:] == ("GPT-OSS-120B-Simple", "Vanilla")
+    assert "(base only)" in figure.layout.yaxis.ticktext[0]
+    assert figure.layout.meta["table_tooltip"]["rows"] == [{"label": "Elo", "index": 2, "emphasis": True}]
+    assert figure.layout.height == 360
+    assert "plotly_hover" in figure_html(figure, "forest", include_plotlyjs=False)
+
+
+def test_interactive_forest_returns_none_without_rows(configs_dir):
+    import pandas as pd
+
+    from bench.plotting.pairing import plot_paired_rows_interactive
+
+    catalog, spec = _pairing_setup(configs_dir)
+    assert plot_paired_rows_interactive(
+        pd.DataFrame(), catalog=catalog, spec=spec, value_col="elo", identity_col="player_type",
+    ) is None
+
+
+@pytest.mark.parametrize("paired, labels, order", [
+    (True,
+     {"GPT-OSS-120B-Simple-Per-5": "GPT-OSS-120B-Simple | Per-5", "Vanilla": "Vanilla",
+      "GPT-OSS-120B-Simple": "GPT-OSS-120B-Simple | Every-turn", "Null": "Null"},
+     ["Null", "Vanilla", "GPT-OSS-120B-Simple | Every-turn", "GPT-OSS-120B-Simple | Per-5"]),
+    (False,
+     {"GPT-OSS-120B-Simple-Per-5": "GPT-OSS-120B-Simple-Per-5", "Vanilla": "Vanilla",
+      "GPT-OSS-120B-Simple": "GPT-OSS-120B-Simple", "Null": "Null"},
+     ["Null", "Vanilla", "GPT-OSS-120B-Simple", "GPT-OSS-120B-Simple-Per-5"]),
+])
+def test_identity_labels_match_heatmap_rows(configs_dir, paired, labels, order):
+    import pandas as pd
+
+    from bench.analyses.heatmap_layout import heatmap_rows, identity_labels
+
+    catalog, spec = _pairing_setup(configs_dir)
+
+    class Context:
+        def __init__(self):
+            self.catalog = catalog
+
+        def condition_pairing(self):
+            return spec if paired else None
+
+    identities = list(labels)
+    assert identity_labels(Context(), identities) == (labels, order)
+    rows, row_order = heatmap_rows(Context(), pd.DataFrame({"player_type": identities}), "player_type")
+    assert row_order == order
+    assert rows["row_label"].tolist() == [labels[i] for i in identities]

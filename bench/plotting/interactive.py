@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import Optional
+
+# The report's one shared copy of the Plotly runtime, under its assets folder.
+PLOTLY_ASSET = "plotly.min.js"
+
 
 def _table_tooltip_post_script() -> str:
     """Return the opt-in table-tooltip behavior installed after Plotly renders."""
@@ -137,8 +143,29 @@ def figure_html(
     )
 
 
+@lru_cache(maxsize=1)
 def plotly_javascript() -> str:
     """Return the installed Plotly runtime for the report's local asset tree."""
     from plotly.offline import get_plotlyjs
 
     return get_plotlyjs()
+
+
+def share_plotly(html: str, src: str) -> Optional[str]:
+    """``html`` with its embedded Plotly runtime replaced by ``<script src=src>``.
+
+    A standalone chart embeds the whole runtime (about 4.7 MB). A report that
+    copies several charts links each one to a single shared copy instead.
+    Returns ``None`` when ``html`` does not embed the installed runtime, for
+    example a chart saved by another Plotly version, so it is left as it is.
+    """
+    bundle = plotly_javascript()
+    start = html.find(bundle)
+    if start < 0:
+        return None
+    open_tag = html.rfind("<script", 0, start)
+    end = html.find("</script>", start + len(bundle))
+    if open_tag < 0 or end < 0 or "</script>" in html[open_tag:start]:
+        return None
+    end += len("</script>")
+    return f'{html[:open_tag]}<script charset="utf-8" src="{src}"></script>{html[end:]}'

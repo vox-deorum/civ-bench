@@ -6,6 +6,11 @@ reference), optionally relabel identities for a multi-dimension ``group_by``
 (``["player_type","strategy"]`` ⇒ per-strategy Elo via the ``strategy`` grouping,
 exactly the legacy ``strategy_ratings`` composite trick), fit the MLE rating, and
 optionally attach bootstrap CIs. The subclass only supplies the per-fit calculator.
+
+A single ``group_by`` shows an interactive Elo forest plot (figure ``ratings``);
+a strategy ``group_by`` shows the ``strategy_ratings`` HTML heatmap of Elo per
+player type and strategy (:mod:`bench.analyses.ratings.heatmaps`). The saved
+``ratings`` table keeps its shape either way.
 """
 
 from __future__ import annotations
@@ -156,7 +161,8 @@ class RatingsAnalysis(Analysis):
             ratings, boot_summary = self._maybe_bootstrap(
                 ctx, full_panel, panel, ratings, reference, bootstrap, "player_type"
             )
-            fig = self._forest(ratings, ctx, "player_type", metadata)
+            ci_level = float((bootstrap or {}).get("ci_level", 0.95))
+            fig = self._forest(ratings, ctx, panel, reference, metadata, ci_level)
             tables = {"ratings": ratings}
             return AnalysisResult(tables=tables, figures={"ratings": fig} if fig is not None else {},
                                   summary=summary, metadata=metadata)
@@ -170,7 +176,11 @@ class RatingsAnalysis(Analysis):
         general = self._calculate(panel, reference)
         general = self._attach_appearances(general, panel, "player_type")
         ratings = self._strategy_ratings(ctx, panel, extra_dims, reference)
-        fig = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference, metadata)
+        tables = {"ratings": ratings}
+        if not ratings.empty:
+            heat, spec = self._strategy_heatmap(ratings, general, ctx, extra_dims[0], reference)
+            tables["strategy_ratings"] = heat
+            metadata["heatmaps"] = {"strategy_ratings": spec}
         if ratings.empty:
             summary = (
                 "No grouped ratings have enough games for a skill estimate."
@@ -183,9 +193,7 @@ class RatingsAnalysis(Analysis):
                 f"player and condition combinations at **{top['elo']:.0f} Elo** "
                 f"across **{groups}** groups."
             )
-        return AnalysisResult(tables={"ratings": ratings},
-                              figures={"ratings": fig} if fig is not None else {},
-                              summary=summary, metadata=metadata)
+        return AnalysisResult(tables=tables, summary=summary, metadata=metadata)
 
     # ── strategy (multi-dim) path ────────────────────────────────────────────────
     def _strategy_ratings(self, ctx, panel, extra_dims, reference) -> pd.DataFrame:
@@ -235,144 +243,15 @@ class RatingsAnalysis(Analysis):
         out["appearances"] = out[identity_col].map(counts)
         return out
 
-    def _strategy_heatmap(
-        self,
-        ratings: pd.DataFrame,
-        general: pd.DataFrame,
-        ctx: AnalysisContext,
-        dim: str,
-        reference: str,
-        metadata: dict,
-    ):
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        from scipy.stats import norm
-
-        if ratings.empty:
-            return None
+    def _strategy_heatmap(self, ratings, general, ctx: AnalysisContext, dim: str, reference: str):
+        """The ``strategy_ratings`` heatmap table and spec: General, then each strategy."""
+        from .heatmaps import strategy_heatmap
 
         configured = list((ctx.config.groupings.get(dim) or {}).get("labels") or [])
         observed = [s for s in ratings["strategy"].dropna().astype(str).unique()]
         strategies = configured + sorted(s for s in observed if s not in configured)
-        columns = ["General", *strategies]
-
-        row_order = (
-            general.sort_values("elo", ascending=False)["player_type"].astype(str).tolist()
-        )
-        missing_rows = sorted(set(ratings["player_type"].astype(str)) - set(row_order))
-        player_types = row_order + missing_rows
-
-        values = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
-        se = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
-        appearances = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
-        pct = pd.DataFrame(np.nan, index=player_types, columns=columns, dtype=float)
-
-        for row in general.itertuples(index=False):
-            pt = str(getattr(row, "player_type"))
-            if pt not in values.index:
-                continue
-            values.loc[pt, "General"] = float(getattr(row, "elo"))
-            se.loc[pt, "General"] = float(getattr(row, "se_elo", np.nan))
-            appearances.loc[pt, "General"] = float(getattr(row, "appearances", np.nan))
-
-        for row in ratings.itertuples(index=False):
-            pt = str(getattr(row, "player_type"))
-            strategy = str(getattr(row, "strategy"))
-            if pt not in values.index or strategy not in values.columns:
-                continue
-            values.loc[pt, strategy] = float(getattr(row, "elo"))
-            se.loc[pt, strategy] = float(getattr(row, "se_elo", np.nan))
-            appearances.loc[pt, strategy] = float(getattr(row, "appearances", np.nan))
-
-        strategy_counts = appearances[strategies]
-        row_totals = strategy_counts.sum(axis=1).replace(0, np.nan)
-        pct[strategies] = strategy_counts.div(row_totals, axis=0) * 100
-
-        finite = values.to_numpy(dtype=float)
-        finite = finite[np.isfinite(finite)]
-        if finite.size:
-            delta = max(float(np.nanmax(np.abs(finite - 1500))), 1.0)
-            vmin, vmax = 1500 - delta, 1500 + delta
-        else:
-            vmin, vmax = 1400, 1600
-
-        fig, ax = plt.subplots(
-            figsize=(max(8.5, 1.45 * len(columns) + 4), max(4.0, 0.62 * len(player_types) + 1.5))
-        )
-        sns.heatmap(
-            values,
-            annot=False,
-            cmap="RdYlGn",
-            center=1500,
-            vmin=vmin,
-            vmax=vmax,
-            linewidths=0.5,
-            linecolor="white",
-            cbar_kws={"label": "Elo"},
-            ax=ax,
-        )
-
-        ref_label = reference if reference in values.index else ctx.catalog.vanilla_label
-        ref_elo = values.loc[ref_label] if ref_label in values.index else None
-        ref_se = se.loc[ref_label] if ref_label in se.index else None
-
-        for i, pt in enumerate(values.index):
-            for j, col in enumerate(values.columns):
-                elo_val = values.loc[pt, col]
-                if pd.isna(elo_val):
-                    continue
-                se_val = se.loc[pt, col]
-                stars = ""
-                if ref_elo is not None and pt != ref_label and pd.notna(ref_elo.get(col)):
-                    ref_se_val = ref_se.get(col) if ref_se is not None else np.nan
-                    combined = np.sqrt(
-                        (se_val if pd.notna(se_val) else 0.0) ** 2
-                        + (ref_se_val if pd.notna(ref_se_val) else 0.0) ** 2
-                    )
-                    if combined > 0:
-                        p = 2 * norm.sf(abs((elo_val - ref_elo[col]) / combined))
-                        stars = self._sig_stars(p)
-                top = f"{elo_val:.0f}"
-                if pd.notna(se_val):
-                    top += f" +/- {se_val:.0f}"
-                top += stars
-                ax.text(j + 0.5, i + 0.42, top, ha="center", va="center",
-                        fontsize=9, color="black")
-
-                n_val = appearances.loc[pt, col]
-                if pd.notna(n_val):
-                    pct_val = pct.loc[pt, col]
-                    if pd.isna(pct_val):
-                        detail = f"(n={int(n_val)})"
-                    else:
-                        detail = f"(n={int(n_val)}, {pct_val:.0f}%)"
-                    ax.text(j + 0.5, i + 0.68, detail, ha="center", va="center",
-                            fontsize=7, color="#444444")
-
-        ax.set_title(f"{self.module} strategy ratings", fontsize=12, fontweight="bold")
-        ax.set_xlabel(
-            f"* p<0.05, ** p<0.01, *** p<0.001 (z-test vs {ref_label})",
-            fontsize=8,
-            color="#666666",
-        )
-        ax.set_ylabel("")
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
-        plt.setp(ax.get_yticklabels(), rotation=0, fontsize=9)
-        self._add_provenance_note(fig, metadata)
-        fig.tight_layout(rect=(0, 0.04, 1, 1))
-        return fig
-
-    @staticmethod
-    def _sig_stars(p: float) -> str:
-        if pd.isna(p):
-            return ""
-        if p < 0.001:
-            return "***"
-        if p < 0.01:
-            return "**"
-        if p < 0.05:
-            return "*"
-        return ""
+        return strategy_heatmap(ctx, ratings, general, strategies, reference,
+                                f"{self.module} strategy ratings")
 
     # ── bootstrap ──────────────────────────────────────────────────────────────
     def _maybe_bootstrap(self, ctx, full_panel, narrowed, ratings, reference, bootstrap, identity_col):
@@ -455,65 +334,51 @@ class RatingsAnalysis(Analysis):
             f"**{top['elo']:.0f} Elo**; rating spread: **{rng:.0f}** points."
         )
 
-    def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, identity_col: str, metadata: dict):
-        import matplotlib.pyplot as plt
+    def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, panel: pd.DataFrame,
+                reference: str, metadata: dict, ci_level: float):
+        """The interactive Elo forest plot, with a table tooltip per point."""
+        from ...plotting.pairing import PairingSpec, plot_paired_rows_interactive
+        from .heatmaps import count_text, p_text
 
-        from ...plotting.styles import get_player_color
-
-        df = ratings.sort_values("elo", ascending=True).reset_index(drop=True)
+        df = self._attach_appearances(ratings, panel, "player_type")
         has_ci = "ci_lower" in df.columns and df["ci_lower"].notna().any()
-        pairing = ctx.condition_pairing() if identity_col == "player_type" else None
-        if pairing is not None:
-            from ...plotting.pairing import plot_paired_rows
-
-            return plot_paired_rows(
-                ratings,
-                catalog=ctx.catalog,
-                spec=pairing,
-                value_col="elo",
-                lo_col="ci_lower" if has_ci else None,
-                hi_col="ci_upper" if has_ci else None,
-                err_col=None if has_ci else "se_elo",
-                identity_col=identity_col,
-                ref_line=1500,
-                ascending=False,
-                xlabel=(
-                    "Elo rating (error bars: bootstrap CI)" if has_ci
-                    else "Elo rating (error bars: +/-1 SE)"
-                ),
-                title=f"{self.module} ratings",
-                provenance_note=self._provenance_text(metadata),
-            )
-        fig, ax = plt.subplots(figsize=(10, max(4, 0.42 * len(df) + 1.5)))
-        for i, row in df.iterrows():
-            name = str(row[identity_col])
-            # Color by the underlying model: a composite identity (player_type-strategy)
-            # has no catalog color of its own, so key off its base player_type.
-            color_key = str(row["player_type"]) if "player_type" in df.columns else name
-            color = get_player_color(ctx.catalog, color_key)
-            x = row["elo"]
-            if has_ci and pd.notna(row.get("ci_lower")):
-                lo, hi = row["ci_lower"], row["ci_upper"]
-                ax.errorbar(x, i, xerr=[[max(0, x - lo)], [max(0, hi - x)]], fmt="o",
-                            color=color, markersize=7, capsize=4, elinewidth=1.5, ecolor=color)
-            else:
-                # +/-1 SE, matching the raw `+/- se_elo` annotation in the strategy
-                # heatmap's General column so the generic category reads the same
-                # across both figures (the bootstrap branch above stays a true CI).
-                se = row.get("se_elo", 0) or 0
-                ax.errorbar(x, i, xerr=se, fmt="o", color=color, markersize=7,
-                            capsize=4, elinewidth=1.5, ecolor=color)
-        ax.axvline(1500, color="gray", linestyle="--", linewidth=1, label="Reference (1500)")
-        ax.set_yticks(range(len(df)))
-        ax.set_yticklabels(df[identity_col])
-        ax.set_xlabel("Elo rating (error bars: bootstrap CI)" if has_ci
-                      else "Elo rating (error bars: +/-1 SE)")
-        ax.set_title(f"{self.module} ratings", fontsize=12, fontweight="bold")
-        ax.legend(fontsize=9, loc="lower right")
-        ax.grid(True, axis="x", alpha=0.3)
-        self._add_provenance_note(fig, metadata)
-        fig.tight_layout(rect=(0, 0.04, 1, 1))
-        return fig
+        df["tip_elo"] = df["elo"].map(lambda v: f"{v:.0f}")
+        if has_ci:
+            error_label = f"{ci_level * 100:g}% CI"
+            df["tip_error"] = [
+                f"{lo:.0f} to {hi:.0f}" if pd.notna(lo) and pd.notna(hi) else ""
+                for lo, hi in zip(df["ci_lower"], df["ci_upper"])
+            ]
+        else:
+            error_label = "SE"
+            df["tip_error"] = df["se_elo"].map(lambda v: f"+/-{v:.0f}" if pd.notna(v) else "")
+        p_values = df["p_value"] if "p_value" in df.columns else pd.Series(np.nan, index=df.index)
+        df["tip_p"] = [
+            "" if str(identity) == reference else p_text(p)
+            for identity, p in zip(df["player_type"], p_values)
+        ]
+        df["tip_n"] = df["appearances"].map(count_text)
+        return plot_paired_rows_interactive(
+            df,
+            catalog=ctx.catalog,
+            spec=ctx.condition_pairing() or PairingSpec((), "base", "Identity"),
+            value_col="elo",
+            lo_col="ci_lower" if has_ci else None,
+            hi_col="ci_upper" if has_ci else None,
+            err_col=None if has_ci else "se_elo",
+            identity_col="player_type",
+            ref_line=1500,
+            ref_label=f"{reference} (1500)",
+            tooltip=[("Elo", "tip_elo"), (error_label, "tip_error"),
+                     (f"p vs {reference}", "tip_p"), ("Appearances", "tip_n")],
+            ascending=False,
+            xlabel=(
+                "Elo rating (error bars: bootstrap CI)" if has_ci
+                else "Elo rating (error bars: +/-1 SE)"
+            ),
+            title=f"{self.module} ratings",
+            provenance_note=self._provenance_text(metadata) or None,
+        )
 
     @staticmethod
     def _provenance_text(metadata: dict) -> str:
@@ -535,11 +400,3 @@ class RatingsAnalysis(Analysis):
         if block:
             bits.append(f"adjust block: {block}")
         return "; ".join(bits)
-
-    @classmethod
-    def _add_provenance_note(cls, fig, metadata: dict) -> None:
-        note = cls._provenance_text(metadata)
-        if not note:
-            return
-        fig.text(0.01, 0.01, note, ha="left", va="bottom",
-                 fontsize=8, color="#666666")

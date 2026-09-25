@@ -27,6 +27,7 @@ class Figure:
 
     caption: str
     rel_path: str  # e.g. "assets/bt_main/ratings.png", relative to the report dir
+    height: Optional[int] = None  # an interactive figure's layout height in pixels
 
     @property
     def interactive(self) -> bool:

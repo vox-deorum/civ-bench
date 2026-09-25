@@ -1364,7 +1364,25 @@ def test_ratings_strategy_group_by(env, monkeypatch):
     assert {"player_type", "strategy", "composite_type", "elo"} <= set(tbl.columns)
     # composite identity = player_type-strategy (the strategy grouping label)
     assert tbl["composite_type"].str.contains("-").all()
-    assert "ratings" in r.figure_paths
+    assert "ratings" not in r.figure_paths
+
+    from bench.reports.heatmap import heatmap_spec, spec_fits
+
+    heat = pd.read_csv(r.table_paths["strategy_ratings"])
+    spec = heatmap_spec(r.metadata, "strategy_ratings")
+    assert spec_fits(spec, heat)
+    assert spec["column_order"][0] == "General"
+    assert spec["reference_rows"] == ["Vanilla"]
+    assert set(heat["column_key"]) == {"General", *tbl["strategy"].astype(str)}
+    general = heat[heat["column_key"] == "General"].set_index("player_type")
+    vanilla = general.loc["Vanilla"]
+    assert vanilla["color_position"] == pytest.approx(0.5 + (vanilla["elo"] - 1500) / (
+        2 * max(abs(heat["elo"] - 1500).max(), 1.0)))
+    assert pd.isna(vanilla["p_value_vs_ref"])
+    assert general["share"].isna().all()
+    strategy_rows = heat[heat["column_key"] != "General"]
+    shares = strategy_rows.groupby("player_type")["share"].sum()
+    assert shares.to_numpy() == pytest.approx(np.full(len(shares), 100.0))
 
     manifest = json.loads(Path(r.manifest_path).read_text(encoding="utf-8"))
     assert isinstance(manifest["module_name"], str) and manifest["module_name"]
@@ -1435,6 +1453,127 @@ def test_matchups_vs_reference_falls_back_when_vanilla_absent(env):
     assert r.metadata["display"] == "matrix"
     assert r.metadata["warning"] == "reference 'Vanilla' is absent"
     assert "reference 'Vanilla' is absent" not in r.summary
+
+
+def test_ratings_matchups_matrix_heatmaps_and_views(env):
+    from bench.reports.heatmap import heatmap_spec, spec_fits
+
+    r = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    assert r.figure_paths == {}
+    assert list(r.metadata["views"]) == ["strength_winrate", "strength_mean"]
+    assert r.metadata["views"]["strength_winrate"]["tables"] == ["strength_winrate_heatmap"]
+    matrix = pd.read_csv(r.table_paths["strength_winrate"]).set_index("player_type")
+    heat = pd.read_csv(r.table_paths["strength_winrate_heatmap"])
+    spec = heatmap_spec(r.metadata, "strength_winrate_heatmap")
+    assert spec_fits(spec, heat)
+    assert spec["complete_grid"] and spec["row_order"] == spec["column_order"]
+    assert set(spec["row_order"]) == set(PLAYER_TYPES)
+    assert spec["reference_rows"] == ["Vanilla"]
+    assert spec["unit"] == "%"
+    assert not (heat["player_type"] == heat["opponent"]).any()
+    cell = heat.set_index(["player_type", "opponent"]).loc[("Kimi-K2.5", "Vanilla")]
+    assert cell["value"] == pytest.approx(100 * matrix.loc["Kimi-K2.5", "Vanilla"])
+    assert cell["color_position"] == pytest.approx(cell["value"] / 100)
+    assert cell["cell_text"] == f"{cell['value']:.0f}%"
+
+    mean = pd.read_csv(r.table_paths["strength_mean_heatmap"], dtype={"cell_text": str})
+    mean_spec = heatmap_spec(r.metadata, "strength_mean_heatmap")
+    assert spec_fits(mean_spec, mean) and mean_spec["signed"]
+    assert mean["color_position"].between(0, 1).all()
+    assert mean["color_position"].min() == pytest.approx(0.0) or mean["color_position"].max() == pytest.approx(1.0)
+    assert mean.loc[mean["value"].abs().idxmin(), "cell_text"].startswith(("+", "-"))
+
+
+def test_ratings_matchups_single_mode_has_no_views(env):
+    r = env("ratings.matchups", {"mode": "mean"}, {"tables": ["strength"]})
+    assert "views" not in r.metadata
+    assert set(r.metadata["heatmaps"]) == {"matchup_heatmap"}
+    assert "matchup_heatmap" in r.table_paths
+
+
+def test_matchup_heatmap_csvs_are_byte_stable(env):
+    first = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    before = {name: Path(first.table_paths[name]).read_bytes()
+              for name in ("strength_winrate_heatmap", "strength_mean_heatmap")}
+    second = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    for name, content in before.items():
+        assert Path(second.table_paths[name]).read_bytes() == content
+
+
+def test_ratings_matchups_vs_reference_plots_are_interactive(env):
+    env.cfg.presentation = {"matchup_display": "vs_reference"}
+    r = env("ratings.matchups", {"mode": "both"}, {"tables": ["strength"]})
+    assert all(Path(path).suffix == ".html" for path in r.figure_paths.values())
+    assert "heatmaps" not in r.metadata
+    assert r.metadata["views"]["strength_mean"]["figures"] == ["strength_mean"]
+
+
+def test_bt_forest_is_interactive_with_a_rating_tooltip(env, monkeypatch):
+    from bench.analyses.ratings.bradley_terry import RatingsBradleyTerry
+
+    monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", _fake_bt)
+    r = env("ratings.bradley_terry", {"group_by": ["player_type"], "ref": "Vanilla"},
+            {"tables": ["strength"]})
+    assert Path(r.figure_paths["ratings"]).suffix == ".html"
+
+    analysis = RatingsBradleyTerry("bt", {"group_by": ["player_type"], "ref": "Vanilla"})
+    ratings = _fake_bt(pd.read_csv(env.cfg.adjust[0].raw["save"]))
+    panel = pd.read_csv(env.cfg.adjust[0].raw["save"])
+
+    class _Ctx:
+        catalog = env.catalog
+
+        @staticmethod
+        def condition_pairing():
+            return None
+
+    figure = analysis._forest(ratings, _Ctx(), panel, "Vanilla", {}, 0.95)
+    rows = [row["label"] for row in figure.layout.meta["table_tooltip"]["rows"]]
+    assert rows == ["Elo", "SE", "p vs Vanilla", "Appearances"]
+    points = [trace for trace in figure.data if trace.customdata is not None]
+    assert not any(trace.showlegend for trace in figure.data if trace.mode == "markers")
+    by_identity = {trace.customdata[0][0]: list(trace.customdata[0]) for trace in points}
+    assert by_identity["Vanilla"][1] == ""  # no condition subtitle without pairing
+    assert by_identity["Vanilla"][4] == ""  # no p-value against itself
+    assert by_identity["Kimi-K2.5"][3] == "+/-40"
+    assert by_identity["Kimi-K2.5"][4] == "0.500"
+    seats = panel.drop_duplicates(["game_id", "player_id"]).groupby("player_type").size()
+    assert by_identity["Kimi-K2.5"][5] == str(seats["Kimi-K2.5"])
+    # Points sit on their row tick when there is only one condition.
+    assert all(float(trace.y[0]).is_integer() for trace in points)
+
+
+def test_matrix_heatmap_groups_opponents_by_strategist_when_paired(env):
+    from bench.analyses.ratings.outcome_matchups import RatingsOutcomeMatchups
+    from bench.plotting.pairing import PairingSpec
+
+    rows = []
+    for game in range(2):
+        for player_id, player_type in enumerate(["Vanilla", "A", "A-Per-5", "B"]):
+            rows.append({"game_id": f"g{game}", "player_id": player_id, "player_type": player_type,
+                         "is_winner": int(player_id == 1 + game), "score_ratio": 1.0 - 0.1 * player_id})
+
+    class _PairedContext(_OutcomeContext):
+        def condition_pairing(self):
+            return PairingSpec(("-Per-5",), "base", "Every-turn")
+
+    result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": True}).run(
+        _PairedContext(pd.DataFrame(rows), env.catalog)
+    )
+    spec = result.metadata["heatmaps"]["win_rate_heatmap"]
+    heat = result.tables["win_rate_heatmap"]
+    assert spec["row_heading"] == "Strategist | Condition"
+    assert spec["row_order"][0] == "Vanilla"
+    assert spec["column_group"] == "opponent_group"
+    assert spec["column_labels"]["A | Per-5"] == "Per-5"
+    assert spec["column_labels"]["A | Every-turn"] == "Every-turn"
+    assert spec["column_labels"]["Vanilla"] == "Vanilla"
+    assert spec["column_names"]["A | Per-5"] == "vs A | Per-5"
+    groups = dict(zip(heat["opponent"], heat["opponent_group"]))
+    assert groups == {"Vanilla": "Baselines", "A": "A", "A-Per-5": "A", "B": "B"}
+    # Rows follow the display order, so the saved CSV reads like the heatmap.
+    rank = {label: i for i, label in enumerate(spec["row_order"])}
+    assert list(heat["row_label"].map(rank)) == sorted(heat["row_label"].map(rank))
 
 
 def test_outcome_matchups_outputs(env):
@@ -1518,8 +1657,10 @@ class _OutcomeContext:
         return None
 
 
-def _figure_text(figure):
-    return " ".join(text.get_text() for axis in figure.axes for text in axis.texts)
+def _tooltip_values(figure):
+    """Every tooltip string of an interactive forest plot's points."""
+    return {str(value) for trace in figure.data if trace.customdata is not None
+            for row in trace.customdata for value in row}
 
 
 def test_outcome_matchups_reports_per_appearance_expected_rate_for_eight_players(env):
@@ -1542,11 +1683,19 @@ def test_outcome_matchups_reports_per_appearance_expected_rate_for_eight_players
     assert "12.5%" in result.summary
     assert "8-player games" in result.summary
     assert "featuring" not in result.summary
-    figure = result.figures["win_rate"]
-    assert "expected 12.5%" in _figure_text(figure)
-    assert "1/2" in _figure_text(figure)
-    assert "0/1" in _figure_text(figure)
-    assert "Counts = wins / player appearances" in figure.axes[0].get_xlabel()
+    assert result.figures == {}
+    heat = result.tables["win_rate_heatmap"].set_index(["player_type", "opponent"])
+    spec = result.metadata["heatmaps"]["win_rate_heatmap"]
+    assert heat.loc[("A", "Vanilla"), "cell_text"] == "50.0%"
+    assert heat.loc[("A", "Vanilla"), "wins_text"] == "1/2"
+    assert heat.loc[("Vanilla", "A"), "wins_text"] == "0/1"
+    assert heat.loc[("A", "Vanilla"), "expected"] == pytest.approx(12.5)
+    # Yellow at equal chance, full blue at twice that: 50% vs 12.5% is past full.
+    assert heat.loc[("A", "Vanilla"), "color_position"] == pytest.approx(1.0)
+    assert heat.loc[("Vanilla", "A"), "color_position"] == pytest.approx(0.0)
+    assert "equal chance" in spec["help"]
+    assert spec["reference_rows"] == ["Vanilla"]
+    assert list(result.metadata["views"]) == ["victory_rate", "score_margin"]
 
 
 def test_outcome_matchups_expected_rate_uses_full_game_size_after_filter(env):
@@ -1590,16 +1739,15 @@ def test_outcome_matchups_vs_reference_uses_expected_rate_and_binomial_validity(
     assert vs.loc["A", "p_value_win_rate"] == pytest.approx(
         binomtest(1, 2, p=0.125).pvalue
     )
-    axis = result.figures["win_rate"].axes[0]
-    assert "Expected (12.5%)" in [text.get_text() for text in axis.get_legend().get_texts()]
-    reference = next(line for line in axis.lines if line.get_linestyle() == "--")
-    assert list(reference.get_xdata()) == [0.125, 0.125]
-    assert axis.get_xlabel() == "Victory rate per player"
-    assert "1/2" in _figure_text(result.figures["win_rate"])
-    assert "0/2" in _figure_text(result.figures["win_rate"])
-    assert "Counts show wins / player appearances" in " ".join(
-        text.get_text() for text in result.figures["win_rate"].texts
-    )
+    figure = result.figures["win_rate"]
+    reference = next(trace for trace in figure.data if trace.mode == "lines")
+    assert reference.name == "Expected (12.5%)"
+    assert list(reference.x) == [0.125, 0.125]
+    assert figure.layout.xaxis.title.text == "Victory rate per player"
+    assert figure.layout.xaxis.tickformat == ".0%"
+    assert "1/2" in _tooltip_values(figure)
+    assert "0/2" in _tooltip_values(figure)
+    assert "Wins count per player appearance" in figure.layout.annotations[0].text
     assert "featuring" not in result.summary
 
     mixed = _outcome_panel([8, 4], winners={(0, 1)})
@@ -1607,7 +1755,7 @@ def test_outcome_matchups_vs_reference_uses_expected_rate_and_binomial_validity(
         _OutcomeContext(mixed, env.catalog, display="vs_reference")
     )
     assert pd.isna(mixed_result.tables["vs_reference"].set_index("player_type").loc["A", "p_value_win_rate"])
-    assert "expected 18.8%" in _figure_text(mixed_result.figures["win_rate"])
+    assert "18.8%" in _tooltip_values(mixed_result.figures["win_rate"])
 
     repeated = _outcome_panel([8], identity_seats={0: 2}, winners={(0, 1)})
     repeated_result = RatingsOutcomeMatchups("outcomes", {"include_score_ratio": False}).run(

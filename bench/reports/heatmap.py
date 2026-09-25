@@ -156,6 +156,20 @@ def heatmap_spec(metadata: dict, name: str) -> Optional[dict]:
     return spec if isinstance(spec, dict) else None
 
 
+def text_columns(spec: Optional[dict]) -> list[str]:
+    """The columns a spec shows as text, which a CSV read must keep as strings.
+
+    Read back as numbers, a cell text such as ``+0.50`` would lose its sign and
+    trailing zero.
+    """
+    if not isinstance(spec, dict):
+        return []
+    names = [spec.get(key) for key in OVERRIDE_KEYS]
+    names += [row.get("column") for row in spec.get("tip_rows") or []
+              if isinstance(row, dict) and row.get("text")]
+    return list(dict.fromkeys(n for n in names if isinstance(n, str) and n))
+
+
 def spec_fits(spec: Optional[dict], frame: pd.DataFrame) -> bool:
     """Whether ``frame`` has every column the spec needs; otherwise render plainly."""
     if not isinstance(spec, dict):

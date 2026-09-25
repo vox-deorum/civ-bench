@@ -7,8 +7,6 @@ from typing import Optional
 
 import pandas as pd
 
-from ..analyses.errors import AnalysisError
-
 
 @dataclass(frozen=True)
 class PairingSpec:
@@ -19,6 +17,10 @@ class PairingSpec:
 
 def resolve_pairing(global_block, stage_override, catalog) -> Optional[PairingSpec]:
     """Resolve a stage override over the global presentation setting."""
+    # Imported here: loading bench.analyses at module import would cycle back
+    # through the analyses that import this module.
+    from ..analyses.errors import AnalysisError
+
     global_cfg = dict(global_block or {})
     if isinstance(stage_override, bool):
         stage_cfg = {"enabled": stage_override}
@@ -326,4 +328,181 @@ def plot_paired_rows(
         fig.tight_layout(rect=(0, 0.04, 0.95, 1))
     else:
         fig.tight_layout(rect=(0, 0, 0.95, 1))
+    return fig
+
+
+_PLOTLY_SYMBOLS = {"o": "circle", "D": "diamond", "s": "square", "^": "triangle-up"}
+
+
+def _missing_note(spec: PairingSpec, present: set[str]) -> str:
+    """``(Base only)`` / ``(missing Brief)`` for an identity lacking some conditions."""
+    if len(present) == 1:
+        only = next(iter(present))
+        return f"({'base' if only == 'base' else only.lstrip('-')} only)"
+    missing = ", ".join(
+        _condition_label(spec, condition)
+        for condition in ("base", *spec.suffixes)
+        if condition not in present
+    )
+    return f"(missing {missing})"
+
+
+def plot_paired_rows_interactive(
+    df: pd.DataFrame,
+    *,
+    catalog,
+    spec: PairingSpec,
+    value_col: str,
+    identity_col: str,
+    lo_col: Optional[str] = None,
+    hi_col: Optional[str] = None,
+    err_col: Optional[str] = None,
+    ref_line: Optional[float] = None,
+    ref_label: Optional[str] = None,
+    tooltip: Optional[list[tuple[str, str]]] = None,
+    tooltip_note: Optional[str] = None,
+    row_order: Optional[list[str]] = None,
+    ascending: bool = False,
+    log_x: bool = False,
+    percent_x: bool = False,
+    provenance_note: Optional[str] = None,
+    xlabel: Optional[str] = None,
+    title: Optional[str] = None,
+):
+    """The Plotly version of :func:`plot_paired_rows`, with a table tooltip.
+
+    Rows, order, offsets, and colors follow :func:`plot_paired_rows`. Each point
+    is its own trace so it carries its own color and error bar; hidden
+    legend-only traces, one per condition, toggle that condition's points (a
+    spec without suffixes, pairing off, has no condition legend or subtitle).
+    ``tooltip`` lists ``(label, column)`` pairs of pre-formatted strings shown
+    under the identity and condition on hover (the first row in bold); without
+    it the tooltip shows the value. ``percent_x`` formats the axis as percents
+    of 1. Returns ``None`` when nothing can be plotted.
+    """
+    from html import escape
+
+    import plotly.graph_objects as go
+
+    from .styles import get_player_color
+
+    if df.empty:
+        return None
+    work = attach_pair_columns(df, catalog, spec, identity_col)
+    if row_order is None:
+        row_order = paired_sort_order(work, spec, value_col, ascending)
+    else:
+        row_order = list(dict.fromkeys(str(value) for value in row_order))
+    if not row_order:
+        return None
+
+    rows = list(tooltip or [(xlabel or value_col, "")])
+    y_by_identity = {identity: idx for idx, identity in enumerate(row_order)}
+    fig = go.Figure()
+    plotted_conditions: set[str] = set()
+    for _, row in work.iterrows():
+        identity = str(row["base_identity"])
+        if identity not in y_by_identity:
+            continue
+        value = pd.to_numeric(pd.Series([row.get(value_col)]), errors="coerce").iloc[0]
+        if pd.isna(value) or (log_x and value <= 0):
+            continue
+        value = float(value)
+        condition = str(row["condition"])
+        is_baseline = bool(row["is_baseline"])
+        group = "base" if is_baseline else condition
+        offset = 0.0 if is_baseline or not spec.suffixes else _condition_offset(spec, condition)
+        y = y_by_identity[identity] + offset
+        color = get_player_color(catalog, identity)
+        symbol = _PLOTLY_SYMBOLS.get(condition_marker(spec, condition), "circle")
+        if not (condition == "base" or is_baseline):
+            symbol += "-open"
+        error_x = None
+        if lo_col and hi_col and pd.notna(row.get(lo_col)) and pd.notna(row.get(hi_col)):
+            error_x = {
+                "type": "data", "symmetric": False,
+                "array": [max(0.0, float(row[hi_col]) - value)],
+                "arrayminus": [max(0.0, value - float(row[lo_col]))],
+            }
+        elif err_col and pd.notna(row.get(err_col)):
+            error_x = {"type": "data", "array": [abs(float(row[err_col]))]}
+        if error_x is not None:
+            error_x.update({"color": color, "thickness": 1.4, "width": 3})
+        details = [
+            str(row[identity_col]),
+            "" if is_baseline or not spec.suffixes else _condition_label(spec, condition),
+            *(
+                (str(row[column]) if column and pd.notna(row.get(column)) else "")
+                if column else f"{value:.4g}"
+                for _label, column in rows
+            ),
+        ]
+        fig.add_trace(go.Scatter(
+            x=[value], y=[y], mode="markers", error_x=error_x,
+            name=escape(str(row[identity_col])), legendgroup=group, showlegend=False,
+            marker={"color": color, "symbol": symbol, "size": 10, "line": {"width": 1.5, "color": color}},
+            customdata=[details], meta={"table_tooltip": True}, hoverinfo="none",
+        ))
+        plotted_conditions.add(group)
+
+    # Without pairing there is one condition, so no condition legend to filter by.
+    for condition in ("base", *spec.suffixes) if spec.suffixes else ():
+        if condition not in plotted_conditions:
+            continue
+        symbol = _PLOTLY_SYMBOLS.get(condition_marker(spec, condition), "circle")
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers", name=escape(_condition_label(spec, condition)),
+            legendgroup=condition, showlegend=True, hoverinfo="skip",
+            marker={"color": "#555555", "size": 10,
+                    "symbol": symbol if condition == "base" else symbol + "-open"},
+        ))
+    if ref_line is not None:
+        fig.add_trace(go.Scatter(
+            x=[ref_line, ref_line], y=[-0.5, len(row_order) - 0.5], mode="lines",
+            name=escape(ref_label or f"Reference ({ref_line:g})"), hoverinfo="skip",
+            line={"color": "gray", "dash": "dash", "width": 1},
+        ))
+
+    expected = {"base", *spec.suffixes}
+    ticktext = []
+    for identity in row_order:
+        label = escape(identity)
+        members = work[work["base_identity"].astype(str) == identity]
+        if not members.empty and not bool(members["is_baseline"].any()):
+            present = set(members["condition"].astype(str))
+            if present != expected:
+                label = (f'<span style="color:#888888">{label} '
+                         f"{escape(_missing_note(spec, present))}</span>")
+        ticktext.append(label)
+
+    annotations = []
+    if provenance_note:
+        annotations.append({
+            "x": 0, "y": 0, "xref": "paper", "yref": "paper", "xanchor": "left",
+            "yanchor": "top", "yshift": -48, "showarrow": False, "align": "left",
+            "text": escape(provenance_note), "font": {"size": 11, "color": "#666666"},
+        })
+    xaxis = {"title": escape(xlabel) if xlabel else None, "type": "log" if log_x else "linear",
+             "showgrid": True, "zeroline": False}
+    if percent_x:
+        xaxis["tickformat"] = ".0%"
+    fig.update_layout(
+        template="plotly_white",
+        title={"text": f"<b>{escape(title)}</b>" if title else None, "x": 0.02},
+        xaxis=xaxis,
+        yaxis={"tickmode": "array", "tickvals": list(range(len(row_order))), "ticktext": ticktext,
+               "range": [len(row_order) - 0.5, -0.5], "showgrid": False, "zeroline": False,
+               "automargin": True},
+        height=max(360, 34 * len(row_order) + 190),
+        margin={"t": 60, "b": 90 if provenance_note else 60},
+        hovermode="closest", annotations=annotations,
+        legend={"title": {"text": "Click to filter"}},
+        meta={"table_tooltip": {
+            "title_index": 0, "subtitle_index": 1, "note": tooltip_note,
+            "rows": [
+                {"label": label, "index": index + 2, **({"emphasis": True} if index == 0 else {})}
+                for index, (label, _column) in enumerate(rows)
+            ],
+        }},
+    )
     return fig

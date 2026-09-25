@@ -346,9 +346,9 @@ def test_baseline_defaults_to_the_strength_stage(behavior_env):
 
 
 @pytest.mark.parametrize("module, params, kwargs, note, declared", [
-    ("behavior.diplomacy", {}, {}, "no baseline is configured", ["absolute", "stance"]),
+    ("behavior.diplomacy", {}, {}, "no baseline is configured", ["absolute"]),
     ("behavior.diplomacy", {"baseline": BASELINE}, {"games": False}, "no controlled games",
-     ["absolute", "stance"]),
+     ["absolute"]),
     ("behavior.flavors", {}, {}, "no experiment is complete", ["absolute"]),
 ])
 def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, module, params, kwargs,
@@ -537,29 +537,37 @@ def test_diplomacy_leaves_out_the_null_strategist(behavior_env, tmp_path):
     assert "Null strategist" in result.metadata["heatmaps"]["diplomacy_absolute"]["help"]
 
 
-def test_diplomacy_stance_view_holds_the_relationship_columns(behavior_env):
+def test_diplomacy_stance_table_sits_outside_the_views(behavior_env):
     result, _ = behavior_env("behavior.diplomacy", {"baseline": BASELINE, "bootstrap_n": 20})
     views = result.metadata["views"]
-    assert list(views) == ["relative", "absolute", "stance"]
-    assert views["stance"]["label"] == "Stance"
-    assert views["stance"]["tables"] == ["stance_absolute", "stance_signals_absolute"]
+    # No Stance tab: the one stance table is left for the report to show under the views.
+    assert list(views) == ["relative", "absolute"]
+    assert all("stance_signals_absolute" not in v["tables"] for v in views.values())
     assert all(not v["figures"] for v in views.values())
+    assert "stance_absolute" not in result.table_paths
     for name in ("diplomacy_relative", "diplomacy_absolute"):
         assert set(_table(result, name)["metric"]) == {"persona_friendliness_avg", "persona_loyalty_avg"}
-    levels = _table(result, "stance_absolute")
+    table = _table(result, "stance_signals_absolute")
     # The in-game AI sets no stances, so only the LLM appears.
-    assert set(levels["player_type"]) == {LLM}
-    assert _cell(levels, LLM, "stance_public_avg") == pytest.approx(10.0)
-    assert _cell(levels, LLM, "stance_private_avg", "color_position") == pytest.approx(0.45)
-    signals = _table(result, "stance_signals_absolute")
-    assert set(signals["metric"]) == {"relationship_changes", "stance_masked_hostility_share",
-                                      "stance_masked_goodwill_share"}
+    assert set(table["player_type"]) == {LLM}
+    spec = result.metadata["heatmaps"]["stance_signals_absolute"]
+    assert spec["column_order"] == [
+        "relationship_changes", "stance_public_avg", "stance_private_avg", "stance_net_avg",
+        "stance_masked_hostility_share", "stance_masked_goodwill_share",
+    ]
+    assert spec["column_group"] == "metric_group"
+    groups = dict(zip(table["metric"], table["metric_group"]))
+    assert groups["relationship_changes"] == "Activity"
+    assert groups["stance_net_avg"] == "Stance"
+    assert groups["stance_masked_goodwill_share"] == "Mixed signals"
+    # Stance levels keep their fixed scale; the other columns stay z-scores.
+    assert _cell(table, LLM, "stance_public_avg") == pytest.approx(10.0)
+    assert _cell(table, LLM, "stance_private_avg", "color_position") == pytest.approx(0.45)
     # Masked shares read as percents.
-    assert _cell(signals, LLM, "stance_masked_hostility_share") == pytest.approx(25.0)
-    assert _cell(signals, LLM, "relationship_changes") == pytest.approx(4.0)
+    assert _cell(table, LLM, "stance_masked_hostility_share") == pytest.approx(25.0)
+    assert _cell(table, LLM, "relationship_changes") == pytest.approx(4.0)
     assert not any("relationship_targets" in set(_table(result, n)["metric"])
                    for n in result.table_paths if n.startswith(("stance", "diplomacy_")))
-    assert result.metadata["heatmaps"]["stance_signals_absolute"]["column_group"] == "metric_group"
     assert "masked hostility" in result.summary and "25.0%" in result.summary
 
 

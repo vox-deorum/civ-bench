@@ -15,7 +15,8 @@ the strategist players of every experiment that fills the controlled grid. It
 is read from the unfiltered table (minus problem games and decision-failure
 games), so player filters such as ``only_llm`` cannot remove it.
 
-:func:`heatmap_rows`, :func:`color_positions`, and :func:`heatmap_spec` turn a
+:func:`heatmap_rows` (from :mod:`bench.analyses.heatmap_layout`),
+:func:`color_positions`, and :func:`heatmap_spec` turn a
 view's summary into the long table and layout spec the report draws as an HTML
 heatmap, so every page labels, orders, and colors its cells the same way.
 """
@@ -31,10 +32,10 @@ import numpy as np
 import pandas as pd
 
 from ...config import schema as S
-from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ...plotting.styles import sort_player_types
 from ..base import AnalysisContext
 from ..errors import AnalysisError
+from ..heatmap_layout import heatmap_rows  # noqa: F401  (re-exported for the modules)
 
 RELATIVE = "relative"
 ABSOLUTE = "absolute"
@@ -416,58 +417,6 @@ def views_metadata(declared: dict, baseline: Optional[Baseline] = None,
 
 
 # ── HTML heatmap tables ───────────────────────────────────────────────────────
-def heatmap_rows(ctx: AnalysisContext, summary: pd.DataFrame, by: str) -> tuple[pd.DataFrame, list[str]]:
-    """Add ``strategist``, ``condition``, and ``row_label``, and return the row order.
-
-    With condition pairing on and ``by == "player_type"``, a row reads
-    "Strategist | Condition" and rows sort like Matched Maps: the Null and
-    Vanilla baselines first, then catalog strategist order, then condition
-    order. Otherwise the row label is the group value, in :func:`order_groups`.
-    """
-    out = summary.copy()
-    groups = [str(g) for g in dict.fromkeys(out[by].astype(str))]
-    spec = ctx.condition_pairing() if by == "player_type" else None
-    baselines = [ctx.catalog.null_label, ctx.catalog.vanilla_label]
-    if spec is None:
-        out["strategist"], out["condition"] = out[by].astype(str), ""
-        out["row_label"] = out[by].astype(str)
-        order = sort_player_types(groups) if by == "player_type" else sorted(groups)
-        return out, order
-
-    identity: dict[str, tuple[str, str, str]] = {}
-    keys: set[str] = set()
-    for group in groups:
-        if group in baselines:
-            identity[group] = (group, "", group)
-            continue
-        strategist, suffix = ctx.catalog.split_condition_suffix(group, list(spec.suffixes))
-        key = "base" if not suffix else suffix
-        keys.add(key)
-        condition = condition_display(spec, key, ctx.catalog.vanilla_label)
-        identity[group] = (str(strategist), condition, f"{strategist} | {condition}")
-    strategist_rank = {
-        name: i for i, name in enumerate(order_strategists(
-            ctx.catalog, [v[0] for g, v in identity.items() if g not in baselines]
-        ))
-    }
-    condition_rank = {
-        name: i for i, name in enumerate(order_conditions(spec, keys, ctx.catalog.vanilla_label))
-    }
-
-    def rank(group: str):
-        strategist, condition, _label = identity[group]
-        if group in baselines:
-            return (0, baselines.index(group), 0, "")
-        return (1, strategist_rank.get(strategist, len(strategist_rank)),
-                condition_rank.get(condition, len(condition_rank)), group)
-
-    ordered = sorted(groups, key=rank)
-    out["strategist"] = out[by].astype(str).map(lambda g: identity[g][0])
-    out["condition"] = out[by].astype(str).map(lambda g: identity[g][1])
-    out["row_label"] = out[by].astype(str).map(lambda g: identity[g][2])
-    return out, [identity[g][2] for g in ordered]
-
-
 def color_positions(
     summary: pd.DataFrame,
     view: str,

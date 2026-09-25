@@ -89,6 +89,7 @@ def run_analysis(
 
     table_paths: dict[str, str] = {}
     figure_paths: dict[str, str] = {}
+    figure_heights: dict[str, int] = {}
     artifact_paths: dict[str, str] = {}
     # Always create the dir + write a manifest, even for an empty result, so the
     # report stage can record the section as produced-but-empty rather than
@@ -103,6 +104,8 @@ def run_analysis(
             if isinstance(fig, BaseFigure):
                 path = out_dir / f"{name}.html"
                 path.write_text(figure_html(fig, name), encoding="utf-8")
+                if fig.layout.height:
+                    figure_heights[name] = int(fig.layout.height)
             else:
                 path = out_dir / f"{name}.png"
                 fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -125,6 +128,7 @@ def run_analysis(
         artifact_paths,
         module_name=module_name,
         module_description=module_description,
+        figure_heights=figure_heights,
     )
 
     return AnalysisRunResult(
@@ -150,6 +154,7 @@ def _write_manifest(
     artifact_paths: dict[str, str],
     module_name: str = "",
     module_description: str = "",
+    figure_heights: dict[str, int] | None = None,
 ) -> Path:
     """Persist a ``result.json`` describing the produced artifacts.
 
@@ -161,6 +166,8 @@ def _write_manifest(
     ``module_description`` carry the module's resolved name and description:
     the report combines them with any per-stage ``name``/``description`` override
     from the run-spec without importing the analysis registry (invariant 3).
+    An interactive figure with a fixed layout height records it as ``height``
+    (pixels), so the report can size the figure's frame to fit.
     """
     manifest = {
         "id": stage_id,
@@ -175,7 +182,8 @@ def _write_manifest(
             for name, path in table_paths.items()
         ],
         "figures": [
-            {"name": name, "file": Path(path).name}
+            {"name": name, "file": Path(path).name,
+             **({"height": figure_heights[name]} if name in (figure_heights or {}) else {})}
             for name, path in figure_paths.items()
         ],
         "artifacts": [

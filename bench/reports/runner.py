@@ -13,6 +13,7 @@ artifacts without re-running any analysis (invariant 3).
 
 Import-light relative to the analysis runner: it needs pandas + the stdlib only
 (analysis figures are already PNG or self-contained Plotly HTML files on disk).
+Copied Plotly figures are relinked to one shared ``assets/plotly.min.js``, and
 Matched Maps loads Plotly when rendering its probability charts.
 """
 
@@ -30,6 +31,7 @@ from typing import Optional
 import pandas as pd
 
 from bench.config.filters import resolve_filter_spec
+from bench.plotting.interactive import PLOTLY_ASSET, plotly_javascript, share_plotly
 
 from ..config import RunConfig
 from ..config import schema as S
@@ -37,7 +39,7 @@ from ..config.analysis_metadata import analysis_report_defaults
 from ..pipeline import build_dag
 from .context import ReportBuildContext
 from .errors import ReportError
-from .heatmap import heatmap_spec, spec_fits
+from .heatmap import heatmap_spec, spec_fits, text_columns
 from .model import CurveChart, Download, Figure, GameLogDocument, Section, Table, View
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
@@ -250,8 +252,14 @@ def _build_section(
             source_root=src_dir,
         )
         if rel is not None:
+            if rel.endswith(".html"):
+                _link_shared_plotly(assets_root, rel)
             caption = _caption(stage_id, fig["name"])
-            figure = Figure(caption=caption, rel_path=rel)
+            height = fig.get("height")
+            figure = Figure(
+                caption=caption, rel_path=rel,
+                height=int(height) if isinstance(height, (int, float)) and height > 0 else None,
+            )
             if fig["name"] in inline_figures:
                 section.figures.append(figure)
                 inline_by_name[("figures", fig["name"])] = figure
@@ -285,8 +293,8 @@ def _build_section(
         if context is not None:
             context.record_table(stage_id, tbl["name"], src_dir, tbl["file"])
         if tbl["name"] in inline_tables:
-            frame = pd.read_csv(src)
             spec = heatmap_spec(section.metadata, tbl["name"])
+            frame = pd.read_csv(src, dtype={name: str for name in text_columns(spec)})
             if not spec_fits(spec, frame):
                 spec = None
             # A heatmap pivots its long table into one grid, so it needs every row.
@@ -381,7 +389,7 @@ def _curve_charts(
 def _assign_views(section: Section, inline_by_name: dict) -> None:
     """Move inline artifacts named by ``metadata["views"]`` into their views.
 
-    Artifacts no view claims stay on the section and render above the views. A
+    Artifacts no view claims stay on the section and render below the views. A
     malformed declaration is ignored, so the section renders as a single view.
     """
     declared = section.metadata.get("views")
@@ -435,6 +443,24 @@ def _inline_artifact_names(
 
 def _caption(stage_id: str, name: str) -> str:
     return f"{stage_id}: {name}" if name != stage_id else stage_id
+
+
+def _link_shared_plotly(assets_root: Path, rel: str) -> None:
+    """Point a copied interactive figure at the report's one shared Plotly runtime.
+
+    ``rel`` is the figure's report-relative path (``assets/<id>/<file>.html``).
+    The first figure that embeds the runtime writes ``assets/plotly.min.js``; a
+    figure that embeds no runtime, or another Plotly version's, is left as is.
+    """
+    path = assets_root.parent / rel
+    depth = rel.count("/") - 1  # folders between assets/ and the figure
+    html = share_plotly(path.read_text(encoding="utf-8"), "../" * depth + PLOTLY_ASSET)
+    if html is None:
+        return
+    shared = assets_root / PLOTLY_ASSET
+    if not shared.exists():
+        shared.write_text(plotly_javascript(), encoding="utf-8")
+    path.write_text(html, encoding="utf-8")
 
 
 def _copy_asset(

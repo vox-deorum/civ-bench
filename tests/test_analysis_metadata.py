@@ -5,11 +5,11 @@ from bench.config.analysis_metadata import analysis_report_defaults
 
 def test_report_defaults_are_discovered_without_importing_registry():
     assert analysis_report_defaults("ratings.bradley_terry") == {
-        "tables": [],
+        "tables": ["strategy_ratings"],
         "figures": ["ratings"],
     }
     assert analysis_report_defaults("ratings.matchups") == {
-        "tables": [],
+        "tables": ["matchup_heatmap", "strength_winrate_heatmap", "strength_mean_heatmap"],
         "figures": ["matchup", "strength_mean", "strength_winrate"],
     }
     assert analysis_report_defaults("performance.usage_efficiency") == {

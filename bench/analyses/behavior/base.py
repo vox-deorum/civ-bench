@@ -7,7 +7,8 @@ report draws as an HTML heatmap. :meth:`BehaviorAnalysis.add_matched_map_tables`
 writes the per-seed and per-seat tables behind a Matched Maps tab.
 
 The declared views render behind the relative/absolute toggle; a module may
-declare more views (the diplomacy page's Stance view) through ``view_names``.
+move a table into a view of its own through ``view_names``, or keep it out of
+every view (the diplomacy page's stance table) by mapping its view to ``None``.
 """
 
 from __future__ import annotations
@@ -30,10 +31,14 @@ class MetricViews:
     summaries: dict = field(default_factory=dict)
     heatmaps: dict = field(default_factory=dict)
 
-    def add(self, view: str, name: str, table=None) -> None:
-        self.declared.setdefault(view, {"tables": [], "figures": []})
+    def add(self, view: str | None, name: str, table=None) -> None:
+        """Store ``table`` under ``name`` in ``view``; ``None`` keeps it out of every view."""
         if table is not None:
             self.tables[name] = table
+        if view is None:
+            return
+        self.declared.setdefault(view, {"tables": [], "figures": []})
+        if table is not None:
             self.declared[view]["tables"].append(name)
 
 
@@ -137,7 +142,7 @@ class BehaviorAnalysis(Analysis):
         ``help_texts``, ``legends``, ``value_labels``) are keyed by
         :data:`C.RELATIVE` / :data:`C.ABSOLUTE`. ``view_names`` maps a view to
         the page view that shows its table (by default the same name), so a
-        table can sit in a view of its own.
+        table can sit in a view of its own; ``None`` shows it outside the views.
 
         With ``baseline_row``, both views pin a row with the baseline pool's absolute
         mean per metric (``row_kind == "baseline"``), colored like the absolute

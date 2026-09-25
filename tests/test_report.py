@@ -33,7 +33,7 @@ from bench.reports import (
     render_markdown,
     run_report,
 )
-from bench.reports.model import FamilyGroup
+from bench.reports.model import FamilyGroup, Figure, ReportDocument, Section, Table, View
 from bench.reports.runner import (
     _analyses_dir,
     _publish_in_place,
@@ -511,6 +511,53 @@ def test_plotly_figure_persistence_is_self_contained_and_deterministic(report_en
 
     second = run_analysis(report_env, stage, catalog=object())
     assert Path(second.figure_paths["cost_vs_rating"]).read_bytes() == content
+
+
+def test_plotly_figure_height_is_recorded_and_sizes_its_frame(report_env, monkeypatch):
+    class TallPlotlyAnalysis:
+        default_all_estimators = False
+
+        def __init__(self, stage_id, params):
+            self.stage_id = stage_id
+
+        def run(self, ctx):
+            figure = go.Figure(go.Scatter(x=[1], y=[2]))
+            figure.update_layout(height=900)
+            return AnalysisResult(figures={"forest": figure})
+
+        def report_identity(self):
+            return "Tall figure", "A test figure."
+
+    monkeypatch.setattr("bench.analyses.runner.get_analysis", lambda module: TallPlotlyAnalysis)
+    result = run_analysis(report_env, {"id": "tall", "module": "test.tall", "params": {}},
+                          catalog=object())
+    manifest = json.loads((Path(result.figure_paths["forest"]).parent / "result.json")
+                          .read_text(encoding="utf-8"))
+    assert manifest["figures"] == [{"name": "forest", "file": "forest.html", "height": 900}]
+
+    section = Section(id="tall", module="test.tall", summary="Tall.",
+                      figures=[Figure(caption="tall: forest", rel_path="assets/tall/forest.html",
+                                      height=900)])
+    doc = ReportDocument(title="T", run_name="r", seed=1, config_path="c", output_root="o",
+                         groups=[FamilyGroup(key="test", title="Test", sections=[section])])
+    page = render_html_site(doc)["test.html"]
+    assert '<iframe class="interactive-figure" style="height:920px;min-height:0" ' in page
+
+
+def test_untabbed_artifacts_render_after_the_views():
+    frame = pd.DataFrame({"a": [1]})
+    section = Section(
+        id="beh", module="behavior.diplomacy", summary="Views first.",
+        tables=[Table(name="untabbed_table", frame=frame)],
+        views=[View(name="relative", label="Relative", tables=[Table(name="tabbed_rel", frame=frame)]),
+               View(name="absolute", label="Absolute", tables=[Table(name="tabbed_abs", frame=frame)])],
+    )
+    doc = ReportDocument(title="T", run_name="r", seed=1, config_path="c", output_root="o",
+                         groups=[FamilyGroup(key="behavior", title="Behavior", sections=[section])])
+    page = render_html_site(doc)["behavior.html"]
+    assert page.index('class="view-group"') < page.index("tabbed_abs") < page.index("untabbed_table")
+    md = render_markdown(doc)
+    assert md.index("**Absolute**") < md.index("**untabbed_table**")
 
 
 def test_plotly_figures_embed_in_html_and_link_in_markdown(report_env):
@@ -1512,3 +1559,51 @@ def test_a_heatmap_spec_that_does_not_fit_renders_a_plain_table(heatmap_env):
     page = (report_dir(heatmap_env) / "behavior.html").read_text(encoding="utf-8")
     assert '<table class="heatmap">' not in page
     assert "<strong>flavors_absolute</strong>" in page
+
+
+def test_heatmap_text_columns_keep_their_text_through_the_csv(heatmap_env):
+    frame = _heat_frame("absolute", n_rows=3)
+    frame["cell_text"] = "+0.50"
+    frame["p_text"] = "0.500"
+    spec = {**_heat_spec("absolute"), "text_column": "cell_text",
+            "tip_rows": [{"column": "p_text", "label": "p", "text": True}]}
+    _emit(heatmap_env, "beh_flavors", "behavior.flavors", summary="Flavors.",
+          metadata={"heatmaps": {"flavors_absolute": spec}},
+          tables={"flavors_absolute": frame})
+    run_report(heatmap_env)
+    page = (report_dir(heatmap_env) / "behavior.html").read_text(encoding="utf-8")
+    assert ">+0.50</td>" in page and ">0.5</td>" not in page
+    assert "p\t0.500" in page
+
+
+def test_copied_plotly_figures_share_one_runtime(report_env):
+    from bench.plotting.interactive import figure_html, plotly_javascript
+
+    for sid, module in (("pred_compare", "prediction.compare"),
+                        ("cal_reliability", "calibration.reliability")):
+        _emit(report_env, sid, module, summary="Charts.",
+              figures=[{"name": "chart", "format": "plotly"}])
+        standalone = figure_html(go.Figure(go.Scatter(x=[1], y=[2])), "chart")
+        (_analyses_dir(report_env, sid) / "chart.html").write_text(standalone, encoding="utf-8")
+    # A chart that embeds no runtime (another Plotly version, say) is copied unchanged.
+    _emit(report_env, "pred_metrics", "prediction.evaluate", summary="Fake.",
+          figures=[{"name": "chart", "format": "plotly"}])
+
+    run_report(report_env)
+    out = report_dir(report_env)
+    bundle = plotly_javascript()
+    assert (out / "assets/plotly.min.js").read_text(encoding="utf-8") == bundle
+    for sid in ("pred_compare", "cal_reliability"):
+        copied = (out / f"assets/{sid}/chart.html").read_text(encoding="utf-8")
+        assert bundle not in copied
+        assert '<script charset="utf-8" src="../plotly.min.js"></script>' in copied
+        assert 'id="plotly-chart"' in copied
+        # The analysis folder keeps its standalone chart.
+        assert bundle in (_analyses_dir(report_env, sid) / "chart.html").read_text(encoding="utf-8")
+    assert (out / "assets/pred_metrics/chart.html").read_text(encoding="utf-8") == _FAKE_HTML
+
+
+def test_share_plotly_leaves_html_without_the_runtime_alone():
+    from bench.plotting.interactive import share_plotly
+
+    assert share_plotly("<html><script>var x = 1;</script></html>", "../plotly.min.js") is None

@@ -18,11 +18,12 @@ range (mean min to max), in the relative view as a difference from the baseline.
 In controlled runs the module also writes ``diplomacy_by_seed`` and
 ``diplomacy_by_seat`` for the Matched Maps chapter's Diplomacy tab.
 
-A third view, **Stance**, covers the ``relationships`` family in two absolute
-heatmaps: the public, private, and net stance a strategist holds toward rivals,
-and how often it changes its modifiers and masks hostility or goodwill. The
-in-game AI and the Null strategist set no relationship modifiers, so they are
-left out and the view has no relative form.
+The ``relationships`` family shows in one absolute heatmap outside the views,
+``stance_signals_absolute``: how often a strategist changes its modifiers, the
+public, private, and net stance it holds toward rivals (on fixed scales), and
+how often it masks hostility or goodwill. The in-game AI and the Null
+strategist set no relationship modifiers, so they are left out and the table
+has no relative form.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from ..errors import AnalysisError
 from . import common as C
 from .base import BehaviorAnalysis, MetricViews
 
-STANCE_VIEW = "stance"
 STANCE_LEVELS = {
     "stance_public_avg": ("Public stance", "Public",
                           "The visible stance toward a rival, from -100 (hostile) to 100 (warm), "
@@ -72,8 +72,7 @@ class BehaviorDiplomacy(BehaviorAnalysis):
         "strategists set toward rivals, including how often the two conflict."
     )
     report_defaults = {
-        "tables": ["diplomacy_relative", "diplomacy_absolute",
-                   "stance_absolute", "stance_signals_absolute"],
+        "tables": ["diplomacy_relative", "diplomacy_absolute", "stance_signals_absolute"],
         "figures": [],
     }
 
@@ -107,9 +106,7 @@ class BehaviorDiplomacy(BehaviorAnalysis):
             **views.metadata(),
             "traits": traits,
             "rate": self.rate,
-            "views": C.views_metadata(out.declared, baseline, extra={
-                STANCE_VIEW: ("Stance", "Public and private stance toward rivals"),
-            }),
+            "views": C.views_metadata(out.declared, baseline),
             "heatmaps": out.heatmaps,
         }
         if traits:
@@ -204,7 +201,7 @@ class BehaviorDiplomacy(BehaviorAnalysis):
 
     # ── stance ────────────────────────────────────────────────────────────────
     def _stance_views(self, ctx, rows, stance, rate_scaled, out) -> str:
-        """Write the Stance view's two tables; returns the masked-hostility sentence."""
+        """Write the untabbed stance table; returns the masked-hostility sentence."""
         if not stance:
             return ""
         skip = {ctx.catalog.null_label, ctx.catalog.vanilla_label}
@@ -213,61 +210,47 @@ class BehaviorDiplomacy(BehaviorAnalysis):
             if share in rows.columns:
                 rows[share] = rows[share] * 100.0
         per = "per 100 turns alive" if "relationship_changes" in rate_scaled else "per game"
-        common = dict(value_labels={C.ABSOLUTE: "Average"}, decimals=1,
-                      view_names={C.ABSOLUTE: STANCE_VIEW})
-
-        levels = [m for m in STANCE_LEVELS if m in stance]
-        if levels:
-            views = C.build_views(rows, rows.iloc[0:0], levels, None, None)
-            self.add_heatmap_views(
-                ctx, views, out, "stance",
-                titles={C.ABSOLUTE: "Stance toward rivals"},
-                help_texts={C.ABSOLUTE: (
-                    "Public is the stance a strategist shows a rival and private its hidden "
-                    "attitude, each set from -100 (hostile) to 100 (warm) and averaged over "
-                    "pair-turns; net is their sum, which the game's diplomacy uses. Colors are "
-                    "fixed from -50 (red) through 0 (yellow) to +50 (blue), twice that for net. "
-                    "The in-game AI and the Null strategist set no stances, so they are left "
-                    "out and this view has no relative form."
-                )},
-                names={m: STANCE_LEVELS[m][0] for m in levels},
-                short_names={m: STANCE_LEVELS[m][1] for m in levels},
-                column_tips={m: f"{STANCE_LEVELS[m][0]}\n{STANCE_LEVELS[m][2]}" for m in levels},
-                fixed={m: STANCE_LEVEL_RANGES[m] for m in levels},
-                legends={C.ABSOLUTE: [[0.0, "hostile: -50 (net -100) or below"],
-                                      [0.5, "neutral: 0"],
-                                      [1.0, "warm: +50 (net +100) or above"]]},
-                **common,
-            )
-
-        signals = {
+        columns = {
             "relationship_changes": ("Relationship changes", "Changes", "Activity",
                                      f"How often the player sets a new public or private modifier, {per}."),
+            **{m: (name, short, "Stance", tip) for m, (name, short, tip) in STANCE_LEVELS.items()},
             "stance_masked_hostility_share": ("Masked hostility %", "Hostility %", "Mixed signals",
                                               "Share of pair-turns with a warm public and a hostile private stance."),
             "stance_masked_goodwill_share": ("Masked goodwill %", "Goodwill %", "Mixed signals",
                                              "Share of pair-turns with a hostile public and a warm private stance."),
         }
-        signals = {m: v for m, v in signals.items() if m in stance}
-        if not signals:
-            return ""
-        views = C.build_views(rows, rows.iloc[0:0], list(signals), None, None)
+        columns = {m: v for m, v in columns.items() if m in stance}
+        views = C.build_views(rows, rows.iloc[0:0], list(columns), None, None)
         self.add_heatmap_views(
             ctx, views, out, "stance_signals",
             titles={C.ABSOLUTE: "Relationship changes and mixed signals"},
             help_texts={C.ABSOLUTE: (
                 f"Changes counts how often a player sets a new public or private modifier, {per}. "
-                "Masked hostility is the share of pair-turns where the public stance is warm and "
-                "the private one hostile; masked goodwill is the reverse. Colors show each cell "
-                "as a z-score across players, full color at 2 SDs."
+                "Public is the stance a strategist shows a rival and private its hidden attitude, "
+                "each set from -100 (hostile) to 100 (warm) and averaged over pair-turns; net is "
+                "their sum, which the game's diplomacy uses. Masked hostility is the share of "
+                "pair-turns where the public stance is warm and the private one hostile; masked "
+                "goodwill is the reverse. Stance colors are fixed from -50 (red) through 0 "
+                "(yellow) to +50 (blue), twice that for net. The other columns show each cell as "
+                "a z-score across players, full color at 2 SDs. The in-game AI and the Null "
+                "strategist set no relationship modifiers, so they are left out and this table "
+                "has no relative form."
             )},
-            names={m: v[0] for m, v in signals.items()},
-            short_names={m: v[1] for m, v in signals.items()},
-            column_tips={m: f"{v[0]}\n{v[3]}" for m, v in signals.items()},
-            groups={m: v[2] for m, v in signals.items()},
-            legends={C.ABSOLUTE: [[0.0, "2 SD below the average player"], [0.25, "1 SD below"],
-                                  [0.5, "average"], [0.75, "1 SD above"], [1.0, "2 SD above"]]},
-            **common,
+            names={m: v[0] for m, v in columns.items()},
+            short_names={m: v[1] for m, v in columns.items()},
+            column_tips={m: f"{v[0]}\n{v[3]}" for m, v in columns.items()},
+            groups={m: v[2] for m, v in columns.items()},
+            fixed={m: STANCE_LEVEL_RANGES[m] for m in columns if m in STANCE_LEVEL_RANGES},
+            legends={C.ABSOLUTE: [
+                [0.0, "hostile: -50 (net -100), or 2 SD below the average player"],
+                [0.25, "-25 (net -50), or 1 SD below"],
+                [0.5, "neutral: 0, or average"],
+                [0.75, "+25 (net +50), or 1 SD above"],
+                [1.0, "warm: +50 (net +100), or 2 SD above"],
+            ]},
+            value_labels={C.ABSOLUTE: "Average"}, decimals=1,
+            # No tab: the table shows under the persona views on every one of them.
+            view_names={C.ABSOLUTE: None},
         )
         return self._mix_note(out)
 

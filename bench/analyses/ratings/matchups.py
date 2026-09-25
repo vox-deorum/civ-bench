@@ -8,6 +8,11 @@ within-game strength pairs (``ttest_rel``). With
 ``validate_ols`` it also fits ``adjusted_strength ~ C(player_type, Treatment(ref))``
 and surfaces the per-type deviation effects as a cross-check on the matrix
 ordering.
+
+With ``presentation.matchup_display: "matrix"`` each matrix shows as an HTML
+heatmap table (``<name>_heatmap``); with ``"vs_reference"`` each shows as an
+interactive forest plot against Vanilla. With ``mode:"both"`` the two metrics sit
+behind the ``strength_winrate`` and ``strength_mean`` view tabs.
 """
 
 from __future__ import annotations
@@ -114,7 +119,7 @@ class RatingsMatchups(Analysis):
         "including mean differences and win rates."
     )
     report_defaults = {
-        "tables": [],
+        "tables": ["matchup_heatmap", "strength_winrate_heatmap", "strength_mean_heatmap"],
         "figures": ["matchup", "strength_mean", "strength_winrate"],
     }
 
@@ -135,6 +140,8 @@ class RatingsMatchups(Analysis):
         metadata = {"mode": mode, **ctx.strength_provenance(table_id, panel)}
         tables = {}
         figures = {}
+        heatmaps = {}
+        slugs = {}
         count_for_summary = None
         mean = mean_pval = winrate = winrate_pval = None
         display = ctx.matchup_display()
@@ -146,31 +153,25 @@ class RatingsMatchups(Analysis):
             mean, count, pval = create_mean_matchup_matrix(panel)
             mean_pval = pval
             count_for_summary = count
-            table_name = "matchup" if mode == "mean" else "strength_mean"
+            slug = slugs["mean"] = "matchup" if mode == "mean" else "strength_mean"
+            tables[slug] = mean.reset_index(names="player_type")
             pval_name = "pvalues" if mode == "mean" else "pvalues_mean"
-            figure_name = "matchup" if mode == "mean" else "strength_mean"
-            tables[table_name] = mean.reset_index(names="player_type")
             tables[pval_name] = pval.reset_index(names="player_type")
             if not use_vs_reference:
-                figures[figure_name] = self._plot(
-                    mean, 0.0, None, None, "mean(row - col) adjusted strength",
-                    "RdBu_r", "strength mean", metadata,
-                )
+                table, spec = self._mean_heatmap(ctx, mean, count, pval)
+                tables[f"{slug}_heatmap"], heatmaps[f"{slug}_heatmap"] = table, spec
 
         if mode in ("winrate", "both"):
             winrate, count, pval = create_matchup_matrix(panel)
             winrate_pval = pval
             count_for_summary = count if count_for_summary is None else count_for_summary
-            table_name = "matchup" if mode == "winrate" else "strength_winrate"
+            slug = slugs["winrate"] = "matchup" if mode == "winrate" else "strength_winrate"
+            tables[slug] = winrate.reset_index(names="player_type")
             pval_name = "pvalues" if mode == "winrate" else "pvalues_winrate"
-            figure_name = "matchup" if mode == "winrate" else "strength_winrate"
-            tables[table_name] = winrate.reset_index(names="player_type")
             tables[pval_name] = pval.reset_index(names="player_type")
             if not use_vs_reference:
-                figures[figure_name] = self._plot(
-                    winrate, 0.5, 0.0, 1.0, "P(row stronger than col)",
-                    "RdBu_r", "strength win rate", metadata, percent=True, counts=count,
-                )
+                table, spec = self._winrate_heatmap(ctx, winrate, count, pval)
+                tables[f"{slug}_heatmap"], heatmaps[f"{slug}_heatmap"] = table, spec
 
         if count_for_summary is not None:
             tables["counts"] = count_for_summary.reset_index(names="player_type")
@@ -183,46 +184,25 @@ class RatingsMatchups(Analysis):
                 ctx, reference, count_for_summary, mean, mean_pval, winrate, winrate_pval
             )
             tables["vs_reference"] = vs
-            plot_vs = vs.copy()
-            plot_vs["n_label"] = plot_vs["n"].map(
-                lambda n: f"n={int(n)}" if pd.notna(n) else ""
-            )
-            pairing = ctx.condition_pairing()
-            from ...plotting.pairing import PairingSpec, plot_paired_rows
+            figures.update(self._vs_reference_plots(ctx, vs, reference, slugs, metadata))
 
-            plot_spec = pairing or PairingSpec((), "base", "Identity")
-            note = self._provenance_text(metadata)
-            if mode in ("mean", "both"):
-                slug = "matchup" if mode == "mean" else "strength_mean"
-                figures[slug] = plot_paired_rows(
-                    plot_vs,
-                    catalog=ctx.catalog,
-                    spec=plot_spec,
-                    value_col="mean_diff_vs_ref",
-                    identity_col="player_type",
-                    ref_line=0,
-                    annotate_col="n_label",
-                    ascending=False,
-                    xlabel=f"Mean adjusted-strength difference vs {reference}",
-                    title=f"Adjusted strength vs {reference}",
-                    provenance_note=note,
-                )
-            if mode in ("winrate", "both"):
-                slug = "matchup" if mode == "winrate" else "strength_winrate"
-                figures[slug] = plot_paired_rows(
-                    plot_vs,
-                    catalog=ctx.catalog,
-                    spec=plot_spec,
-                    value_col="winrate_vs_ref",
-                    identity_col="player_type",
-                    ref_line=0.5,
-                    annotate_col="n_label",
-                    ascending=False,
-                    xlabel=f"P(row stronger than {reference})",
-                    title=f"Adjusted-strength win rate vs {reference}",
-                    provenance_note=note,
-                )
-
+        if heatmaps:
+            metadata["heatmaps"] = heatmaps
+        if mode == "both":
+            metadata["views"] = {
+                "strength_winrate": {
+                    "label": "Win rate",
+                    "tip": "How often the row player type had higher adjusted strength.",
+                    "tables": ["strength_winrate_heatmap"],
+                    "figures": ["strength_winrate"],
+                },
+                "strength_mean": {
+                    "label": "Mean difference",
+                    "tip": "The average adjusted-strength gap, row minus column.",
+                    "tables": ["strength_mean_heatmap"],
+                    "figures": ["strength_mean"],
+                },
+            }
         metadata["display"] = "vs_reference" if use_vs_reference else "matrix"
         if display == "vs_reference" and not reference_available:
             metadata["warning"] = f"reference '{reference}' is absent"
@@ -249,6 +229,110 @@ class RatingsMatchups(Analysis):
                     f"**{value:+.3f}** against {opponent}, across **{n}** player comparisons."
                 )
         return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
+
+    # ── matrix display ───────────────────────────────────────────────────────────
+    _TIP_ROWS = [
+        {"column": "n", "label": "Comparisons", "decimals": 0},
+        {"column": "p_text", "label": "Paired t-test p", "text": True},
+    ]
+
+    def _winrate_heatmap(self, ctx, winrate, counts, pvalues):
+        from .heatmaps import diverging_positions, matrix_cells, matrix_heatmap, p_text
+
+        cells = matrix_cells(winrate * 100, n=counts, p_value=pvalues)
+        cells["color_position"] = diverging_positions(cells["value"], 50.0, 50.0)
+        cells["cell_text"] = cells["value"].map(lambda v: f"{v:.0f}%")
+        cells["p_text"] = cells["p_value"].map(p_text)
+        return matrix_heatmap(
+            ctx, cells, winrate.index,
+            title="Adjusted-strength win rate",
+            help_text=(
+                "Each cell is how often the row player type had higher adjusted strength "
+                "than the column player type in the games they shared, with ties counted "
+                "as half. Colors run from red (0%) through yellow (50%, even) to blue "
+                "(100%). Hover a cell for the number of comparisons and the paired "
+                "t-test p-value."
+            ),
+            value_label="Win rate", decimals=0, unit="%", tip_rows=self._TIP_ROWS,
+            legend=[[0.0, "0%"], [0.25, "25%"], [0.5, "50% (even)"], [0.75, "75%"], [1.0, "100%"]],
+        )
+
+    def _mean_heatmap(self, ctx, mean, counts, pvalues):
+        from .heatmaps import (
+            diverging_positions, matrix_cells, matrix_heatmap, p_text, signed_legend, spread,
+        )
+
+        cells = matrix_cells(mean, n=counts, p_value=pvalues)
+        half = spread(cells["value"], 0.0, 1e-9)
+        cells["color_position"] = diverging_positions(cells["value"], 0.0, half)
+        cells["cell_text"] = cells["value"].map(lambda v: f"{v:+.2f}")
+        cells["p_text"] = cells["p_value"].map(p_text)
+        return matrix_heatmap(
+            ctx, cells, mean.index,
+            title="Mean adjusted-strength difference",
+            help_text=(
+                "Each cell is the average adjusted-strength difference, row minus column, "
+                "over the games the two player types shared. Blue means the row player "
+                "type was stronger, red weaker; full color is the largest gap in the "
+                "table. Hover a cell for the number of comparisons and the paired "
+                "t-test p-value."
+            ),
+            value_label="Mean difference", decimals=2, signed=True, tip_rows=self._TIP_ROWS,
+            legend=signed_legend(half, 2, "row weaker", "row stronger", "0 (even)"),
+        )
+
+    # ── vs-reference display ─────────────────────────────────────────────────────
+    def _vs_reference_plots(self, ctx, vs, reference, slugs, metadata) -> dict:
+        from ...plotting.pairing import PairingSpec, plot_paired_rows_interactive
+        from .heatmaps import count_text, p_text
+
+        spec = ctx.condition_pairing() or PairingSpec((), "base", "Identity")
+        note = self._provenance_text(metadata) or None
+        plot_vs = vs.copy()
+        plot_vs["tip_n"] = plot_vs["n"].map(count_text)
+        figures = {}
+        if "mean" in slugs:
+            plot_vs["tip_value"] = plot_vs["mean_diff_vs_ref"].map(
+                lambda v: f"{v:+.3f}" if pd.notna(v) else ""
+            )
+            plot_vs["tip_p"] = plot_vs["p_value_mean"].map(p_text)
+            figures[slugs["mean"]] = plot_paired_rows_interactive(
+                plot_vs,
+                catalog=ctx.catalog,
+                spec=spec,
+                value_col="mean_diff_vs_ref",
+                identity_col="player_type",
+                ref_line=0,
+                ref_label="Even (0)",
+                tooltip=[("Mean difference", "tip_value"), ("Paired t-test p", "tip_p"),
+                         ("Comparisons", "tip_n")],
+                ascending=False,
+                xlabel=f"Mean adjusted-strength difference vs {reference}",
+                title=f"Adjusted strength vs {reference}",
+                provenance_note=note,
+            )
+        if "winrate" in slugs:
+            plot_vs["tip_value"] = plot_vs["winrate_vs_ref"].map(
+                lambda v: f"{v:.1%}" if pd.notna(v) else ""
+            )
+            plot_vs["tip_p"] = plot_vs["p_value_winrate"].map(p_text)
+            figures[slugs["winrate"]] = plot_paired_rows_interactive(
+                plot_vs,
+                catalog=ctx.catalog,
+                spec=spec,
+                value_col="winrate_vs_ref",
+                identity_col="player_type",
+                ref_line=0.5,
+                ref_label="Even (50%)",
+                tooltip=[("Win rate", "tip_value"), ("Paired t-test p", "tip_p"),
+                         ("Comparisons", "tip_n")],
+                ascending=False,
+                percent_x=True,
+                xlabel=f"P(row stronger than {reference})",
+                title=f"Adjusted-strength win rate vs {reference}",
+                provenance_note=note,
+            )
+        return {name: fig for name, fig in figures.items() if fig is not None}
 
     @staticmethod
     def _vs_reference_table(ctx, reference, counts, mean, mean_pval, winrate, winrate_pval):
@@ -286,36 +370,6 @@ class RatingsMatchups(Analysis):
         result = fit_regression(formula, panel, outcome_col=_STRENGTH_COL)
         return deviation_coefficients(result.fit, vanilla)
 
-    def _plot(self, matrix, center, vmin, vmax, label, cmap, mode, metadata, percent=False, counts=None):
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-
-        n = len(matrix)
-        fig, ax = plt.subplots(figsize=(max(6, 0.7 * n + 3), max(5, 0.6 * n + 2)))
-        annot = True
-        fmt = ".2f"
-        if percent:
-            annot = matrix.copy().astype(object)
-            for row in matrix.index:
-                for col in matrix.columns:
-                    value = matrix.loc[row, col]
-                    if pd.isna(value):
-                        annot.loc[row, col] = ""
-                        continue
-                    n_txt = ""
-                    if counts is not None and pd.notna(counts.loc[row, col]):
-                        n_txt = f"\nn={int(counts.loc[row, col])}"
-                    annot.loc[row, col] = f"{100 * value:.0f}%{n_txt}"
-            fmt = ""
-        sns.heatmap(matrix, annot=annot, fmt=fmt, cmap=cmap, center=center,
-                    vmin=vmin, vmax=vmax, square=True, linewidths=0.3, linecolor="lightgray",
-                    cbar_kws={"label": label}, annot_kws={"fontsize": 7}, ax=ax)
-        ax.set_title(f"Head-to-head matchups ({mode})", fontsize=12, fontweight="bold")
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-        self._add_provenance_note(fig, metadata)
-        fig.tight_layout(rect=(0, 0.04, 1, 1))
-        return fig
-
     @staticmethod
     def _provenance_text(metadata: dict) -> str:
         est = metadata.get("strength_estimator")
@@ -327,10 +381,3 @@ class RatingsMatchups(Analysis):
         if block:
             bits.append(f"adjust block: {block}")
         return "; ".join(bits)
-
-    @classmethod
-    def _add_provenance_note(cls, fig, metadata: dict) -> None:
-        note = cls._provenance_text(metadata)
-        if note:
-            fig.text(0.01, 0.01, note, ha="left", va="bottom",
-                     fontsize=8, color="#666666")
