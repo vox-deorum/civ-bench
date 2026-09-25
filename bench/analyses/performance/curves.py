@@ -113,16 +113,21 @@ def interpolate_curves(
 ) -> dict[tuple, list[tuple[float, float, int]]]:
     """Mean interpolated curve per ``keys`` cell.
 
-    Each individual game curve (one ``game_id`` within a cell) is linearly
-    interpolated onto the fixed grid inside its own observed progress range
-    only; no extrapolation and no endpoint holding. Each grid point averages
-    exactly the runs that cover it. Integer-like key values are returned as
-    ``int`` so cells compare and sort deterministically.
+    A run is one player's curve in one game (``game_id`` and ``player_id``),
+    even when a cell holds several seats of the same game, such as the VPAI
+    seats of one match. Each run is linearly interpolated onto the fixed grid
+    inside its own observed progress range only; no extrapolation and no
+    endpoint holding. Each grid point averages exactly the runs that cover it.
+    Integer-like key values are returned as ``int`` so cells compare and sort
+    deterministically.
     """
     curves: dict[tuple, list[tuple[float, float, int]]] = {}
     sums: dict[tuple, np.ndarray] = {}
     counts: dict[tuple, np.ndarray] = {}
-    for key, grp in runs.groupby([*keys, "game_id"], sort=True):
+    # Grouping by game alone would merge seats into one run with repeated
+    # progress values, and np.interp would then pick one seat at exact grid hits.
+    run_keys = [*keys, *(c for c in ("game_id", "player_id") if c not in keys)]
+    for key, grp in runs.groupby(run_keys, sort=True):
         if grp["turn_progress"].isna().all():
             continue
         points = grp.dropna(subset=["turn_progress", "predicted_win_probability"])

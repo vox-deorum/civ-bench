@@ -711,8 +711,10 @@ validation rejects it. Key behavior:
   Matched Maps pages; the stage accepts `params.condition_pairing` as an
   override. The strength stage's `params.baseline_experiment` games form the
   VPAI reference curve (without one, every Vanilla seat does).
-- **Curves.** Each run is interpolated onto a fixed 101-point turn-progress
-  grid (0 to 1), and each grid point averages the runs that cover it.
+- **Curves.** A run is one player's curve in one game, so a game with two
+  seats of the same identity contributes two runs. Each run is interpolated
+  onto a fixed 101-point turn-progress grid (0 to 1), and each grid point
+  averages the runs that cover it (`n_runs`).
 - **Tables.** `over_progress` (strategist, condition, turn_progress,
   mean_predicted_win_probability, n_runs) and `by_identity` (`<by>`,
   strategist, condition, mean_predicted, n_rows, n_games).

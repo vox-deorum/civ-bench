@@ -386,6 +386,24 @@ def test_interpolation_grid_averages_covering_runs():
     assert all(0.0 <= v <= 1.0 for v, _ in by_progress.values())
 
 
+def test_seats_of_one_game_are_separate_runs():
+    # Two seats of the same strategist in one game, pooled without player_id in
+    # the keys (as Win-probability trends does). Merging them into one run made
+    # exact grid hits return only the last row's seat.
+    grid = np.round(np.arange(GRID_POINTS) / (GRID_POINTS - 1), 10)
+    runs = pd.DataFrame({
+        "strategist": ["A"] * 6, "condition": [""] * 6, "game_id": ["g1"] * 6,
+        "player_id": [1, 2, 1, 2, 1, 2],
+        "turn_progress": [0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+        "predicted_win_probability": [0.4, 0.2, 0.6, 0.2, 1.0, 0.0],
+    })
+    points = interpolate_curves(runs, grid, ["strategist", "condition"])[("A", "")]
+    by_progress = {round(p, 2): (v, n) for p, v, n in points}
+    assert by_progress[0.5] == (0.4, 2)
+    assert by_progress[1.0] == (0.5, 2)
+    assert by_progress[0.25] == (round((0.5 + 0.2) / 2, 6), 2)
+
+
 def test_single_point_run_contributes_nothing():
     grid = np.round(np.arange(GRID_POINTS) / (GRID_POINTS - 1), 10)
     runs = pd.DataFrame({
