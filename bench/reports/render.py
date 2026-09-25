@@ -398,6 +398,9 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .heat-tooltip .tip-grid { display: grid; grid-template-columns: auto auto; gap: .1rem .75rem; margin-top: .3rem; }
 .heat-tooltip .tip-label { color: #5b6778; }
 .heat-tooltip .tip-number { color: #6b3fa0; font-variant-numeric: tabular-nums; }
+.heat-tooltip .tip-number-positive { color: #237a45; }
+.heat-tooltip .tip-number-negative { color: #c0392b; }
+.heat-tooltip .tip-number-unsigned { color: #6b3fa0; }
 .heat-tooltip .tip-note { color: #5b6778; font-variant-numeric: tabular-nums; }
 .heat-tooltip .tip-value > .tip-number + .tip-note { margin-left: .4rem; }
 .focus-legend { display: flex; flex-wrap: wrap; gap: .9rem; margin: .25rem 0 1.5rem; padding: 0; list-style: none; font-size: .85rem; }

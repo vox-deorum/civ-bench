@@ -1259,9 +1259,16 @@ def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
     # The whole long table survives the inline row cap (60 rows x 2 flavors).
     assert page.count(">Model-59<") == 2
     assert "heatmaps:" not in page
-    assert "data-tip" in (out / "assets/report-help.js").read_text(encoding="utf-8")
+    help_js = (out / "assets/report-help.js").read_text(encoding="utf-8")
+    assert "data-tip" in help_js
+    assert 'tip-number-" + color' in help_js
+    assert 'sign === "+" ? "positive"' in help_js
+    assert 'sign === "-"' in help_js and '"unsigned"' in help_js
     css = (out / "assets/report.css").read_text(encoding="utf-8")
     assert "table.heatmap .row-label { position: sticky" in css
+    assert ".heat-tooltip .tip-number-positive { color: #237a45; }" in css
+    assert ".heat-tooltip .tip-number-negative { color: #c0392b; }" in css
+    assert ".heat-tooltip .tip-number-unsigned { color: #6b3fa0; }" in css
 
     md = (out / "report.md").read_text(encoding="utf-8")
     assert r"| Strategist \| Condition | Off | Sci |" in md

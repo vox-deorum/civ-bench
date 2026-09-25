@@ -36,12 +36,18 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
     node.textContent = text;
     return node;
   }
-  /* A note's numbers (a CI range, a game count) share the value color. */
+  function numberSpan(text) {
+    var sign = text.charAt(0);
+    var color = sign === "+" ? "positive"
+      : (sign === "-" || sign === "\\u2212" ? "negative" : "unsigned");
+    return span("tip-number tip-number-" + color, text);
+  }
+  /* A note's numbers (a CI range, a game count) use the same sign colors. */
   function noteSpan(text) {
     var node = span("tip-note", "");
     text.split(/([+\\-\\u2212]?\\d[\\d,.]*%?)/).forEach(function (part, index) {
       if (!part) { return; }
-      node.appendChild(index % 2 ? span("tip-number", part) : document.createTextNode(part));
+      node.appendChild(index % 2 ? numberSpan(part) : document.createTextNode(part));
     });
     return node;
   }
@@ -60,7 +66,7 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
         grid.appendChild(span("tip-label", cells[0]));
         var value = document.createElement("span");
         value.className = "tip-value";
-        if (cells[1]) { value.appendChild(span("tip-number", cells[1])); }
+        if (cells[1]) { value.appendChild(numberSpan(cells[1])); }
         if (cells[2]) { value.appendChild(noteSpan(cells[2])); }
         grid.appendChild(value);
         return;
