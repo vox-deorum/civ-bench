@@ -29,7 +29,7 @@ from bench.reports.content import (
     report_summary,
 )
 
-from .curves import CURVE_CHART_JS, render_curve_chart_html
+from .curves import CURVE_CHART_JS, render_curve_views_html
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
@@ -586,7 +586,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
             _render_section_html(section, parts, anchors[id(section)])
         parts.append(render_footer_html(doc.footer))
         parts.append("</main>")
-        if any(section.curve_chart is not None for section in group.sections):
+        if any(section.curve_charts for section in group.sections):
             # report-common.js is already in the head when the report has a game log.
             if doc.game_log is None:
                 parts.append('<script src="assets/report-common.js" defer></script>')
@@ -627,10 +627,10 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         )
         parts.append("</section>")
         return
-    if section.curve_chart is not None:
-        parts.append(render_curve_chart_html(section.curve_chart, anchor, "assets/plotly.min.js"))
-        if section.curve_chart.help:
-            parts.append(f'<p class="caption">{_html.escape(section.curve_chart.help)}</p>')
+    if section.curve_charts:
+        parts.append(render_curve_views_html(
+            section.curve_charts, anchor, "assets/plotly.min.js", captions=True,
+        ))
     _render_artifacts_html(section.figures, section.tables, parts, anchor)
     if section.views:
         _render_views_html(section, parts, anchor)

@@ -79,12 +79,15 @@ class CurveChart:
     """The data behind one interactive victory-probability curve chart.
 
     ``frame`` holds one row per curve point (``strategist``, ``condition``,
-    ``turn_progress``, ``mean_predicted_win_probability``). The ordering and
+    ``turn_progress``, and the mean in ``value_column``). The ordering and
     color fields come from the producing analysis, so the renderer needs no
     catalog. A curve whose strategist and condition both equal
     ``vanilla_label`` is the VPAI reference curve. Rendered by
-    :func:`bench.reports.curves.render_curve_chart_html` on family pages and on
-    the Matched Maps seat pages.
+    :func:`bench.reports.curves.render_curve_views_html` on family pages and on
+    the Matched Maps seat pages. ``view``, ``label``, and ``tip`` name the
+    chart's tab when a section offers several views of its curves (Relative
+    for adjusted strength, Absolute for probability); ``reference_line`` draws
+    a dotted level line, such as 0.5 for adjusted strength.
     """
 
     frame: pd.DataFrame
@@ -93,6 +96,12 @@ class CurveChart:
     condition_order: list[str] = field(default_factory=list)
     strategist_colors: dict[str, str] = field(default_factory=dict)
     help: str = ""
+    value_column: str = "mean_predicted_win_probability"
+    y_title: str = "Mean predicted win probability"
+    reference_line: Optional[float] = None
+    view: str = ""
+    label: str = ""
+    tip: str = ""
 
 
 @dataclass
@@ -109,7 +118,8 @@ class Section:
     tables: list[Table] = field(default_factory=list)
     downloads: list[Download] = field(default_factory=list)
     views: list[View] = field(default_factory=list)  # alternative presentations, default first
-    curve_chart: Optional[CurveChart] = None  # declared by metadata["curve_chart"]
+    # declared by metadata["curve_chart"]; several are alternative views
+    curve_charts: list[CurveChart] = field(default_factory=list)
     empty: bool = False
 
     @property
@@ -213,6 +223,9 @@ class ControlledSeedDocument:
     metadata: dict = field(default_factory=dict)
     summary_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     probability_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Adjusted-strength curves (the seat pages' Relative view); empty when the
+    # analysis emitted none.
+    adjusted_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     downloads: list[Download] = field(default_factory=list)
     footer: str = REPORT_DEFAULT_FOOTER

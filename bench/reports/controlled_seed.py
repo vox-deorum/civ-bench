@@ -46,7 +46,9 @@ from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
 from bench.reports.game_log import games_url, render_seat_games
 from bench.plotting.interactive import plotly_javascript
 from .context import ReportBuildContext
-from .curves import CURVE_CHART_JS, VPAI_MIXED_TIP, render_curve_chart_html
+from .curves import (
+    ABSOLUTE_TIP, CURVE_CHART_JS, LINEAR_MEAN_NOTE, VPAI_MIXED_TIP, render_curve_views_html,
+)
 from bench.reports.content import (
     render_footer_html, render_summary_html, resolve_footer, render_help_html,
     render_view_group, report_summary, metadata_text,
@@ -63,6 +65,17 @@ CONTROLLED_SEED_TABLES = (
     "seed_player_summary",
     "seed_player_probability",
     "seed_player_index",
+)
+CONTROLLED_SEED_ADJUSTED_TABLE = "seed_player_adjusted"
+
+# The seat pages' Relative view, in the same words as the trends section.
+SEAT_RELATIVE_HELP = (
+    "Adjusted strength over the game, the scale the ratings use. At each "
+    "progress point, every run's victory probability goes through the "
+    "strength stage's adjustment against the mean VPAI self-play value on "
+    "this map and seat, so 0.5 means level with VPAI from the same start. "
+    "Winner enforcement is off so the final outcome does not lift a whole "
+    "curve. Checkbox choices apply to both views."
 )
 
 # The chapter's place in the report site: its own top-level directory beside the
@@ -104,6 +117,12 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
     tables = {
         name: ctx.load_table(section.id, name) for name in CONTROLLED_SEED_TABLES
     }
+    # Optional: results saved before the adjusted curves existed lack it.
+    adjusted = (
+        ctx.load_table(section.id, CONTROLLED_SEED_ADJUSTED_TABLE)
+        if ctx.has_table(section.id, CONTROLLED_SEED_ADJUSTED_TABLE)
+        else pd.DataFrame()
+    )
     return ControlledSeedDocument(
         title=ctx.meta["title"],
         run_name=ctx.meta["run_name"],
@@ -117,6 +136,7 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         metadata=dict(section.metadata or {}),
         summary_table=tables["seed_player_summary"],
         probability_table=tables["seed_player_probability"],
+        adjusted_table=adjusted,
         index_table=tables["seed_player_index"],
         downloads=list(section.downloads),
         tabs=_matched_map_tabs(ctx, section.metadata.get("tabs") or []),
@@ -571,18 +591,36 @@ def _render_overview(
 
 
 # ── detail pages ──────────────────────────────────────────────────────────────
-def _seat_chart(doc: ControlledSeedDocument, seed: int, player_id: int) -> CurveChart:
-    """The shared curve chart's data for one seed-player page."""
-    frame = doc.probability_table
-    if not frame.empty:
-        frame = frame[(frame["seed"] == seed) & (frame["player_id"] == player_id)]
-    return CurveChart(
-        frame=frame,
+def _seat_charts(doc: ControlledSeedDocument, seed: int, player_id: int) -> list[CurveChart]:
+    """The shared curve charts for one seed-player page.
+
+    With adjusted-strength curves for the seat, a Relative chart comes first
+    and the probability chart becomes the Absolute view.
+    """
+    def seat(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame.empty:
+            return frame
+        return frame[(frame["seed"] == seed) & (frame["player_id"] == player_id)]
+
+    common = dict(
         vanilla_label=doc.vanilla_label,
         strategist_order=doc.strategist_order,
         condition_order=doc.condition_order,
         strategist_colors=doc.strategist_colors,
     )
+    absolute = CurveChart(frame=seat(doc.probability_table), **common)
+    adjusted = seat(doc.adjusted_table)
+    if adjusted.empty:
+        return [absolute]
+    absolute.view, absolute.label = "absolute", "Absolute"
+    absolute.tip = ABSOLUTE_TIP
+    relative = CurveChart(
+        frame=adjusted, **common, help=SEAT_RELATIVE_HELP,
+        value_column="mean_adjusted_strength", y_title="Mean adjusted strength",
+        reference_line=0.5, view="relative", label="Relative",
+        tip="Adjusted strength against matched VPAI self-play",
+    )
+    return [relative, absolute]
 
 
 def _comparison_rows(doc: ControlledSeedDocument, seed: int, player_id: int) -> list[dict]:
@@ -713,7 +751,7 @@ def _render_detail(
 ) -> str:
     seed = int(index_row["seed"])
     player_id = int(index_row["player_id"])
-    chart = _seat_chart(doc, seed, player_id)
+    charts = _seat_charts(doc, seed, player_id)
     parts = _page_start(
         doc, f"Seed {seed} · Player {player_id} | {doc.title}", navigation
     )
@@ -758,17 +796,11 @@ def _render_detail(
     parts.append('<section aria-labelledby="curves-heading">')
     tip = render_help_html(
         "Each curve is the mean of every run's interpolated victory probability "
-        "on the fixed 0 to 1 progress grid. The VPAI reference curve is drawn "
-        "thicker when present. The vertical axis fits the visible curves. "
-        "Only VPAI and the best and worst strategists by mean curve value "
-        "start checked; All and Best and worst switch the selection. Hover a "
-        "checkbox to preview or highlight that strategist's curves, or a "
-        "legend entry to highlight its curve. Hover the chart to compare every "
-        "visible condition's probability at one progress point.", "curves-help",
+        "on the fixed 0 to 1 progress grid. " + LINEAR_MEAN_NOTE, "curves-help",
     )
     parts.append(f'<h2 id="curves-heading">Victory-probability curves{tip}</h2>')
-    parts.append(render_curve_chart_html(
-        chart, "matched-map", "../assets/plotly.min.js", query_select=True,
+    parts.append(render_curve_views_html(
+        charts, "matched-map", "../assets/plotly.min.js", query_select=True, captions=True,
     ))
     parts.append("</section>")
 

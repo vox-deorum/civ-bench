@@ -10,6 +10,9 @@ estimator, then emits three deterministic, report-ready tables:
   the strength stage's ``baseline_experiment``.
 * ``seed_player_probability``: mean victory-probability curves on the fixed
   101-point normalized-progress grid for the same keys.
+* ``seed_player_adjusted``: the same curves after the strength stage's own
+  matched-cell adjustment at every progress point (the seat pages' Relative
+  view; 0.5 is level with matched VPAI self-play).
 * ``seed_player_index``: one row per available ``(seed, player_id)`` page.
 
 The renderer completes the global row/column grid and leaves unobserved
@@ -27,8 +30,8 @@ from ...plotting.pairing import condition_display, order_conditions, order_strat
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .curves import (
-    GRID_POINTS, curve_records, interpolate_curves, load_curve_predictions,
-    progress_grid, split_identities,
+    GRID_POINTS, adjusted_curves, curve_records, interpolate_curves,
+    load_curve_predictions, progress_grid, split_identities,
 )
 
 CURVE_KEYS = ["seed", "player_id", "strategist", "condition"]
@@ -53,6 +56,10 @@ SUMMARY_COLUMNS = [
 PROBABILITY_COLUMNS = [
     "seed", "player_id", "strategist", "condition", "turn_progress",
     "mean_predicted_win_probability", "n_runs",
+]
+ADJUSTED_COLUMNS = [
+    "seed", "player_id", "strategist", "condition", "turn_progress",
+    "mean_adjusted_strength", "n_runs",
 ]
 INDEX_COLUMNS = [
     "seed", "player_id", "civilization", "n_civilizations", "run_count",
@@ -185,8 +192,17 @@ class PerformanceControlledSeedReport(Analysis):
         summary = _aggregate_summary(rows)
         summary = self._attach_baseline(summary, baseline_rows, vanilla_label)
 
-        curves = self._build_curves(ctx, estimator_id, rows)
+        curves, adjusted = self._build_curves(
+            ctx, estimator_id, rows, dict(adjust_stage.raw.get("params") or {})
+        )
         probability = self._probability_table(curves)
+        adjusted_table = pd.DataFrame(
+            curve_records(adjusted or {}, CURVE_KEYS, "mean_adjusted_strength"),
+            columns=ADJUSTED_COLUMNS,
+        ).sort_values(
+            ["seed", "player_id", "strategist", "condition", "turn_progress"],
+            kind="mergesort",
+        ).reset_index(drop=True)
         index = self._index_table(rows, probability, vanilla_label)
 
         strategist_order = order_strategists(
@@ -259,6 +275,7 @@ class PerformanceControlledSeedReport(Analysis):
             tables={
                 "seed_player_summary": summary,
                 "seed_player_probability": probability,
+                "seed_player_adjusted": adjusted_table,
                 "seed_player_index": index,
             },
             summary=summary_text,
@@ -401,14 +418,24 @@ class PerformanceControlledSeedReport(Analysis):
 
     # ── probability curves ─────────────────────────────────────────────────────
     def _build_curves(
-        self, ctx: AnalysisContext, estimator_id: str, rows: pd.DataFrame
-    ) -> dict[tuple, list[tuple[float, float, int]]]:
+        self, ctx: AnalysisContext, estimator_id: str, rows: pd.DataFrame,
+        strength_params: dict,
+    ):
+        """The probability curves and their adjusted-strength counterparts.
+
+        Every seat of every controlled game is a run, so the adjustment sees
+        the full matched baseline and each game's leader.
+        """
         pred = load_curve_predictions(
             ctx, estimator_id, set(rows["game_id"]),
             f"performance.controlled_seed_report '{self.stage_id}'",
         )
         runs = rows.merge(pred, on=["game_id", "player_id"], how="inner")
-        return interpolate_curves(runs, progress_grid(), CURVE_KEYS)
+        grid = progress_grid()
+        adjusted = adjusted_curves(
+            runs, runs, grid, CURVE_KEYS, ctx.catalog, strength_params
+        )
+        return interpolate_curves(runs, grid, CURVE_KEYS), adjusted
 
     def _probability_table(
         self, curves: dict[tuple, list[tuple[float, float, int]]]

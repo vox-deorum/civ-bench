@@ -671,7 +671,8 @@ Two single-purpose views of how well estimator probabilities are calibrated: one
 
 // performance.controlled_seed_report: report-ready tables for the controlled-seed chapter
 //   the report renders automatically (§7.1). Emits seed_player_summary,
-//   seed_player_probability, and seed_player_index; the renderer completes the grid.
+//   seed_player_probability, seed_player_adjusted, and seed_player_index; the renderer
+//   completes the grid.
 //   uses.analyses optionally lists stages whose Matched Maps tabs render beside
 //   Strength and Focus (§7.1).
 { "module": "performance.controlled_seed_report",
@@ -715,12 +716,31 @@ validation rejects it. Key behavior:
   seats of the same identity contributes two runs. Each run is interpolated
   onto a fixed 101-point turn-progress grid (0 to 1), and each grid point
   averages the runs that cover it (`n_runs`).
+- **Adjusted-strength curves.** On a controlled design, each controlled run's
+  interpolated probability at every grid point goes through the strength
+  stage's own controlled adjustment (`cell_adjust_rows` in
+  `bench/adjust/strength.py`, the code `build_strength_panel` uses) with that
+  stage's `params`: `relative_to`, the clipped logit, the matched start-cell
+  VPAI baseline (explicit with `baseline_experiment`, otherwise implicit per
+  experiment), the inverse logit of the difference, and `post_cell_normalize`.
+  The curve is adjusted strength over the game, where 0.5 is level with the
+  matched VPAI baseline. Winner enforcement is off, since the final outcome
+  would otherwise lift the winner's whole curve. The baseline reads every
+  seat of the unfiltered games, as the strength stage does; runs without a
+  matched baseline cell are left out. Without controlled games, or when the
+  strength stage's `block` turns the cell adjustment off, the table is not
+  emitted and `metadata.relative_view` says why.
 - **Tables.** `over_progress` (strategist, condition, turn_progress,
-  mean_predicted_win_probability, n_runs) and `by_identity` (`<by>`,
-  strategist, condition, mean_predicted, n_rows, n_games).
+  mean_predicted_win_probability, n_runs), `over_progress_relative`
+  (strategist, condition, turn_progress, mean_adjusted_strength, n_runs; only
+  on a controlled design), and `by_identity` (`<by>`, strategist, condition,
+  mean_predicted, n_rows, n_games).
 - **Rendering.** The report renders the same interactive chart as the Matched
   Maps seat pages (strategist checkboxes, thick VPAI line, hover previews;
-  §7.1) inline on the Performance page. There is no figure file.
+  §7.1) inline on the Performance page. With the adjusted-strength table it
+  shows **Relative** (adjusted strength, with a dotted line at 0.5) and
+  **Absolute** (probability) tabs, declared through
+  `metadata.curve_chart.views`. There is no figure file.
 
 **`performance.controlled_seed_report` in detail.** The module aggregates the
 controlled design by `(seed, player_id)` cell so the report can expose
@@ -755,6 +775,11 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
   conflicting duplicate progress points are an analysis error, as are duplicate
   panel or strength records per `(game_id, player_id)`. Runs are unique
   `game_id`s.
+- **Adjusted-strength curves.** `seed_player_adjusted` holds the same keys
+  after the strength stage's controlled adjustment at every grid point,
+  computed exactly as for `performance.turn_predicted` (above) over every seat
+  of the controlled games (`mean_adjusted_strength`, 0.5 is level with the
+  matched VPAI baseline). Seat pages show it as the Relative tab.
 - **Scope.** Only rows with both `seed != -1` and `seating_rotation != -1`
   participate; uncontrolled rows are excluded from mixed inputs, and an input
   with no controlled rows is a clear analysis error. The module reads its
@@ -1076,7 +1101,11 @@ The chapter lives in its own directory beside the family pages:
   highlights its curve. The legend sits beside the plot and scrolls when long,
   so the plot keeps its height. The vertical axis fits the visible curves; and
   hovering the chart snaps to the nearest grid progress and lists every
-  visible condition's probability at that point. The seat's game list shows
+  visible condition's probability at that point. When the analysis emitted
+  `seed_player_adjusted`, the chart has **Relative** (adjusted strength over
+  the game, dotted line at 0.5 for level with matched VPAI) and **Absolute**
+  (probability) tabs. Both tabs share one default selection, taken from the
+  Relative view, and their checkboxes change together. The seat's game list shows
   only the checked strategists' games. The chart uses the shared Plotly renderer and a
   local JavaScript bundle, with no network access required. Strategists that share a catalog
   color (typically one model family) are spread through the shared

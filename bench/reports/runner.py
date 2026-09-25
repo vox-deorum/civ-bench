@@ -315,44 +315,63 @@ def _build_section(
         if copied is not None:
             section.downloads.append(Download(label=Path(copied).name, rel_path=copied))
     _assign_views(section, inline_by_name)
-    section.curve_chart = _curve_chart(section, table_entries, src_dir, warnings)
+    section.curve_charts = _curve_charts(section, table_entries, src_dir, warnings)
     return section
 
 
-def _curve_chart(
+def _curve_charts(
     section: Section, table_entries: list[dict], src_dir: Path, warnings: list[str]
-) -> Optional[CurveChart]:
-    """The interactive curve chart a section declares in ``metadata["curve_chart"]``.
+) -> list[CurveChart]:
+    """The interactive curve charts a section declares in ``metadata["curve_chart"]``.
 
     The declaration names one emitted table plus the chart's ordering and
-    colors; the full table is loaded so every curve point renders. A malformed
-    declaration is skipped with a warning.
+    colors; the full table is loaded so every curve point renders. An optional
+    ``views`` list declares alternative charts in tab order, each with its own
+    ``name``, ``label``, ``tip``, ``table``, ``value`` column, ``help``, and
+    ``relative`` flag (adjusted strength with a 0.5 level line). A malformed
+    declaration or view is skipped with a warning.
     """
     declared = section.metadata.get("curve_chart")
     if declared is None:
-        return None
+        return []
+    if not isinstance(declared, dict):
+        declared = {}
     files = {str(entry["name"]): entry["file"] for entry in table_entries}
-    table = declared.get("table") if isinstance(declared, dict) else None
-    path = src_dir / files[table] if isinstance(table, str) and table in files else None
-    if path is None or not path.exists():
-        warnings.append(
-            f"section '{section.id}': metadata.curve_chart names no emitted table; "
-            "its chart is skipped."
+    views = declared.get("views")
+    specs = [v for v in views if isinstance(v, dict)] if isinstance(views, list) else []
+    if not specs:
+        specs = [{"table": declared.get("table")}]
+    charts = []
+    for spec in specs:
+        table = spec.get("table")
+        path = src_dir / files[table] if isinstance(table, str) and table in files else None
+        if path is None or not path.exists():
+            warnings.append(
+                f"section '{section.id}': metadata.curve_chart names no emitted table "
+                f"'{table}'; that chart is skipped."
+            )
+            continue
+        frame = pd.read_csv(
+            path, keep_default_na=False, dtype={"strategist": str, "condition": str}
         )
-        return None
-    frame = pd.read_csv(
-        path, keep_default_na=False, dtype={"strategist": str, "condition": str}
-    )
-    return CurveChart(
-        frame=frame,
-        vanilla_label=str(declared.get("vanilla_label") or "Vanilla"),
-        strategist_order=[str(v) for v in declared.get("strategist_order") or []],
-        condition_order=[str(v) for v in declared.get("condition_order") or []],
-        strategist_colors={
-            str(k): str(v) for k, v in (declared.get("strategist_colors") or {}).items()
-        },
-        help=str(declared.get("help") or ""),
-    )
+        relative = bool(spec.get("relative"))
+        charts.append(CurveChart(
+            frame=frame,
+            vanilla_label=str(declared.get("vanilla_label") or "Vanilla"),
+            strategist_order=[str(v) for v in declared.get("strategist_order") or []],
+            condition_order=[str(v) for v in declared.get("condition_order") or []],
+            strategist_colors={
+                str(k): str(v) for k, v in (declared.get("strategist_colors") or {}).items()
+            },
+            help=str(spec.get("help", declared.get("help")) or ""),
+            value_column=str(spec.get("value") or "mean_predicted_win_probability"),
+            y_title="Mean adjusted strength" if relative else "Mean predicted win probability",
+            reference_line=0.5 if relative else None,
+            view=str(spec.get("name") or ""),
+            label=str(spec.get("label") or spec.get("name") or ""),
+            tip=str(spec.get("tip") or ""),
+        ))
+    return charts
 
 
 def _assign_views(section: Section, inline_by_name: dict) -> None:

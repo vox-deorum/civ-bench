@@ -618,6 +618,42 @@ def test_curve_chart_renders_inline_on_the_family_page(report_env):
     assert (out / "performance.html").read_text(encoding="utf-8") == first
 
 
+def test_curve_chart_views_render_as_synced_tabs(report_env):
+    curves = pd.DataFrame({
+        "strategist": ["Vanilla", "Vanilla", "Kimi-K2.5", "Kimi-K2.5"],
+        "condition": ["Vanilla", "Vanilla", "", ""],
+        "turn_progress": [0.0, 1.0, 0.0, 1.0],
+        "mean_predicted_win_probability": [0.2, 0.1, 0.3, 0.6],
+        "n_runs": [2, 2, 3, 3],
+    })
+    adjusted = curves.rename(
+        columns={"mean_predicted_win_probability": "mean_adjusted_strength"}
+    ).assign(mean_adjusted_strength=[0.5, 0.5, 0.45, 0.7])
+    _emit(report_env, "perf_usage_efficiency", "performance.usage_efficiency",
+          summary="Curves.",
+          tables={"over_progress": curves, "over_progress_relative": adjusted},
+          metadata={"curve_chart": {
+              "table": "over_progress", "vanilla_label": "Vanilla",
+              "strategist_order": ["Kimi-K2.5"],
+              "views": [
+                  {"name": "relative", "label": "Relative", "tip": "Adjusted",
+                   "table": "over_progress_relative", "value": "mean_adjusted_strength",
+                   "relative": True, "help": "Adjusted strength over the game."},
+                  {"name": "absolute", "label": "Absolute", "tip": "Probability",
+                   "table": "over_progress", "help": "Each curve is a mean."},
+              ],
+          }})
+    run_report(report_env)
+    html = (report_dir(report_env) / "performance.html").read_text(encoding="utf-8")
+    assert html.index('data-view="relative"') < html.index('data-view="absolute"')
+    anchor = re.search(r'id="plotly-([\w-]+)-relative"', html).group(1)
+    assert f'id="plotly-{anchor}-absolute"' in html
+    assert html.count(f'data-sync="{anchor}"') == 2
+    assert html.count('src="assets/plotly.min.js"') == 1
+    assert "Mean adjusted strength" in html and '"y0":0.5' in html
+    assert "Adjusted strength over the game." in html and "Each curve is a mean." in html
+
+
 def test_curve_chart_checks_vpai_and_the_best_and_worst_by_default():
     from bench.reports.curves import render_curve_chart_html
     from bench.reports.model import CurveChart

@@ -2,9 +2,10 @@
 
 One chart, two homes: each Matched Maps seat page (curves for one seed and
 seat) and the family page of ``performance.turn_predicted`` (curves pooled over
-every game). Both render a :class:`~bench.reports.model.CurveChart` through
-:func:`render_curve_chart_html`: a strategist checkbox group above an offline
-Plotly chart. Every value, color, label, and the default selection (VPAI
+every game). Both render :class:`~bench.reports.model.CurveChart` objects through
+:func:`render_curve_views_html`: a strategist checkbox group above an offline
+Plotly chart, or, with Relative (adjusted strength) and Absolute (probability)
+charts, one such chart per tab with the checkboxes kept in step. Every value, color, label, and the default selection (VPAI
 plus the best and worst strategists) is computed server-side, so unchanged
 inputs re-render byte-identically. The static :data:`CURVE_CHART_JS` asset only
 changes trace visibility, color, and emphasis, previews or highlights curves on
@@ -25,12 +26,21 @@ from typing import Optional
 
 from bench.plotting.interactive import figure_html
 
+from .content import render_view_group
 from .model import CurveChart
 
 # Plotly dash styles cycled by condition position, so one strategist's
 # conditions stay distinguishable while sharing its color.
 _DASH_PATTERNS = ("solid", "dash", "dot", "dashdot")
 _FALLBACK_COLOR = "#555555"
+
+# Why the Absolute curves average raw probabilities, for the chart help and tab
+# (performance.turn_predicted carries the same sentence).
+LINEAR_MEAN_NOTE = (
+    "Probabilities are averaged linearly to compare with their expectations "
+    "(12.5% in 8-player games, for example)."
+)
+ABSOLUTE_TIP = "Mean predicted win probability, averaged linearly"
 
 # The tooltip of VPAI seats in games with LLM players.
 VPAI_MIXED_TIP = (
@@ -56,7 +66,7 @@ def curve_series(chart: CurveChart) -> list[dict]:
     """
     vanilla = chart.vanilla_label
     frame = chart.frame
-    if frame.empty:
+    if frame.empty or chart.value_column not in frame.columns:
         return []
     strategist_rank = {name: i for i, name in enumerate(chart.strategist_order)}
     condition_rank = {name: i for i, name in enumerate(chart.condition_order)}
@@ -84,7 +94,7 @@ def curve_series(chart: CurveChart) -> list[dict]:
                 "points": [],
             }
         series[key]["points"].append(
-            [round(float(row["turn_progress"]), 2), round(float(row["mean_predicted_win_probability"]), 6)]
+            [round(float(row["turn_progress"]), 2), round(float(row[chart.value_column]), 6)]
         )
     ordered = sorted(
         series.values(),
@@ -101,10 +111,16 @@ def curve_series(chart: CurveChart) -> list[dict]:
     return ordered
 
 
-def curve_figure(series: list[dict]):
-    """Build the probability chart with stable trace metadata."""
+def curve_figure(series: list[dict], chart: Optional[CurveChart] = None):
+    """Build the curve chart with stable trace metadata.
+
+    ``chart`` supplies the vertical axis title and the optional dotted
+    reference line (0.5 for adjusted strength).
+    """
     import plotly.graph_objects as go
 
+    y_title = chart.y_title if chart is not None else "Mean predicted win probability"
+    reference = chart.reference_line if chart is not None else None
     figure = go.Figure()
     for entry in series:
         points = entry["points"]
@@ -136,11 +152,15 @@ def curve_figure(series: list[dict]):
         },
         xaxis={"title": "Turn progress", "range": [0, 1], "tickformat": ".2f"},
         yaxis={
-            "title": "Mean predicted win probability", "autorange": True,
+            "title": y_title, "autorange": True,
             "autorangeoptions": {"clipmin": 0, "clipmax": 1},
             "tickformat": ".2f",
         },
     )
+    if reference is not None:
+        figure.add_hline(
+            y=reference, line={"color": "#8a96a8", "width": 1, "dash": "dot"},
+        )
     return figure
 
 
@@ -187,6 +207,9 @@ def render_curve_chart_html(
     plotly_src: str,
     tips: Optional[dict[str, str]] = None,
     query_select: bool = False,
+    defaults: Optional[list[str]] = None,
+    sync: str = "",
+    include_plotly: bool = True,
 ) -> str:
     """The strategist checkboxes plus the Plotly chart, in one container.
 
@@ -200,6 +223,10 @@ def render_curve_chart_html(
     that default. With ``query_select``, the page's ``?strategist=`` and
     ``?condition=`` query preselects one strategist (plus VPAI) and
     emphasizes one condition.
+
+    ``defaults`` overrides the default selection, ``sync`` names a group of
+    charts whose checkboxes change together, and ``include_plotly`` adds the
+    Plotly script tag (only the first chart on a page needs it).
     """
     series = curve_series(chart)
     vanilla = chart.vanilla_label
@@ -209,10 +236,11 @@ def render_curve_chart_html(
     for entry in series:
         if entry["strategist"] not in strategists:
             strategists.append(entry["strategist"])
-    defaults = set(default_strategists(series, vanilla))
+    defaults = set(default_strategists(series, vanilla) if defaults is None else defaults)
     tips = {vanilla: _vpai_tip(series, vanilla), **(tips or {})}
     select = "true" if query_select else "false"
-    parts = [f'<div class="curve-chart" data-query-select="{select}">']
+    sync_attr = f' data-sync="{_esc(sync)}"' if sync else ""
+    parts = [f'<div class="curve-chart" data-query-select="{select}"{sync_attr}>']
     if strategists:
         parts.append(
             f'<div class="chart-controls" id="{_esc(name)}-filters" role="group" '
@@ -238,10 +266,52 @@ def render_curve_chart_html(
             )
         parts.append("</div>")
     parts.append(figure_html(
-        curve_figure(series), name, full_html=False, include_plotlyjs=plotly_src,
+        curve_figure(series, chart), name, full_html=False,
+        include_plotlyjs=plotly_src if include_plotly else False,
     ))
     parts.append("</div>")
     return "\n".join(parts)
+
+
+def render_curve_views_html(
+    charts: list[CurveChart],
+    name: str,
+    plotly_src: str,
+    tips: Optional[dict[str, str]] = None,
+    query_select: bool = False,
+    captions: bool = False,
+) -> str:
+    """One chart, or several alternative charts behind the shared view tabs.
+
+    A single chart renders as :func:`render_curve_chart_html`. Several charts
+    (such as Relative and Absolute) each get a tab from
+    :func:`bench.reports.content.render_view_group`, chart ids
+    ``plotly-<name>-<view>``, and one shared default selection taken from the
+    first chart; their checkboxes stay in step, so switching tabs compares
+    the same strategists. With ``captions``, each chart's ``help`` renders as a
+    caption below it.
+    """
+    def caption(chart: CurveChart) -> str:
+        if captions and chart.help:
+            return f'\n<p class="caption">{_esc(chart.help)}</p>'
+        return ""
+
+    if len(charts) == 1:
+        chart = charts[0]
+        return render_curve_chart_html(
+            chart, name, plotly_src, tips=tips, query_select=query_select,
+        ) + caption(chart)
+    first = curve_series(charts[0])
+    defaults = default_strategists(first, charts[0].vanilla_label)
+    views = []
+    for index, chart in enumerate(charts):
+        view = chart.view or f"view-{index + 1}"
+        body = render_curve_chart_html(
+            chart, f"{name}-{view}", plotly_src, tips=tips, query_select=query_select,
+            defaults=defaults, sync=name, include_plotly=index == 0,
+        ) + caption(chart)
+        views.append((view, chart.label or view, chart.tip, body))
+    return render_view_group(f"{name}-curves", views)
 
 
 # ── the static browser script ─────────────────────────────────────────────────
@@ -250,12 +320,16 @@ CURVE_CHART_JS = """/* civ-bench victory-probability curve charts.
    and worst presets, hover previews from the checkboxes and the legend,
    same-family color spreading (the shared civBench.distinguishColors util in
    assets/report-common.js), condition emphasis, and the adaptive Y axis for
-   every .curve-chart on the page. */
+   every .curve-chart on the page. Charts sharing a data-sync name (the
+   Relative and Absolute tabs of one chart) keep their checkboxes in step,
+   and a chart redraws at full width when its hidden tab opens. */
 (function () {
   "use strict";
 
   var DIMMED_OPACITY = 0.2;
   var FOCUS_EXTRA_WIDTH = 1.5;
+  // Sync group name to the charts in it, each with an apply(checked) hook.
+  var syncGroups = {};
 
   function readQuery() {
     var params = {};
@@ -373,14 +447,51 @@ CURVE_CHART_JS = """/* civ-bench victory-probability curve charts.
 
     function update() {
       updateChart();
+      var checked = checkedMap();
       container.dispatchEvent(new CustomEvent("curvechart:change", {
         bubbles: true,
-        detail: { checked: checkedMap(), filtered: boxes.length > 0 }
+        detail: { checked: checked, filtered: boxes.length > 0 }
       }));
+      return checked;
+    }
+
+    // A user change here updates the other charts of the sync group.
+    var sync = container.dataset.sync || "";
+    var self = {
+      apply: function (checked) {
+        boxes.forEach(function (box) {
+          if (Object.prototype.hasOwnProperty.call(checked, box.value)) {
+            box.checked = checked[box.value];
+          }
+        });
+        updateChart();
+      }
+    };
+    if (sync) {
+      (syncGroups[sync] = syncGroups[sync] || []).push(self);
+    }
+    function userUpdate() {
+      var checked = update();
+      (syncGroups[sync] || []).forEach(function (other) {
+        if (other !== self) { other.apply(checked); }
+      });
+    }
+
+    // A chart drawn or resized inside a hidden tab keeps a stale width;
+    // redraw it once its tab shows it at a new width.
+    if (window.ResizeObserver) {
+      var lastWidth = container.clientWidth;
+      new window.ResizeObserver(function () {
+        var width = container.clientWidth;
+        if (width && width !== lastWidth) {
+          lastWidth = width;
+          window.Plotly.Plots.resize(chart);
+        }
+      }).observe(container);
     }
 
     boxes.forEach(function (box) {
-      box.addEventListener("change", update);
+      box.addEventListener("change", userUpdate);
       var label = box.closest("label") || box;
       label.addEventListener("mouseenter", function () {
         setFocus({strategist: box.value});
@@ -395,7 +506,7 @@ CURVE_CHART_JS = """/* civ-bench victory-probability curve charts.
           boxes.forEach(function (box) {
             box.checked = all || box.dataset.default === "true";
           });
-          update();
+          userUpdate();
         });
       }
     );

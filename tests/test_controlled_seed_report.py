@@ -234,7 +234,8 @@ def _summary_row(tables, seed, player_id, strategist, condition):
 def test_fully_controlled_dataset_accepted(env):
     tables = _tables(env())
     assert set(tables) == {
-        "seed_player_summary", "seed_player_probability", "seed_player_index"
+        "seed_player_summary", "seed_player_probability", "seed_player_adjusted",
+        "seed_player_index",
     }
     assert len(tables["seed_player_summary"]) == 8  # 6 seed-1 + 2 seed-2 combos
 
@@ -402,6 +403,57 @@ def test_seats_of_one_game_are_separate_runs():
     assert by_progress[0.5] == (0.4, 2)
     assert by_progress[1.0] == (0.5, 2)
     assert by_progress[0.25] == (round((0.5 + 0.2) / 2, 6), 2)
+
+
+@pytest.mark.parametrize("params", [
+    {"baseline_experiment": "base"},
+    {"baseline_experiment": "base", "relative_to": "game_leader"},
+    {},  # implicit: each experiment's own VPAI seats
+])
+def test_adjusted_curves_match_the_strength_adjustment(params):
+    from types import SimpleNamespace
+
+    from bench.adjust.strength import cell_adjust_rows
+    from bench.analyses.performance.curves import adjusted_curves
+
+    # Flat curves, so each grid point must equal the strength stage's
+    # adjustment of that constant probability.
+    seats = [
+        # game, experiment, player_id, player_type, probability
+        ("b1", "base", 0, "Vanilla", 0.2), ("b1", "base", 1, "Vanilla", 0.3),
+        ("b2", "base", 0, "Vanilla", 0.4), ("b2", "base", 1, "Vanilla", 0.1),
+        ("t1", "exp", 0, "A", 0.5), ("t1", "exp", 1, "Vanilla", 0.25),
+    ]
+    pool = pd.DataFrame([
+        {"game_id": g, "experiment": e, "player_id": pid, "player_type": pt,
+         "seed": 1, "seating_rotation": 0, "turn_progress": x,
+         "predicted_win_probability": p}
+        for g, e, pid, pt, p in seats for x in (0.0, 1.0)
+    ])
+    pool["strategist"] = pool["player_type"]
+    pool["condition"] = ""
+    catalog = SimpleNamespace(vanilla_label="Vanilla")
+    grid = np.round(np.arange(GRID_POINTS) / (GRID_POINTS - 1), 10)
+    shown = pool[pool["game_id"] == "t1"]
+    curves = adjusted_curves(shown, pool, grid, ["strategist", "condition"], catalog, params)
+
+    rows = pool.drop_duplicates(["game_id", "player_id"]).rename(
+        columns={"predicted_win_probability": "weighted_strength"}
+    )
+    rows = rows.assign(controlled=True, is_winner=0)
+    expected = cell_adjust_rows(rows, catalog, params, enforce_winner=False)
+    expected = expected.set_index(["game_id", "player_id"])["adjusted_strength"]
+    for strategist, player_id in (("A", 0), ("Vanilla", 1)):
+        if not np.isfinite(expected[("t1", player_id)]):
+            # Implicit mode: exp has no VPAI seat at player 0, so A has no
+            # matched baseline and is left out, as in the strength panel.
+            assert (strategist, "") not in curves
+            continue
+        points = curves[(strategist, "")]
+        assert len(points) == GRID_POINTS
+        assert {n for _x, _v, n in points} == {1}
+        want = round(float(expected[("t1", player_id)]), 6)
+        assert {v for _x, v, _n in points} == {want}
 
 
 def test_single_point_run_contributes_nothing():
@@ -740,8 +792,10 @@ def test_shared_color_util_and_adaptive_axis(rendered):
     assert "svgTag" not in script
     assert "curve-data" not in script
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
-    assert 'id="plotly-matched-map"' in detail
-    assert 'src="../assets/plotly.min.js"' in detail
+    # Relative (adjusted strength) and Absolute charts, the Plotly bundle once.
+    assert 'id="plotly-matched-map-relative"' in detail
+    assert 'id="plotly-matched-map-absolute"' in detail
+    assert detail.count('src="../assets/plotly.min.js"') == 1
     assert '"hovermode":"x unified"' in detail
 
 
@@ -774,12 +828,14 @@ def test_strategist_checkboxes_replace_the_dropdown(rendered):
     env, result, out = rendered
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert "<select" not in detail
-    assert 'class="curve-chart" data-query-select="true"' in detail
-    assert 'id="matched-map-filters"' in detail
+    assert 'class="curve-chart" data-query-select="true" data-sync="matched-map"' in detail
+    assert 'id="matched-map-relative-filters"' in detail
+    assert 'id="matched-map-absolute-filters"' in detail
     assert 'src="../assets/curve-chart.js"' in detail
     # VPAI leads and controls the self-play reference; with only two other
-    # strategists everyone is checked and no preset buttons appear.
-    assert detail.count('type="checkbox"') == 3
+    # strategists everyone is checked and no preset buttons appear. Each of
+    # the two views has its own checkbox group.
+    assert detail.count('type="checkbox"') == 6
     assert detail.index('value="Vanilla" checked') < detail.index('value="GPT-OSS-120B-Simple"')
     assert 'data-tip="VPAI self-play: all players use VPAI."><input' in detail
     assert 'value="GPT-OSS-120B-Simple" checked' in detail

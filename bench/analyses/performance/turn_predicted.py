@@ -15,6 +15,12 @@ shared 101-point progress grid (:mod:`bench.analyses.performance.curves`) and
 each grid point averages the runs that cover it. The result declares the
 curve table through ``metadata["curve_chart"]``, which the report renders as
 the same interactive chart the Matched Maps pages use.
+
+On a controlled design the stage also emits ``over_progress_relative``: each
+controlled run's probability at every progress point goes through the
+strength stage's own matched-cell adjustment, so the curve shows adjusted
+strength over the game (0.5 is level with matched VPAI self-play). The chart
+then offers Relative and Absolute views.
 """
 
 from __future__ import annotations
@@ -26,12 +32,22 @@ from ...plotting.pairing import condition_display, order_conditions, order_strat
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .curves import (
-    GRID_POINTS, clean_curve_predictions, curve_records, interpolate_curves,
-    progress_grid, split_identities,
+    GRID_POINTS, adjusted_curves, clean_curve_predictions, curve_records,
+    interpolate_curves, progress_grid, split_identities,
 )
 
 CURVE_KEYS = ["strategist", "condition"]
 CURVE_COLUMNS = [*CURVE_KEYS, "turn_progress", "mean_predicted_win_probability", "n_runs"]
+RELATIVE_VALUE = "mean_adjusted_strength"
+RELATIVE_COLUMNS = [*CURVE_KEYS, "turn_progress", RELATIVE_VALUE, "n_runs"]
+
+# Why the Absolute curves average raw probabilities (the report's seat pages
+# carry the same sentence in bench.reports.curves).
+LINEAR_MEAN_NOTE = (
+    "Probabilities are averaged linearly to compare with their expectations "
+    "(12.5% in 8-player games, for example)."
+)
+ABSOLUTE_TIP = "Mean predicted win probability, averaged linearly"
 
 # Line colors for identities that are not player types (``by`` other than
 # ``player_type``), which have no catalog color.
@@ -42,13 +58,25 @@ _FALLBACK_COLORS = (
 
 _CHART_HELP = (
     "Each curve is the mean of every run's interpolated victory probability on "
-    "the fixed 0 to 1 progress grid, pooled over all games. The VPAI reference "
+    "the fixed 0 to 1 progress grid, pooled over all games. " + LINEAR_MEAN_NOTE
+    + " The VPAI reference "
     "curve is drawn thicker when present. The vertical axis fits the visible "
     "curves. Only VPAI and the best and worst strategists by mean curve value "
     "start checked; All and Best and worst switch the selection. Hover a "
     "checkbox to preview or highlight that strategist's curves, or a legend "
     "entry to highlight its curve. Hover the chart to compare every visible "
     "curve at one progress point."
+)
+
+RELATIVE_HELP = (
+    "Adjusted strength over the game, the scale the ratings use. At each "
+    "progress point, every run's victory probability goes through the "
+    "strength stage's adjustment against the mean VPAI self-play value on the "
+    "same map and seat, so 0.5 means level with VPAI from the same start. A "
+    "strategist can sit above 0.5 here with a low absolute probability when it "
+    "drew hard seats. Only controlled games count, and winner enforcement is "
+    "off so the final outcome does not lift a whole curve. Checkbox choices "
+    "apply to both views."
 )
 
 
@@ -76,7 +104,7 @@ class PerformanceTurnPredicted(Analysis):
         agg = aggregate if aggregate in {"mean", "median"} else "mean"
         vanilla = ctx.catalog.vanilla_label
 
-        points = self._load_points(ctx, estimator_id, by, where)
+        points, pool = self._load_points(ctx, estimator_id, by, where)
         spec = ctx.condition_pairing() if by == "player_type" else None
         baseline = self._baseline_experiment(ctx, table_id) if by == "player_type" else None
         if by != "player_type":
@@ -91,10 +119,12 @@ class PerformanceTurnPredicted(Analysis):
         points["strategist"] = strategists
         points["condition"] = [_condition(spec, key, vanilla) for key in keys]
 
+        grid = progress_grid()
         over_progress = pd.DataFrame(
-            curve_records(interpolate_curves(points, progress_grid(), CURVE_KEYS), CURVE_KEYS),
+            curve_records(interpolate_curves(points, grid, CURVE_KEYS), CURVE_KEYS),
             columns=CURVE_COLUMNS,
         ).sort_values([*CURVE_KEYS, "turn_progress"], kind="mergesort").reset_index(drop=True)
+        relative, relative_note = _relative_table(ctx, points, pool, grid, table_id)
 
         by_identity = (
             points.groupby([by, *CURVE_KEYS], sort=True)
@@ -125,26 +155,42 @@ class PerformanceTurnPredicted(Analysis):
             order_conditions(spec, {k for k in keys if k}, vanilla) if spec is not None else []
         )
 
+        chart = {
+            "table": "over_progress",
+            "vanilla_label": vanilla,
+            "strategist_order": strategist_order,
+            "condition_order": condition_order,
+            "strategist_colors": colors,
+            "grid_points": GRID_POINTS,
+            "help": _CHART_HELP,
+        }
+        tables = {"by_identity": by_identity, "over_progress": over_progress}
         metadata = {
             "estimator": estimator_id,
             "strength_table": table_id,
             "by": by,
             "aggregate": agg,
             "games": int(points["game_id"].nunique()),
-            "curve_chart": {
-                "table": "over_progress",
-                "vanilla_label": vanilla,
-                "strategist_order": strategist_order,
-                "condition_order": condition_order,
-                "strategist_colors": colors,
-                "grid_points": GRID_POINTS,
-                "help": _CHART_HELP,
-            },
+            "curve_chart": chart,
         }
+        if relative is not None:
+            tables["over_progress_relative"] = relative
+            # The relative view comes first, as on the behavior pages.
+            chart["views"] = [
+                {"name": "relative", "label": "Relative",
+                 "tip": "Adjusted strength against matched VPAI self-play",
+                 "table": "over_progress_relative", "value": RELATIVE_VALUE,
+                 "relative": True, "help": RELATIVE_HELP},
+                {"name": "absolute", "label": "Absolute",
+                 "tip": ABSOLUTE_TIP,
+                 "table": "over_progress", "help": _CHART_HELP},
+            ]
+        else:
+            metadata["relative_view"] = relative_note
         if baseline:
             metadata["baseline_experiment"] = baseline
         return AnalysisResult(
-            tables={"by_identity": by_identity, "over_progress": over_progress},
+            tables=tables,
             summary=_summary(by_identity, by, agg, estimator_id, vanilla),
             metadata=metadata,
         )
@@ -152,12 +198,24 @@ class PerformanceTurnPredicted(Analysis):
     # ── input preparation ──────────────────────────────────────────────────────
     def _load_points(
         self, ctx: AnalysisContext, estimator_id: str, by: str, where: str
-    ) -> pd.DataFrame:
-        """Filtered prediction points of one estimator, each with its identity."""
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Filtered prediction points of one estimator, each with its identity,
+        plus the unfiltered points that can serve as the matched VPAI baseline.
+
+        Both carry the game's ``seed`` and ``seating_rotation`` (``-1`` when
+        uncontrolled). The pool is unfiltered, as the strength stage's input
+        is, so a player filter such as ``only_llm`` cannot remove the baseline.
+        """
         panel = ctx.load_table("panel")
         if by not in panel.columns:
             raise AnalysisError(f"{where}: panel has no '{by}' column to group by.")
-        panel = panel[["game_id", "player_id", by]].drop_duplicates(["game_id", "player_id"])
+        # player_type and model let the strength adjustment find the VPAI seats.
+        identity = [
+            c for c in dict.fromkeys([by, "player_type", "model"]) if c in panel.columns
+        ]
+        panel = panel[["game_id", "player_id", *identity]].drop_duplicates(
+            ["game_id", "player_id"]
+        )
         panel["game_id"] = panel["game_id"].astype(str)
         pred = ctx.load_predictions(estimator_id)
         pred["game_id"] = pred["game_id"].astype(str)
@@ -167,17 +225,21 @@ class PerformanceTurnPredicted(Analysis):
         # prediction row with no panel identity is a genuine gap, so drop it rather
         # than resurrect a fake ``Player <id>`` player_type that would pollute the
         # per-identity aggregation.
-        df = ctx.apply_filter(pred.merge(panel, on=["game_id", "player_id"], how="inner"))
-        keep = tuple(dict.fromkeys(c for c in (by, "experiment") if c in df.columns))
+        joined = pred.merge(panel, on=["game_id", "player_id"], how="inner")
+        df = ctx.apply_filter(joined)
+        keep = tuple(dict.fromkeys(c for c in (*identity, "experiment") if c in df.columns))
         points = clean_curve_predictions(df, estimator_id, where, keep)
         if points.empty:
             raise AnalysisError(f"{where}: no rows after filtering.")
-        return points.reset_index(drop=True)
+        pool = clean_curve_predictions(joined, estimator_id, where, keep)
+        design = _design(ctx)
+        return (
+            points.merge(design, on="game_id", how="left").reset_index(drop=True),
+            pool.merge(design, on="game_id", how="left").reset_index(drop=True),
+        )
 
     def _baseline_experiment(self, ctx: AnalysisContext, table_id: str):
-        stage = next((s for s in ctx.config.adjust if s.id == table_id), None)
-        value = ((stage.raw.get("params") or {}).get("baseline_experiment")
-                 if stage is not None else None)
+        value = _strength_params(ctx, table_id).get("baseline_experiment")
         return str(value) if value else None
 
     def _strategist_colors(
@@ -189,6 +251,43 @@ class PerformanceTurnPredicted(Analysis):
         for name in strategist_order:
             colors[name] = get_player_color(ctx.catalog, name)
         return colors
+
+
+def _design(ctx: AnalysisContext) -> pd.DataFrame:
+    """Each game's ``seed`` and ``seating_rotation``, ``-1`` when unknown."""
+    games = ctx.load_table("games")
+    out = pd.DataFrame({"game_id": games["game_id"].astype(str)})
+    for column in ("seed", "seating_rotation"):
+        values = games[column] if column in games.columns else pd.Series(-1, index=games.index)
+        out[column] = pd.to_numeric(values, errors="coerce").fillna(-1).astype(int)
+    return out.drop_duplicates("game_id")
+
+
+def _relative_table(ctx: AnalysisContext, points: pd.DataFrame, pool: pd.DataFrame,
+                    grid, table_id: str):
+    """The controlled runs' mean adjusted-strength curves (:func:`adjusted_curves`).
+
+    Returns ``(table, None)`` or ``(None, reason)``.
+    """
+    curves = adjusted_curves(
+        points, pool, grid, CURVE_KEYS, ctx.catalog, _strength_params(ctx, table_id)
+    )
+    if curves is None:
+        return None, (
+            "no controlled games, or the strength stage's block setting turns the "
+            "matched-cell adjustment off"
+        )
+    if not curves:
+        return None, "no controlled run has a matched VPAI baseline"
+    table = pd.DataFrame(
+        curve_records(curves, CURVE_KEYS, RELATIVE_VALUE), columns=RELATIVE_COLUMNS,
+    ).sort_values([*CURVE_KEYS, "turn_progress"], kind="mergesort").reset_index(drop=True)
+    return table, None
+
+
+def _strength_params(ctx: AnalysisContext, table_id: str) -> dict:
+    stage = next((s for s in ctx.config.adjust if s.id == table_id), None)
+    return dict((stage.raw.get("params") or {}) if stage is not None else {})
 
 
 def _condition(spec, key: str, vanilla_label: str) -> str:

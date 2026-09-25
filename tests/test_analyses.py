@@ -872,7 +872,8 @@ def test_experiment_completeness_uncontrolled_only_is_empty():
 
 def test_performance_turn_predicted(env):
     r = env("performance.turn_predicted", {"by": "player_type"}, {"tables": ["strength"]})
-    assert set(r.table_paths) == {"by_identity", "over_progress"}
+    # The fixture is a controlled design, so the Relative view's table exists.
+    assert set(r.table_paths) == {"by_identity", "over_progress", "over_progress_relative"}
     assert r.figure_paths == {}
     # The strength stage's estimator is the one read.
     assert r.metadata["estimator"] == "est"
@@ -894,6 +895,14 @@ def test_performance_turn_predicted(env):
     assert chart["vanilla_label"] == "Vanilla"
     assert "Vanilla" not in chart["strategist_order"]
     assert set(chart["strategist_colors"]) == {"Vanilla", *chart["strategist_order"]}
+    assert [(v["name"], v["table"]) for v in chart["views"]] == [
+        ("relative", "over_progress_relative"), ("absolute", "over_progress"),
+    ]
+    adjusted = pd.read_csv(r.table_paths["over_progress_relative"], keep_default_na=False)
+    assert list(adjusted.columns) == [
+        "strategist", "condition", "turn_progress", "mean_adjusted_strength", "n_runs",
+    ]
+    assert adjusted["mean_adjusted_strength"].between(0, 1).all()
 
 
 def test_performance_turn_predicted_estimator_override(env):

@@ -380,6 +380,64 @@ def _cell_baseline_per_row(
     return pd.Series(values, index=df.index)
 
 
+def select_cell_baseline(
+    df: pd.DataFrame, catalog: Catalog, baseline_experiment: str | None
+) -> tuple[pd.DataFrame, str, dict, pd.Series]:
+    """The matched start-cell Vanilla VPAI baseline of every row.
+
+    Returns the baseline evidence rows, the selected pathway (``explicit`` with
+    a ``baseline_experiment``, else ``implicit``), the cell to mean
+    ``logit_strength`` map, and each row's baseline (NaN without one).
+    """
+    baseline_df = df[df["controlled"] & _vanilla_baseline_mask(df, catalog)]
+    selected, sel_map = _selected_baseline_maps(baseline_df, baseline_experiment)
+    return baseline_df, selected, sel_map, _cell_baseline_per_row(df, selected, sel_map)
+
+
+def _normalize_to_leader(df: pd.DataFrame, mask: pd.Series) -> None:
+    """``post_cell_normalize = relative_to_leader``: divide by the game's top row."""
+    gmax = df.loc[mask].groupby("game_id")["adjusted_strength"].transform("max")
+    df.loc[mask, "adjusted_strength"] = df.loc[mask, "adjusted_strength"] / gmax
+
+
+def cell_adjust_rows(
+    rows: pd.DataFrame,
+    catalog: Catalog,
+    params: dict | None,
+    enforce_winner: bool | None = None,
+) -> pd.DataFrame | None:
+    """The controlled-design adjustment of :func:`build_strength_panel` on given rows.
+
+    ``rows`` already hold ``weighted_strength`` plus ``game_id``, ``player_id``,
+    ``experiment``, ``player_type``, ``seed``, ``controlled``, and ``is_winner``
+    (``model`` optional). The same steps then run with the same ``params``:
+    ``relative_to``, winner enforcement (``enforce_winner`` overrides the
+    param), the clipped logit, the selected matched cell baseline, the inverse
+    logit of the difference, and ``post_cell_normalize``. ``adjusted_strength``
+    is NaN on rows without a cell baseline. Returns ``None`` when ``block``
+    turns the cell adjustment off or no row is controlled.
+    """
+    p = _resolve_params(params)
+    if enforce_winner is not None:
+        p["enforce_winner"] = enforce_winner
+    controlled_any = bool(rows["controlled"].any())
+    if not (_effective_block(p["block"], controlled_any) == "start_cell" and controlled_any):
+        return None
+    df = _relative_and_logit(rows.copy(), p["enforce_winner"], p["relative_to"])
+    _baseline_df, _selected, _map, baseline = select_cell_baseline(
+        df, catalog, p["baseline_experiment"]
+    )
+    cell_mask = df["controlled"] & baseline.notna()
+    df["cell_baseline"] = baseline
+    df["adjusted_strength"] = np.nan
+    df.loc[cell_mask, "adjusted_strength"] = inv_logit(
+        df.loc[cell_mask, "logit_strength"].to_numpy() - baseline[cell_mask].to_numpy()
+    )
+    if p["post_cell_normalize"] == "relative_to_leader":
+        _normalize_to_leader(df, df["controlled"])
+    return df
+
+
 def _build_cell_coverage(
     df: pd.DataFrame,
     baseline_df: pd.DataFrame,
@@ -490,11 +548,11 @@ def build_strength_panel(
     cell_baseline_series = pd.Series(np.nan, index=df.index)
     selected = None
     if cell_active:
-        baseline_df = df[df["controlled"] & _vanilla_baseline_mask(df, catalog)]
         be = p["baseline_experiment"]
+        baseline_df, selected, sel_map, cell_baseline_series = select_cell_baseline(
+            df, catalog, be
+        )
         cell_baseline_df = _build_cell_baseline(df, baseline_df, be, catalog)
-        selected, sel_map = _selected_baseline_maps(baseline_df, be)
-        cell_baseline_series = _cell_baseline_per_row(df, selected, sel_map)
 
         # A controlled row whose selected baseline cell is missing. EXPLICIT is
         # fatal: the designated baseline source is meant to span the whole grid,
@@ -569,9 +627,7 @@ def build_strength_panel(
 
     # Optional final re-normalization of the cell-adjusted (controlled) rows.
     if cell_active and p["post_cell_normalize"] == "relative_to_leader":
-        mask = df["controlled"]
-        gmax = df.loc[mask].groupby("game_id")["adjusted_strength"].transform("max")
-        df.loc[mask, "adjusted_strength"] = df.loc[mask, "adjusted_strength"] / gmax
+        _normalize_to_leader(df, df["controlled"])
 
     panel_out = df[[c for c in PANEL_COLUMNS if c in df.columns]].reset_index(drop=True)
     return StrengthArtifacts(
