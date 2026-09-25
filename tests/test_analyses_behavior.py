@@ -23,6 +23,7 @@ from bench.analyses.behavior.policies import _earliest
 from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.config.behavior import flavor_gate_text
+from bench.plotting.styles import VICTORY_COLORS
 
 BASELINE = "vanilla-standard"
 TREATMENT = "llm-standard"
@@ -84,11 +85,15 @@ def _turn_rows():
         for pid in range(3):
             llm = exp == TREATMENT and pid == 0
             plan = ["Conquest", "Conquest", "Culture", "Culture"] if llm else ["Spaceship"] * 4
+            # The LLM revises once, on turn 2: Offense +20 and Defense -10.
+            offense = [50, 50, 70, 70] if llm else [np.nan] * 4
+            defense = [50, 50, 40, 40] if llm else [np.nan] * 4
             for turn, gs in enumerate(plan):
                 rows.append({
                     "experiment": exp, "game_id": gid, "player_id": pid,
                     "player_type": LLM if llm else "Vanilla", "turn": turn,
                     "is_decision": 1 if llm else 0, "is_changed": int(llm and turn == 2),
+                    "flavor_offense": offense[turn], "flavor_defense": defense[turn],
                     "grand_strategy": gs, "rationale": "long text",
                 })
     return rows
@@ -583,27 +588,117 @@ def test_turn_metrics_count_switches_and_pivots():
         "grand_strategy": ["Conquest", "Culture", "Culture", np.nan, "Conquest"],
     })
     m = turn_metrics(turns, ["Conquest", "Culture", "Spaceship"]).iloc[0]
-    assert m["decision_rate"] == pytest.approx(0.8)
-    assert m["change_rate"] == pytest.approx(0.2)
+    assert m["acts_pct"] == pytest.approx(80.0)
+    # One of the four decisions changed a flavor.
+    assert m["revise_pct"] == pytest.approx(25.0)
     # Recorded strategies by turn: Culture, Culture, Conquest, Conquest -> one switch in 4.
     assert m["grand_strategy_switches"] == pytest.approx(25.0)
-    assert m["main_strategy_share"] == pytest.approx(0.5)
+    assert m["main_strategy_share"] == pytest.approx(50.0)
     assert m["first_pivot_turn"] == 3
     assert m["grand_strategy_share_spaceship"] == 0
+    # No flavor columns, so there is no change size to measure.
+    assert np.isnan(m["step_size"])
 
 
-def test_commitment_views(behavior_env):
-    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE,
-                                                      "bootstrap_n": 20})
+def test_turn_metrics_measure_change_size_and_net_direction():
+    turns = pd.DataFrame({
+        "game_id": ["g"] * 4 + ["h"] * 3, "player_id": [0] * 7, "turn": [0, 1, 2, 3, 0, 1, 2],
+        "is_decision": [1] * 7, "is_changed": [0, 1, 1, 0, 0, 1, 1],
+        "grand_strategy": ["Culture"] * 7,
+        # g: Offense 50 -> 70 -> 50 and back (all undone); h: two steps the same way.
+        "flavor_offense": [50, 70, 50, 50, 50, 60, 80],
+        "flavor_defense": [50, 50, 50, 50, 50, 55, 55],
+    })
+    m = turn_metrics(turns, ["Culture"]).set_index("game_id")
+    assert m.loc["g", "flavors_touched"] == pytest.approx(1.0)
+    assert m.loc["g", "step_size"] == pytest.approx(20.0)
+    assert m.loc["g", "flavor_shift"] == pytest.approx(20.0)
+    assert m.loc["g", "net_direction_pct"] == pytest.approx(0.0)
+    # h: revisions move (10, 5) then (20, 0): 3 flavor moves over 2 revisions, 35 points.
+    assert m.loc["h", "flavors_touched"] == pytest.approx(1.5)
+    assert m.loc["h", "step_size"] == pytest.approx(35 / 3)
+    assert m.loc["h", "flavor_shift"] == pytest.approx(17.5)
+    assert m.loc["h", "net_direction_pct"] == pytest.approx(100.0)
+
+
+def test_commitment_steering_heatmaps_leave_out_players_without_a_strategist(behavior_env):
+    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
+    views = result.metadata["views"]
+    assert list(views) == ["relative", "absolute", "grand_strategy"]
+    assert views["grand_strategy"]["tables"] == ["grand_strategy"]
+    absolute = _table(result, "commitment_absolute")
+    assert set(absolute.loc[absolute["row_kind"] == "group", "player_type"]) == {LLM}
+    assert _cell(absolute, LLM, "acts_pct") == pytest.approx(100.0)
+    assert _cell(absolute, LLM, "revise_pct") == pytest.approx(25.0)
+    assert _cell(absolute, LLM, "flavors_touched") == pytest.approx(2.0)
+    assert _cell(absolute, LLM, "step_size") == pytest.approx(15.0)
+    assert _cell(absolute, LLM, "net_direction_pct") == pytest.approx(100.0)
+    assert _cell(absolute, LLM, "persona_changes") == pytest.approx(2.0)
+    # The tooltip adds the total change per revision on the change-size columns.
+    assert _cell(absolute, LLM, "step_size", "shift") == pytest.approx(30.0)
+    assert np.isnan(_cell(absolute, LLM, "acts_pct", "shift"))
+    spec = result.metadata["heatmaps"]["commitment_absolute"]
+    assert "column_group" not in spec
+    assert spec["column_labels"]["revise_pct"] == "Revises %"
+    assert spec["column_decimals"]["step_size"] == 1 and spec["column_decimals"]["acts_pct"] == 0
+    assert spec["column_units"]["acts_pct"] == "%"
+    assert spec["tip_rows"][0]["column"] == "shift"
+    rel_spec = result.metadata["heatmaps"]["commitment_relative"]
+    assert rel_spec["column_units"]["acts_pct"] == "pts"
+    assert rel_spec["baseline_units"]["acts_pct"] == "%"
     rel = _table(result, "commitment_relative")
-    assert _cell(rel, LLM, "decision_rate") == pytest.approx(1.0)
-    assert _cell(rel, LLM, "grand_strategy_switches") == pytest.approx(25.0)
-    assert _cell(rel, LLM, "strategy_changes") == pytest.approx(6.0)
-    shares = _table(result, "strategy_shares_relative")
-    assert _cell(shares, LLM, "grand_strategy_share_spaceship") == pytest.approx(-1.0)
-    mix = _table(result, "strategy_mix_absolute").set_index("player_type")
-    assert mix.loc[LLM, "Conquest"] == pytest.approx(0.5)
-    assert result.metadata["grand_strategies"] == ["Conquest", "Culture", "Spaceship"]
+    # The baseline's in-game AI never decides, so the LLM acts 100 points more often.
+    assert _cell(rel, LLM, "acts_pct") == pytest.approx(100.0)
+    assert "research_changes" not in set(absolute["metric"])
+
+
+def test_commitment_defaults_to_the_completed_baseline(behavior_env):
+    result, _ = behavior_env("behavior.commitment", {"bootstrap_n": 20})
+    assert result.metadata["baseline"] == "completed-experiment average"
+
+
+def test_commitment_grand_strategy_view_reads_like_the_focus_tab(behavior_env):
+    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
+    table = _table(result, "grand_strategy")
+    main = table[table["metric"] == "gs_main"].set_index("player_type")
+    # Conquest and Culture tie at 50%; schema order picks Conquest.
+    assert main.loc[LLM, "category"] == "Conquest"
+    assert main.loc[LLM, "text"] == "Conquest 50%"
+    assert main.loc[LLM, "color_position"] == pytest.approx(0.5)
+    assert main.loc[LLM, "switches"] == pytest.approx(25.0)
+    assert main.loc[LLM, "pivot"] == pytest.approx(2.0)
+    assert main.loc["Vanilla", "text"] == "Spaceship 100%"
+    share = table[(table["metric"] == "grand_strategy_share_culture")].set_index("player_type")
+    assert share.loc[LLM, "mean"] == pytest.approx(50.0) and share.loc[LLM, "category"] == "Culture"
+    spec = result.metadata["heatmaps"]["grand_strategy"]
+    assert spec["category_column"] == "category" and spec["text_column"] == "text"
+    assert spec["category_colors"]["Conquest"] == VICTORY_COLORS["Domination"]
+    assert spec["column_labels"]["gs_main"] == "Main"
+    assert spec["reference_rows"] == ["Vanilla"]
+
+
+def test_commitment_offers_two_matched_map_tabs(behavior_env):
+    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
+    tabs = result.metadata["matched_maps"]
+    assert [t["key"] for t in tabs] == ["commitment", "grand-strategy"]
+    assert tabs[0]["seed_table"] == "commitment_by_seed"
+    assert tabs[1] == {"label": "Grand strategy", "tip": "Main grand strategy and its share of turns",
+                       "key": "grand-strategy", "seed_table": "grand_strategy_by_seed",
+                       "seat_table": "grand_strategy_by_seat"}
+    seed = _table(result, "grand_strategy_by_seed")
+    assert set(seed["metric"]) == {"gs_main"}
+    assert set(seed["seat"]) == {0, 1, 2}
+    spec = result.metadata["heatmaps"]["grand_strategy_by_seed"]
+    assert spec["column"] == "seat" and spec["seat_columns"] is True and spec["unit"] == "%"
+    diff = result.metadata["heatmaps"]["commitment_by_seed"]["tip_rows"][0]
+    assert diff["column"] == "difference" and diff["units"]["acts_pct"] == "pts"
+
+
+def test_uncontrolled_commitment_offers_no_tab(behavior_env):
+    result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20},
+                             games=False)
+    assert "matched_maps" not in result.metadata
+    assert "grand_strategy" in result.table_paths
 
 
 # ── policies ───────────────────────────────────────────────────────────────────
@@ -613,23 +708,54 @@ def test_earliest_branch_uses_turns_and_none():
 
 
 def test_policies_views(behavior_env):
-    result, _ = behavior_env("behavior.policies", {"baseline": BASELINE,
-                                                    "bootstrap_n": 20})
+    result, _ = behavior_env("behavior.policies", {"baseline": BASELINE, "bootstrap_n": 20})
     rel = _table(result, "adoption_relative")
     # Seat 0 in the baseline always adopts order and never freedom.
-    assert _cell(rel, LLM, "adopted_freedom") == pytest.approx(1.0)
-    assert _cell(rel, LLM, "adopted_order") == pytest.approx(-1.0)
+    assert _cell(rel, LLM, "adopted_freedom") == pytest.approx(100.0)
+    assert _cell(rel, LLM, "adopted_order") == pytest.approx(-100.0)
     turns = _table(result, "adoption_turn_absolute")
     assert _cell(turns, LLM, "adoption_turn_freedom") == pytest.approx(150)
-    ideologies = _table(result, "ideologies_absolute").set_index("player_type")
-    assert ideologies.loc[LLM, "freedom"] == pytest.approx(1.0)
-    openings = _table(result, "openings_absolute").set_index("player_type")
+    assert _cell(turns, LLM, "adoption_turn_freedom", "share") == pytest.approx(100.0)
+    absolute = _table(result, "adoption_absolute")
+    # Columns sit in tier order under their tier.
+    groups = absolute.drop_duplicates("metric").set_index("metric")["metric_group"]
+    assert list(groups.index) == ["adopted_tradition", "adopted_progress", "adopted_freedom",
+                                  "adopted_order"]
+    assert list(groups) == ["Ancient", "Ancient", "Ideology", "Ideology"]
+    # The tooltip companions: the first-adoption turn and the first pick in the tier.
+    assert _cell(absolute, LLM, "adopted_tradition", "turn") == pytest.approx(20)
+    assert _cell(absolute, LLM, "adopted_tradition", "first") == pytest.approx(100.0)
+    assert _cell(absolute, LLM, "adopted_freedom", "first") == pytest.approx(100.0)
     # 17 in-game AI rows (9 baseline, 8 treatment); seat 1 opens with progress in all 7 games.
-    assert openings.loc["Vanilla", "n_players"] == 17
-    assert openings.loc["Vanilla", "progress"] == pytest.approx(7 / 17)
-    assert openings.loc[LLM, "tradition"] == pytest.approx(1.0)
-    figures = result.metadata["views"]["absolute"]["figures"]
-    assert figures[:2] == ["adoption_absolute", "adoption_turn_absolute"]
+    assert _cell(absolute, "Vanilla", "adopted_progress", "first") == pytest.approx(700 / 17)
+    spec = result.metadata["heatmaps"]["adoption_absolute"]
+    assert spec["column_labels"]["adopted_tradition"] == "Trad"
+    assert spec["column_tips"]["adopted_tradition"] == "Tradition\nOpen from the start."
+    assert spec["value_label"] == "Adopted by"
+    assert [r["column"] for r in spec["tip_rows"]] == ["turn", "first"]
+    assert result.metadata["heatmaps"]["adoption_relative"]["column_units"]["adopted_order"] == "pts"
+    assert all(not v["figures"] for v in result.metadata["views"].values())
+    assert not any(name.startswith(("openings", "ideologies")) for name in result.table_paths)
+
+
+def test_policies_against_the_in_game_ai_leave_out_vanilla_players(behavior_env):
+    result, _ = behavior_env("behavior.policies", {"bootstrap_n": 20}, adjust_baseline=BASELINE)
+    rel = _table(result, "adoption_relative")
+    assert set(rel.loc[rel["row_kind"] == "group", "player_type"]) == {LLM}
+    base = rel[rel["row_kind"] == "baseline"]
+    assert set(base["row_label"]) == {"Matched in-game AI"}
+    assert result.metadata["matched_maps"] == {
+        "label": "Policies", "tip": "Policy paths: share of players adopting each branch",
+        "seed_table": "policies_by_seed", "seat_table": "policies_by_seat",
+    }
+    seat = _table(result, "policies_by_seat")
+    llm = seat[(seat["seed"] == 1) & (seat["player_type"] == LLM)
+               & (seat["metric"] == "adopted_freedom")].iloc[0]
+    assert llm["mean"] == pytest.approx(100.0) and llm["difference"] == pytest.approx(100.0)
+    assert llm["turn"] == pytest.approx(150) and llm["first"] == pytest.approx(100.0)
+    spec = result.metadata["heatmaps"]["policies_by_seat"]
+    assert spec["value_label"] == "Adopted by"
+    assert [r["column"] for r in spec["tip_rows"]] == ["difference", "turn", "first"]
 
 
 # ── config validation ──────────────────────────────────────────────────────────

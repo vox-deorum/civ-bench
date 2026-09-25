@@ -31,7 +31,6 @@ import numpy as np
 import pandas as pd
 
 from ...config import schema as S
-from ...plotting.heatmap import plot_diverging_heatmap
 from ...plotting.pairing import condition_display, order_conditions, order_strategists
 from ...plotting.styles import sort_player_types
 from ..base import AnalysisContext
@@ -98,6 +97,8 @@ class BehaviorViews:
     dropped_metrics: list[str] = field(default_factory=list)
     # Companion columns the relative rows hold as differences from the baseline.
     shifted: set = field(default_factory=set)
+    # The pool's rows on controlled games, as measured (for pinned-row tooltips).
+    pool: Optional[pd.DataFrame] = None
     n_unmatched: int = 0
     n_baseline_rows: int = 0
     n_baseline_experiments: int = 0
@@ -298,6 +299,7 @@ def build_views(
         }
     views.n_baseline_rows = int(len(pool))
     views.n_baseline_experiments = int(pool["experiment"].nunique())
+    views.pool = pool.reset_index(drop=True)
 
     in_baseline = rows["experiment"].isin(baseline.experiments)
     candidates = rows if baseline.self_included else rows[~in_baseline]
@@ -390,79 +392,7 @@ def check_by(df: pd.DataFrame, by: str, stage_id: str) -> None:
         raise AnalysisError(f"analysis '{stage_id}': params.by column '{by}' is not in the input.")
 
 
-# ── labels and figures ───────────────────────────────────────────────────────
-def metric_label(metric: str, rate_scaled: set) -> str:
-    label = metric.replace("_", " ")
-    return f"{label} /100 turns" if metric in rate_scaled else label
-
-
-def summary_heatmap(
-    summary: pd.DataFrame,
-    by: str,
-    metrics: list[str],
-    color: dict,
-    *,
-    labels: dict,
-    title: str,
-    cbar_label: str,
-    signed: bool,
-):
-    """Heatmap of ``by`` × metric: colored by ``color[(group, metric)]``, annotated with the mean."""
-    groups = list(dict.fromkeys(summary[by].astype(str)))
-    columns = [m for m in metrics if m in set(summary["metric"])]
-    matrix = pd.DataFrame(0.0, index=groups, columns=[labels[m] for m in columns])
-    annot = pd.DataFrame("", index=groups, columns=matrix.columns)
-    mask = pd.DataFrame(True, index=groups, columns=matrix.columns)
-    for rec in summary.itertuples(index=False):
-        group, metric = str(getattr(rec, by)), rec.metric
-        if metric not in columns:
-            continue
-        col = labels[metric]
-        value = color.get((group, metric), 0.0)
-        matrix.loc[group, col] = 0.0 if not np.isfinite(value) else value
-        annot.loc[group, col] = _fmt(rec.mean, signed)
-        mask.loc[group, col] = False
-    fig, _ax = plot_diverging_heatmap(
-        matrix, annot=annot, mask=mask, vlim=2.0, title=title, cbar_label=cbar_label,
-        ylabel=by.replace("_", " "),
-    )
-    return fig
-
-
-def _fmt(value: float, signed: bool) -> str:
-    if not np.isfinite(value):
-        return ""
-    magnitude = abs(value)
-    text = f"{value:+.2f}" if signed else f"{value:.2f}"
-    if magnitude >= 100:
-        text = f"{value:+.0f}" if signed else f"{value:.0f}"
-    elif magnitude >= 10:
-        text = f"{value:+.1f}" if signed else f"{value:.1f}"
-    return text
-
-
-def absolute_colors(summary: pd.DataFrame, rows: pd.DataFrame, by: str) -> dict:
-    """Group mean as a z-score against all players in the absolute view."""
-    colors = {}
-    for rec in summary.itertuples(index=False):
-        values = rows[rec.metric].dropna()
-        sd = float(values.std(ddof=1)) if len(values) > 1 else float("nan")
-        z = (rec.mean - float(values.mean())) / sd if sd and np.isfinite(sd) else 0.0
-        colors[(str(getattr(rec, by)), rec.metric)] = z
-    return colors
-
-
-def relative_colors(summary: pd.DataFrame, baseline_sd: dict, by: str) -> dict:
-    """Mean difference in units of the baseline's spread for that metric."""
-    colors = {}
-    for rec in summary.itertuples(index=False):
-        sd = baseline_sd.get(rec.metric, float("nan"))
-        colors[(str(getattr(rec, by)), rec.metric)] = (
-            rec.mean / sd if sd and np.isfinite(sd) else 0.0
-        )
-    return colors
-
-
+# ── view labels ──────────────────────────────────────────────────────────────
 def views_metadata(declared: dict, baseline: Optional[Baseline] = None,
                    extra: Optional[dict] = None) -> dict:
     """``metadata["views"]`` in display order, skipping empty views.
@@ -483,54 +413,6 @@ def views_metadata(declared: dict, baseline: Optional[Baseline] = None,
         if spec and (spec.get("tables") or spec.get("figures")):
             out[name] = {"label": labels.get(name, name), "tip": tips.get(name, ""), **spec}
     return out
-
-
-def largest_departure(summary: pd.DataFrame, colors: dict, by: str, min_players: int = 1):
-    """The ``(group, metric, mean)`` with the largest |color| among well-supported cells."""
-    best = None
-    for rec in summary.itertuples(index=False):
-        if rec.n_players < min_players:
-            continue
-        score = abs(colors.get((str(getattr(rec, by)), rec.metric), 0.0))
-        if best is None or score > best[0]:
-            best = (score, str(getattr(rec, by)), rec.metric, float(rec.mean))
-    return None if best is None else best[1:]
-
-
-def stacked_shares_figure(shares: pd.DataFrame, *, title: str, xlabel: str = "share of players"):
-    """Horizontal 100% bars: rows are groups, columns are categories summing to 1."""
-    import matplotlib.pyplot as plt
-
-    n_rows = max(1, len(shares))
-    fig, ax = plt.subplots(figsize=(10, 0.4 * n_rows + 1.4))
-    cmap = plt.get_cmap("tab10")
-    left = np.zeros(len(shares))
-    labels = [str(i) for i in shares.index]
-    for idx, column in enumerate(shares.columns):
-        values = shares[column].fillna(0.0).to_numpy(dtype=float)
-        ax.barh(labels, values, left=left, color=cmap(idx % 10), label=str(column),
-                edgecolor="white", linewidth=0.5)
-        left = left + values
-    ax.set_xlim(0, 1)
-    ax.margins(y=0.01)
-    ax.invert_yaxis()
-    ax.set_xlabel(xlabel)
-    ax.set_title(title, fontsize=12, fontweight="bold")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8)
-    fig.tight_layout()
-    return fig
-
-
-def share_table(df: pd.DataFrame, by: str, category: str, categories: list[str]) -> pd.DataFrame:
-    """Per-group share of rows in each category, plus ``n_players``; categories in order."""
-    counts = pd.crosstab(df[by].astype(str), df[category].astype(str))
-    counts = counts.reindex(columns=categories, fill_value=0)
-    shares = counts.div(counts.sum(axis=1).where(lambda s: s > 0), axis=0)
-    shares.insert(0, "n_players", counts.sum(axis=1))
-    shares.index.name = by
-    out = shares.reset_index()
-    order = sort_player_types(out[by]) if by == "player_type" else sorted(out[by])
-    return out.set_index(by).loc[order].reset_index()
 
 
 # ── HTML heatmap tables ───────────────────────────────────────────────────────
@@ -640,8 +522,18 @@ def heatmap_spec(
     range_label: str = "",
     range_note: str = "",
     baseline_rows: Optional[list] = None,
+    column_decimals: Optional[dict] = None,
+    column_units: Optional[dict] = None,
+    tip_rows: Optional[list] = None,
+    baseline_units: Optional[dict] = None,
 ) -> dict:
-    """The ``metadata["heatmaps"]`` entry for one view's table (layout only)."""
+    """The ``metadata["heatmaps"]`` entry for one view's table (layout only).
+
+    ``column_decimals`` and ``column_units`` override the number format and add
+    a tooltip unit per column (``baseline_units`` for the pinned baseline rows,
+    which stay absolute); ``tip_rows`` lists extra tooltip lines
+    (:mod:`bench.reports.heatmap`).
+    """
     spec = {
         "view": view,
         "title": title,
@@ -672,5 +564,13 @@ def heatmap_spec(
             spec["range_note"] = range_note
     if baseline_rows:
         spec["baseline_rows"] = list(baseline_rows)
+    if column_decimals:
+        spec["column_decimals"] = {m: int(v) for m, v in column_decimals.items() if m in column_order}
+    if column_units:
+        spec["column_units"] = {m: str(v) for m, v in column_units.items() if m in column_order}
+    if baseline_units is not None and baseline_rows:
+        spec["baseline_units"] = {m: str(v) for m, v in baseline_units.items() if m in column_order}
+    if tip_rows:
+        spec["tip_rows"] = [dict(row) for row in tip_rows]
     return spec
 

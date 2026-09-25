@@ -263,18 +263,23 @@ class AnalysisContext:
             f"adjust stage id."
         )
 
-    def load_table(self, name: str, usecols=None) -> pd.DataFrame:
+    def load_table(self, name: str, usecols=None, dtype=None) -> pd.DataFrame:
         """Read a resolved table CSV (canonical or adjust output), unfiltered
         except that games flagged in the malformed-DB ``import_issues.csv`` are
         dropped (see :meth:`_drop_problem_games`). ``usecols`` limits the columns
-        read from a wide table; keep ``game_id`` in it for the exclusion."""
+        read from a wide table; keep ``game_id`` in it for the exclusion.
+        ``dtype`` passes column types to the CSV reader (absent columns are
+        ignored)."""
         path = self.table_path(name)
         if not Path(path).exists():
             raise AnalysisError(
                 f"analysis '{self.stage_id}': table '{name}' not found at '{path}'. "
                 f"Run the upstream stage (extract / adjust) first."
             )
-        return self._drop_problem_games(pd.read_csv(path, usecols=usecols))
+        if dtype:
+            header = pd.read_csv(path, nrows=0).columns
+            dtype = {c: t for c, t in dtype.items() if c in header}
+        return self._drop_problem_games(pd.read_csv(path, usecols=usecols, dtype=dtype or None))
 
     # ── problem-game exclusion ──────────────────────────────────────────────────
     def _problem_game_ids(self) -> set[str]:

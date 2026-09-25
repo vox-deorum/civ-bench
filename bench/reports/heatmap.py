@@ -32,6 +32,12 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     text, and the header tooltip.
 ``decimals``, ``signed``, ``value_label``, ``ci_level``
     Number format and the tooltip's value line.
+``column_decimals``, ``column_value_labels``, ``column_units``, ``unit``
+    Optional per-column overrides of ``decimals`` and ``value_label``, and a
+    unit appended to the tooltip's numbers (such as ``%``) per column or for
+    the whole table, for tables whose columns measure different things.
+    ``baseline_units`` gives the units of the baseline rows, which hold
+    absolute values even in a signed table.
 ``range_columns``, ``range_label``, ``range_note``
     Optional ``[low, high]`` columns shown as one more tooltip line, in the
     table's number format (signed in a signed table) and followed by
@@ -43,8 +49,15 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     When true, ``row_order`` and ``column_order`` are the full grid: listed
     rows and columns render even without data, as blank cells.
 ``tip_rows``
-    Optional ``[{"column", "label", "signed", "decimals"}, ...]``: more tooltip
-    lines from other columns, such as a difference from the baseline.
+    Optional ``[{"column", "label", "signed", "decimals", "unit", "units", "text"}, ...]``:
+    more tooltip lines from other columns, such as a difference from the
+    baseline. ``units`` maps a table column to the line's unit there, else
+    ``unit`` applies; a row with ``"text": true`` shows the column's string as is.
+``category_column``, ``category_colors``
+    Optional categorical coloring, the Matched Maps Focus style: a cell whose
+    category column names a key of ``category_colors`` (``#rrggbb``) is shaded
+    from white toward that color by its ``color_position`` (see
+    :func:`category_background`). Other cells keep the RdYlBu color.
 
 Some tables need more than one number per cell. These optional keys each name
 a column of the long table that overrides one part of a cell:
@@ -118,6 +131,12 @@ def cell_text_color(background: str) -> str:
     return TEXT_LIGHT if luminance(hex_to_rgb(background)) < 0.55 else TEXT_DARK
 
 
+def category_background(color: str, value: float) -> str:
+    """``color`` at intensity ``value`` in [0, 1]: a faint tint at 0, full at 1."""
+    t = 0.0 if not np.isfinite(value) else min(1.0, max(0.0, value))
+    return interpolate("#ffffff", color, 0.22 + 0.78 * t)
+
+
 def position_background(value: float) -> str:
     """The RdYlBu color at ``value`` in [0, 1] (clipped; NaN reads as 0)."""
     t = 0.0 if not np.isfinite(value) else min(1.0, max(0.0, value))
@@ -145,7 +164,7 @@ def spec_fits(spec: Optional[dict], frame: pd.DataFrame) -> bool:
     if not isinstance(row, str) or not isinstance(column, str):
         return False
     needed = {row, column, str(spec.get("value", "mean")), COLOR_COLUMN}
-    for key in ("column_group", *OVERRIDE_KEYS):
+    for key in ("column_group", "category_column", *OVERRIDE_KEYS):
         name = spec.get(key)
         if name is None:
             continue
@@ -212,11 +231,17 @@ def _text(rec: dict, column) -> str:
     return str(value)
 
 
-def _cell_value(rec: dict, spec: dict, row: str) -> str:
+def _decimals(spec: dict, column: str) -> int:
+    """The column's number of decimals, else the table's."""
+    per_column = spec.get("column_decimals") or {}
+    return int(per_column.get(column, spec.get("decimals", 1)))
+
+
+def _cell_value(rec: dict, spec: dict, row: str, column: str) -> str:
     text = _text(rec, spec.get("text_column"))
     if text:
         return text
-    return _number(rec.get(spec.get("value", "mean")), int(spec.get("decimals", 1)),
+    return _number(rec.get(spec.get("value", "mean")), _decimals(spec, column),
                    _signed(spec, row))
 
 
@@ -251,14 +276,20 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
     override = _text(rec, spec.get("tip_column"))
     if override:
         return override
-    decimals = int(spec.get("decimals", 1)) + 1
+    places = _decimals(spec, column)
+    decimals = places + 1
     baseline = row in set(spec.get("baseline_rows") or [])
+    units = spec["baseline_units"] if baseline and "baseline_units" in spec else spec.get("column_units")
+    unit = str((units or {}).get(column, spec.get("unit", "")))
     signed = _signed(spec, row)
-    value = _number(rec.get(spec.get("value", "mean")), decimals, signed)
-    label = "Average" if baseline else str(spec.get("value_label") or "Value")
+    value = _with_unit(_number(rec.get(spec.get("value", "mean")), decimals, signed), unit)
+    value_labels = spec.get("column_value_labels") or {}
+    label = "Average" if baseline else str(
+        value_labels.get(column) or spec.get("value_label") or "Value"
+    )
     lines = [row, _column_name(spec, column), tip_row(label, value)]
-    lo = _number(rec.get("ci_lower"), decimals, signed)
-    hi = _number(rec.get("ci_upper"), decimals, signed)
+    lo = _with_unit(_number(rec.get("ci_lower"), decimals, signed), unit)
+    hi = _with_unit(_number(rec.get("ci_upper"), decimals, signed), unit)
     if lo and hi:
         level = spec.get("ci_level")
         prefix = f"{float(level) * 100:g}% CI" if isinstance(level, (int, float)) else "CI"
@@ -268,7 +299,6 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
         lines.append(tip_row("SD", sd, "one legend step"))
     bounds = spec.get("range_columns")
     if isinstance(bounds, list) and len(bounds) == 2:
-        places = int(spec.get("decimals", 1))
         low = _number(rec.get(bounds[0]), places, signed)
         high = _number(rec.get(bounds[1]), places, signed)
         if low and high:
@@ -278,8 +308,14 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
     for extra in spec.get("tip_rows") or []:
         if not isinstance(extra, dict) or not extra.get("column"):
             continue
-        text = _number(rec.get(extra["column"]), int(extra.get("decimals", decimals)),
-                       bool(extra.get("signed", False)))
+        if extra.get("text"):
+            text = _text(rec, extra["column"])
+        else:
+            text = _with_unit(
+                _number(rec.get(extra["column"]), int(extra.get("decimals", decimals)),
+                        bool(extra.get("signed", False))),
+                str((extra.get("units") or {}).get(column, extra.get("unit", ""))),
+            )
         if text:
             lines.append(tip_row(str(extra.get("label", extra["column"])), text))
     n_players, n_games = rec.get("n_players"), rec.get("n_games")
@@ -287,6 +323,13 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
         players, games = int(n_players), int(float(n_games))
         lines.append(tip_row("Players", str(players), f"in {plural(games, 'game')}"))
     return "\n".join(lines)
+
+
+def _with_unit(text: str, unit: str) -> str:
+    """``text`` with its unit: ``%`` joins the number, a word follows a space."""
+    if not text or not unit:
+        return text
+    return f"{text}{unit}" if unit == "%" else f"{text} {unit}"
 
 
 def _label_html(label: str, tip: str) -> str:
@@ -303,14 +346,20 @@ def _background(rec: dict, spec: dict) -> str:
         position = float(rec.get(COLOR_COLUMN))
     except (TypeError, ValueError):
         return ""
-    return position_background(position) if np.isfinite(position) else ""
+    if not np.isfinite(position):
+        return ""
+    category = _text(rec, spec.get("category_column"))
+    color = (spec.get("category_colors") or {}).get(category) if category else None
+    if isinstance(color, str) and color.startswith("#") and len(color) == 7:
+        return category_background(color, position)
+    return position_background(position)
 
 
 def _cell_html(rec: Optional[dict], spec: dict, row: str, column: str) -> str:
     divider = " col-divider" if column in set(spec.get("divider_columns") or []) else ""
     if rec is None:
         return f'<td class="heat-cell heat-cell-empty{divider}" aria-label="no data"></td>'
-    text = _cell_value(rec, spec, row)
+    text = _cell_value(rec, spec, row, column)
     tip = _esc(_cell_tooltip(rec, spec, row, column))
     value = _raw_value(rec, spec)
     value_attr = f' data-value="{value}"' if value else ""
@@ -436,7 +485,7 @@ def render_heatmap_md(frame: pd.DataFrame, spec: dict) -> list[str]:
         "|" + "|".join([":---"] + ["---:"] * len(columns)) + "|",
     ]
     for row in reference + body:
-        values = [_cell_value(cells[(row, c)], spec, row) if (row, c) in cells else "" for c in columns]
+        values = [_cell_value(cells[(row, c)], spec, row, c) if (row, c) in cells else "" for c in columns]
         lines.append("| " + " | ".join(clean(v) for v in [row, *values]) + " |")
     key = [
         f"{_column_label(spec, c)} = {_column_name(spec, c)}"

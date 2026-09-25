@@ -183,6 +183,31 @@ BEHAVIOR_RELATIONSHIP_KINDS = {
 BEHAVIOR_RELATIONSHIPS = tuple(BEHAVIOR_RELATIONSHIP_KINDS)
 # Policy branches that are ideologies; the rest compete for the opening branch.
 BEHAVIOR_IDEOLOGIES = ("freedom", "autocracy", "order")
+# Policy branch → (name, short header, tier, unlock rule). Tiers and unlocks
+# follow Vox Populi's PolicyTreeChanges.sql; `behavior.policies` groups its
+# columns by tier in this order.
+POLICY_INFO = {
+    "tradition": ("Tradition", "Trad", "Ancient", "Open from the start."),
+    "authority": ("Authority", "Auth", "Ancient", "Open from the start."),
+    "progress": ("Progress", "Prog", "Ancient", "Open from the start."),
+    "fealty": ("Fealty", "Feal", "Medieval", "Opens in the Medieval era after 6 adopted policies."),
+    "statecraft": ("Statecraft", "Stat", "Medieval", "Opens in the Medieval era after 6 adopted policies."),
+    "artistry": ("Artistry", "Art", "Medieval", "Opens in the Medieval era after 6 adopted policies."),
+    "industry": ("Industry", "Ind", "Industrial", "Opens in the Industrial era after 12 adopted policies."),
+    "imperialism": ("Imperialism", "Imp", "Industrial", "Opens in the Industrial era after 12 adopted policies."),
+    "rationalism": ("Rationalism", "Rat", "Industrial", "Opens in the Industrial era after 12 adopted policies."),
+    "freedom": ("Freedom", "Free", "Ideology", "An ideology; a player usually adopts one."),
+    "autocracy": ("Autocracy", "Auto", "Ideology", "An ideology; a player usually adopts one."),
+    "order": ("Order", "Ord", "Ideology", "An ideology; a player usually adopts one."),
+}
+# The in-game AI's grand strategies → (display name, the victory type whose
+# color it shares in reports). Unknown strategies still show, uncolored.
+GRAND_STRATEGY_INFO = {
+    "Conquest": ("Conquest", "Domination"),
+    "Culture": ("Culture", "Culture"),
+    "UnitedNations": ("United Nations", "Diplomatic"),
+    "Spaceship": ("Spaceship", "Science"),
+}
 # Persona traits `behavior.diplomacy` reads (as `persona_<trait>_avg`) by default.
 BEHAVIOR_DIPLOMACY_TRAITS = (
     "DiplomaticBalance", "Friendliness", "WorkWithWillingness",
@@ -351,7 +376,9 @@ STRENGTH_RATING_MODULES = {
 
 # Modules the controlled-seed report may list in uses.analyses: each one adds a
 # tab to the Matched Maps overview and seat pages (§7.1).
-MATCHED_MAPS_TAB_MODULES = {"behavior.flavors", "behavior.diplomacy"}
+MATCHED_MAPS_TAB_MODULES = {
+    "behavior.flavors", "behavior.diplomacy", "behavior.commitment", "behavior.policies",
+}
 
 # Params every behavior.* module accepts (§6.2). `baseline` is "completed", one
 # experiment id, or a list of experiment ids.

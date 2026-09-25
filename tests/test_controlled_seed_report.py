@@ -507,11 +507,16 @@ def test_config_tabs_must_offer_a_matched_maps_tab(tmp_path, write_spec, dev_spe
                              "params": {}})
     spec["analyses"].append({"id": "diplomacy", "module": "behavior.diplomacy", "enabled": True,
                              "params": {}})
+    spec["analyses"].append({"id": "commitment", "module": "behavior.commitment", "enabled": True,
+                             "params": {}})
+    spec["analyses"].append({"id": "policies", "module": "behavior.policies", "enabled": True,
+                             "params": {}})
     spec["analyses"].append({"id": "coverage", "module": "performance.experiment_completeness",
                              "enabled": True, "uses": {"tables": ["strength"]}, "params": {}})
-    spec["analyses"][0]["uses"]["analyses"] = ["flavors", "diplomacy"]
+    tabs = ["flavors", "diplomacy", "commitment", "policies"]
+    spec["analyses"][0]["uses"]["analyses"] = tabs
     cfg = load_config(write_spec(spec))
-    assert cfg.analyses[0].uses_analyses == ["flavors", "diplomacy"]
+    assert cfg.analyses[0].uses_analyses == tabs
     spec["analyses"][0]["uses"]["analyses"] = ["flavors", "coverage"]
     with pytest.raises(ConfigError, match="offer a Matched Maps tab"):
         load_config(write_spec(spec))
@@ -1117,6 +1122,47 @@ def test_strategy_and_diplomacy_tabs_follow_strength_and_focus():
         assert positions == sorted(positions)
 
 
+def _grand_strategy_tab() -> MatchedMapTab:
+    """A Focus-style Grand strategy tab like behavior.commitment writes it."""
+    cell = {"row_kind": "group", "seed": 1, "player_id": 0, "row_label": "Weird & <Model> | Per 5",
+            "mean": 62.0, "color_position": 0.62, "category": "Spaceship", "strategy": "Spaceship",
+            "text": "Spaceship 62%", "switches": 0.5, "n_players": 2, "n_games": 2}
+    spec = {
+        "title": "Main grand strategy", "help": "Grand strategy help.", "row": "row_label",
+        "column": "seat", "value": "mean", "row_order": ["Weird & <Model> | Per 5"],
+        "seat_columns": True, "decimals": 0, "unit": "%", "value_label": "Share of turns",
+        "text_column": "text", "category_column": "category",
+        "category_colors": {"Spaceship": "#4e9b4e"},
+        "tip_rows": [{"column": "strategy", "label": "Strategy", "text": True}],
+    }
+    seat_spec = {**spec, "column": "metric", "seat_columns": False,
+                 "column_order": ["gs_main"], "column_names": {"gs_main": "Main grand strategy"}}
+    return MatchedMapTab(
+        name="beh_commitment-grand-strategy", label="Grand strategy", tip="Main grand strategy",
+        seed_table=pd.DataFrame([{**cell, "seat": 0, "metric": "gs_main"}]),
+        seat_table=pd.DataFrame([{**cell, "metric": "gs_main"}]),
+        seed_spec=spec, seat_spec=seat_spec,
+    )
+
+
+def test_seat_column_tabs_lay_out_like_the_focus_tab():
+    from bench.reports.heatmap import category_background
+
+    doc = _tiny_doc()
+    doc.tabs = [_grand_strategy_tab()]
+    pages = render_controlled_seed_site(doc)
+    overview = pages["controlled-seed/index.html"]
+    # One column per seat of the seed, headed like Focus, in the strategy color.
+    panel = overview[overview.index('id="seed-1-view-beh_commitment-grand-strategy"'):]
+    assert '<th scope="col" data-col="1">0: Civ &quot;X&quot;</th>' in panel
+    assert f"background-color:{category_background('#4e9b4e', 0.62)}" in panel
+    assert ">Spaceship 62%</td>" in panel
+    assert "Share of turns\t62.0%" in panel and "Strategy\tSpaceship" in panel
+    detail = pages["controlled-seed/seed-1-player-0.html"]
+    assert 'aria-controls="seat-view-beh_commitment-grand-strategy"' in detail
+    assert "Main grand strategy\nShare of turns\t62.0%" in detail
+
+
 def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
     from bench.reports.context import ReportBuildContext
     from bench.reports.controlled_seed import _matched_map_tabs
@@ -1142,3 +1188,33 @@ def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
         "Matched Maps: analysis 'beh_other' offers no Matched Maps tab; its tab is skipped.",
         "Matched Maps: analysis 'gone' is not among the report sections; its tab is skipped.",
     ]
+
+
+def test_one_section_may_declare_several_tabs(tmp_path):
+    from bench.reports.context import ReportBuildContext
+    from bench.reports.controlled_seed import _matched_map_tabs
+    from bench.reports.model import Section
+
+    tab = _strategic_tab()
+    for name in ("a_by_seed", "b_by_seed"):
+        tab.seed_table.to_csv(tmp_path / f"{name}.csv", index=False)
+    for name in ("a_by_seat", "b_by_seat"):
+        tab.seat_table.to_csv(tmp_path / f"{name}.csv", index=False)
+    section = Section(id="beh_commitment", module="behavior.commitment", metadata={
+        "matched_maps": [
+            {"label": "Commitment", "key": "commitment", "seed_table": "a_by_seed",
+             "seat_table": "a_by_seat"},
+            {"label": "Grand strategy", "key": "grand-strategy", "seed_table": "b_by_seed",
+             "seat_table": "b_by_seat"},
+        ],
+        "heatmaps": {},
+    })
+    ctx = ReportBuildContext(meta={}, sections=[section])
+    for name in ("a_by_seed", "a_by_seat", "b_by_seed", "b_by_seat"):
+        ctx.record_table("beh_commitment", name, tmp_path, f"{name}.csv")
+    tabs = _matched_map_tabs(ctx, ["beh_commitment"])
+    assert [(t.name, t.label) for t in tabs] == [
+        ("beh_commitment-commitment", "Commitment"),
+        ("beh_commitment-grand-strategy", "Grand strategy"),
+    ]
+    assert not ctx.warnings

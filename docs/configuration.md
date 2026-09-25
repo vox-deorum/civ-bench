@@ -415,7 +415,7 @@ Artifact names come from the analysis's saved `result.json`. Hidden inline artif
 | `index.html` | Overview cards and navigation |
 | `report.md` | Combined Markdown report |
 | `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `exploratory.html` | One page per represented family |
-| `controlled-seed/index.html` | Matched Maps tables by seed, in Strength, Focus, Strategy, and Diplomacy tabs |
+| `controlled-seed/index.html` | Matched Maps tables by seed, in Strength, Focus, Strategy, Diplomacy, Commitment, Grand strategy, and Policies tabs |
 | `controlled-seed/seed-<seed>-player-<position>.html` | Probability curves and the same tabs for one seed and player position |
 | `games.html` | Filterable per-game log and replay links, when `report.replay.enabled` |
 | `saves/<experiment>/<game_id>.Civ5Save` | Copied replay saves, when available and in scope |

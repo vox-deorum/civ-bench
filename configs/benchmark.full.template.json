@@ -475,7 +475,9 @@
         ],
         "analyses": [
           "beh_flavors",
-          "beh_diplomacy"
+          "beh_diplomacy",
+          "beh_commitment",
+          "beh_policies"
         ]
       },
       "params": {}

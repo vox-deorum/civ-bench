@@ -1,17 +1,13 @@
 """Common scaffolding for the ``behavior.*`` modules.
 
 A module computes one row per player per game with its metric columns, then
-summarizes both views through one of two paths:
+summarizes both views with :meth:`BehaviorAnalysis.add_heatmap_views`, which
+writes one long table per view plus the ``metadata["heatmaps"]`` layout the
+report draws as an HTML heatmap. :meth:`BehaviorAnalysis.add_matched_map_tables`
+writes the per-seed and per-seat tables behind a Matched Maps tab.
 
-* :meth:`BehaviorAnalysis.add_heatmap_views` writes one long table per view
-  plus the ``metadata["heatmaps"]`` layout the report draws as an HTML heatmap
-  (the flavors page);
-* :meth:`BehaviorAnalysis.metric_views` draws matplotlib heatmaps (the pages
-  not yet moved to HTML tables).
-
-Either way the declared views render behind the relative/absolute toggle; a
-module may declare more views (the diplomacy page's Stance view) through
-``view_names``.
+The declared views render behind the relative/absolute toggle; a module may
+declare more views (the diplomacy page's Stance view) through ``view_names``.
 """
 
 from __future__ import annotations
@@ -29,21 +25,16 @@ from . import common as C
 @dataclass
 class MetricViews:
     tables: dict = field(default_factory=dict)
-    figures: dict = field(default_factory=dict)
     declared: dict = field(default_factory=lambda: {C.RELATIVE: {"tables": [], "figures": []},
                                                     C.ABSOLUTE: {"tables": [], "figures": []}})
     summaries: dict = field(default_factory=dict)
-    colors: dict = field(default_factory=dict)
     heatmaps: dict = field(default_factory=dict)
 
-    def add(self, view: str, name: str, table=None, figure=None) -> None:
+    def add(self, view: str, name: str, table=None) -> None:
         self.declared.setdefault(view, {"tables": [], "figures": []})
         if table is not None:
             self.tables[name] = table
             self.declared[view]["tables"].append(name)
-        if figure is not None:
-            self.figures[name] = figure
-            self.declared[view]["figures"].append(name)
 
 
 class BehaviorAnalysis(Analysis):
@@ -128,6 +119,10 @@ class BehaviorAnalysis(Analysis):
         range_label: str = "",
         baseline_row: bool = False,
         view_names: dict | None = None,
+        column_decimals: dict | None = None,
+        column_units: dict | None = None,
+        companions: dict | None = None,
+        tip_rows: dict | None = None,
     ) -> None:
         """Write ``<slug>_relative`` / ``<slug>_absolute`` and their heatmap specs.
 
@@ -147,6 +142,12 @@ class BehaviorAnalysis(Analysis):
         With ``baseline_row``, both views pin a row with the baseline pool's absolute
         mean per metric (``row_kind == "baseline"``), colored like the absolute
         view; it needs a relative view, so an uncontrolled run has none.
+
+        ``column_decimals`` sets a metric's number format. ``column_units``,
+        ``companions``, and ``tip_rows`` are keyed by view: a metric's tooltip
+        unit, ``{metric: {out_column: source_column}}`` group means of other
+        per-player columns (the pinned row takes the pool's), and the tooltip
+        lines that show them.
         """
         metrics = list(names)
         per_view = [(C.ABSOLUTE, views.absolute, metrics)]
@@ -173,12 +174,18 @@ class BehaviorAnalysis(Analysis):
                 m: pair for m, pair in (ranges or {}).items() if set(pair) <= views.shifted
             }
             if view_ranges:
-                summary = _attach_ranges(summary, frame, self.by, view_ranges)
+                summary = _attach_means(summary, frame, self.by, {
+                    m: {"mean_min": low, "mean_max": high} for m, (low, high) in view_ranges.items()
+                })
+            view_companions = (companions or {}).get(view) or {}
+            if view_companions:
+                summary = _attach_means(summary, frame, self.by, view_companions)
             summary["color_position"] = C.color_positions(summary, view, views, fixed)
             table, order = C.heatmap_rows(ctx, summary, self.by)
             table.insert(0, "row_kind", "group")
             if pinned:
-                table = _with_baseline_row(table, views, view_metrics, pinned, self.by, groups, fixed)
+                table = _with_baseline_row(table, views, view_metrics, pinned, self.by, groups, fixed,
+                                           view_companions)
                 order = [pinned] + order
             leading = ["row_kind", self.by, "strategist", "condition", "row_label"]
             table = table[leading + [c for c in table.columns if c not in leading]]
@@ -205,6 +212,10 @@ class BehaviorAnalysis(Analysis):
                 range_label=range_label if view_ranges else "",
                 range_note="mean min to max, vs. baseline" if view == C.RELATIVE else "",
                 baseline_rows=[pinned] if pinned else None,
+                column_decimals=column_decimals,
+                column_units=(column_units or {}).get(view),
+                tip_rows=(tip_rows or {}).get(view),
+                baseline_units=(column_units or {}).get(C.ABSOLUTE, {}) if column_units else None,
             )
 
     def add_matched_map_tables(
@@ -227,6 +238,12 @@ class BehaviorAnalysis(Analysis):
         fixed: dict | None = None,
         legend: list,
         decimals: int = 1,
+        column_decimals: dict | None = None,
+        column_units: dict | None = None,
+        companions: dict | None = None,
+        tip_rows: list | None = None,
+        key: str = "",
+        value_label: str = "Average",
     ) -> dict | None:
         """Write ``<slug>_by_seed`` / ``<slug>_by_seat`` for a Matched Maps tab.
 
@@ -236,8 +253,11 @@ class BehaviorAnalysis(Analysis):
         players are left out: the chapter's pinned row is the reference. A cell's
         ``difference`` is the mean relative value there (the player minus the
         baseline at its own seed and seat), shown in the tooltip. No bootstrap:
-        the Matched Maps tables report plain means. Returns the
-        ``metadata["matched_maps"]`` entry, or ``None`` without a relative view.
+        the Matched Maps tables report plain means. ``companions`` and
+        ``tip_rows`` add per-cell means of other columns to the tooltip, as in
+        :meth:`add_heatmap_views`; ``key`` names the tab when a module offers
+        more than one. Returns the ``metadata["matched_maps"]`` entry, or
+        ``None`` without a relative view.
         """
         if views.relative is None or cells is None or cells.empty or not views.baseline_summary:
             return None
@@ -249,15 +269,15 @@ class BehaviorAnalysis(Analysis):
         rows = views.absolute[views.absolute["player_type"].astype(str) != ctx.catalog.vanilla_label]
         rows = rows.merge(cells, on="game_id", how="inner")
         base = pool.merge(cells, on="game_id", how="inner")
-        declared = {"label": label, "tip": tip}
-        for keys, name, key in ((["seed"], f"{slug}_by_seed", "seed_table"),
-                                (["seed", "player_id"], f"{slug}_by_seat", "seat_table")):
+        declared = {"label": label, "tip": tip, **({"key": key} if key else {})}
+        for keys, name, entry in ((["seed"], f"{slug}_by_seed", "seed_table"),
+                                  (["seed", "player_id"], f"{slug}_by_seat", "seat_table")):
             table, order = self._matched_map_table(ctx, rows, base, views, metrics, keys,
-                                                   pinned, groups, fixed)
+                                                   pinned, groups, fixed, companions or {})
             if table.empty:
                 return None
             out.tables[name] = table
-            spec = C.heatmap_spec(
+            out.heatmaps[name] = C.heatmap_spec(
                 view=C.ABSOLUTE,
                 title=title,
                 help_text=help_text,
@@ -270,18 +290,23 @@ class BehaviorAnalysis(Analysis):
                 column_tips={m: (column_tips or {}).get(m, names[m]) for m in metrics},
                 grouped=bool(groups),
                 decimals=decimals,
-                value_label="Average",
+                value_label=value_label,
                 ci_level=self.ci_level,
                 legend=legend,
                 baseline_rows=[pinned],
+                column_decimals=column_decimals,
+                column_units=column_units,
+                # A difference of percents is in percentage points.
+                tip_rows=[{"column": "difference", "label": "Vs. baseline", "signed": True,
+                           "units": {m: "pts" if u == "%" else u
+                                     for m, u in (column_units or {}).items()}},
+                          *(tip_rows or [])],
             )
-            spec["tip_rows"] = [{"column": "difference", "label": "Vs. baseline",
-                                 "signed": True, "decimals": decimals + 1}]
-            out.heatmaps[name] = spec
-            declared[key] = name
+            declared[entry] = name
         return declared
 
-    def _matched_map_table(self, ctx, rows, base, views, metrics, keys, pinned, groups, fixed):
+    def _matched_map_table(self, ctx, rows, base, views, metrics, keys, pinned, groups, fixed,
+                           companions):
         """One long absolute table per ``keys`` cell, the baseline row first."""
         by = self.by
         difference = views.relative.groupby(keys + [by])[metrics].mean()
@@ -295,6 +320,7 @@ class BehaviorAnalysis(Analysis):
                 diff = difference[metric].get(tuple(values), float("nan"))
                 records.append({**dict(zip(keys, cell)), by: group, "metric": metric,
                                 "mean": float(col[metric].mean()), "difference": float(diff),
+                                **_companion_means(grp, companions.get(metric)),
                                 "n_players": int(len(col)), "n_games": int(col["game_id"].nunique())})
         if not records:
             return pd.DataFrame(), []
@@ -311,7 +337,9 @@ class BehaviorAnalysis(Analysis):
                 baseline.append({"row_kind": "baseline", **dict(zip(keys, values)), by: pinned,
                                  "strategist": pinned, "condition": "", "row_label": pinned,
                                  "metric": metric, "mean": float(col[metric].mean()),
-                                 "difference": float("nan"), "n_players": int(len(col)),
+                                 "difference": float("nan"),
+                                 **_companion_means(grp, companions.get(metric)),
+                                 "n_players": int(len(col)),
                                  "n_games": int(col["game_id"].nunique())})
         table = pd.concat([pd.DataFrame(baseline), summary], ignore_index=True) if baseline else summary
         table["metric_group"] = table["metric"].map(lambda m: (groups or {}).get(m, ""))
@@ -327,7 +355,8 @@ class BehaviorAnalysis(Analysis):
         return table.reset_index(drop=True), order
 
     def heatmap_headline(self, ctx: AnalysisContext, out: MetricViews, views: C.BehaviorViews,
-                         slug: str, names: dict, decimals: int = 1) -> str:
+                         slug: str, names: dict, decimals: int = 1,
+                         column_decimals: dict | None = None) -> str:
         """One sentence on the strongest-colored cell, leaving out Null and Vanilla rows."""
         skip = {ctx.catalog.null_label, ctx.catalog.vanilla_label}
         for view in (C.RELATIVE, C.ABSOLUTE):
@@ -344,109 +373,26 @@ class BehaviorAnalysis(Analysis):
             score = (table["color_position"] - 0.5).abs()
             best = table.loc[score.idxmax()]
             row, name = best["row_label"], names[best["metric"]]
+            places = int((column_decimals or {}).get(best["metric"], decimals))
             if view == C.RELATIVE:
                 return (
                     f"Against the {views.baseline.label} on the same map and seat, the largest "
-                    f"departure is **{row}** on {name} (**{best['mean']:+.{decimals}f}**), across "
+                    f"departure is **{row}** on {name} (**{best['mean']:+.{places}f}**), across "
                     f"**{len(views.relative)}** controlled players."
                 )
             return (
                 f"The most distinctive value is **{row}** on {name} "
-                f"(**{best['mean']:.{decimals}f}**), across **{len(views.absolute)}** players in "
+                f"(**{best['mean']:.{places}f}**), across **{len(views.absolute)}** players in "
                 f"**{views.absolute['game_id'].nunique()}** games."
             )
         return "No player had values for the selected behavior metrics."
 
-    # ── outputs ───────────────────────────────────────────────────────────────
-    def metric_views(
-        self,
-        ctx: AnalysisContext,
-        views: C.BehaviorViews,
-        slug: str,
-        title: str,
-        labels: dict,
-        metrics: list[str] | None = None,
-        figure_slug: str | None = None,
-    ) -> MetricViews:
-        """Summary tables and heatmaps for ``metrics`` in both views."""
-        out = MetricViews()
-        self.add_metric_views(ctx, views, out, slug, title, labels, metrics, figure_slug)
-        return out
-
-    def add_metric_views(
-        self,
-        ctx: AnalysisContext,
-        views: C.BehaviorViews,
-        out: MetricViews,
-        slug: str,
-        title: str,
-        labels: dict,
-        metrics: list[str] | None = None,
-        figure_slug: str | None = None,
-    ) -> None:
-        by = self.by
-        figure_slug = figure_slug or slug
-        metrics = list(metrics if metrics is not None else views.metrics)
-        if views.relative is not None:
-            rel_metrics = [m for m in metrics if m in views.relative_metrics]
-            if rel_metrics:
-                rel = C.summarize(ctx, views.relative, rel_metrics, by, C.RELATIVE,
-                                  self.bootstrap_n, self.ci_level)
-                colors = C.relative_colors(rel, views.baseline_sd, by)
-                fig = C.summary_heatmap(
-                    rel, by, rel_metrics, colors, labels=labels, signed=True,
-                    title=f"{title}: difference from the matched in-game AI",
-                    cbar_label="difference / baseline SD",
-                ) if not rel.empty else None
-                out.add(C.RELATIVE, f"{slug}_relative", table=rel)
-                if fig is not None:
-                    out.add(C.RELATIVE, f"{figure_slug}_relative", figure=fig)
-                out.summaries[(slug, C.RELATIVE)] = rel
-                out.colors[(slug, C.RELATIVE)] = colors
-        absolute = C.summarize(ctx, views.absolute, metrics, by, C.ABSOLUTE,
-                               self.bootstrap_n, self.ci_level)
-        colors = C.absolute_colors(absolute, views.absolute, by)
-        fig = C.summary_heatmap(
-            absolute, by, metrics, colors, labels=labels, signed=False,
-            title=f"{title}: absolute values", cbar_label="z-score across players",
-        ) if not absolute.empty else None
-        out.add(C.ABSOLUTE, f"{slug}_absolute", table=absolute)
-        if fig is not None:
-            out.add(C.ABSOLUTE, f"{figure_slug}_absolute", figure=fig)
-        out.summaries[(slug, C.ABSOLUTE)] = absolute
-        out.colors[(slug, C.ABSOLUTE)] = colors
-
-    def headline(self, out: MetricViews, views: C.BehaviorViews, slug: str, labels: dict) -> str:
-        """One sentence leading with the relative finding when there is one."""
-        rel = out.summaries.get((slug, C.RELATIVE))
-        if rel is not None and not rel.empty:
-            pick = _pick(rel, out.colors[(slug, C.RELATIVE)], self.by)
-            if pick is not None:
-                group, metric, mean = pick
-                return (
-                    f"Against the {views.baseline.label}, the largest departure is **{group}** on "
-                    f"{labels[metric]} (**{mean:+.2f}**), across **{len(views.relative)}** "
-                    "controlled players."
-                )
-        absolute = out.summaries.get((slug, C.ABSOLUTE))
-        if absolute is None or absolute.empty:
-            return "No player had values for the selected behavior metrics."
-        pick = _pick(absolute, out.colors[(slug, C.ABSOLUTE)], self.by)
-        n_games = views.absolute["game_id"].nunique()
-        if pick is None:
-            return f"Behavior covers **{len(views.absolute)}** players in **{n_games}** games."
-        group, metric, mean = pick
-        overall = float(views.absolute[metric].mean())
-        return (
-            f"The most distinctive value is **{group}** on {labels[metric]} (**{mean:.2f}** vs "
-            f"**{overall:.2f}** overall), across **{len(views.absolute)}** players in "
-            f"**{n_games}** games."
-        )
-
 
 def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: list[str],
-                       label: str, by: str, groups: dict | None, fixed: dict | None) -> pd.DataFrame:
+                       label: str, by: str, groups: dict | None, fixed: dict | None,
+                       companions: dict | None = None) -> pd.DataFrame:
     """``table`` with the baseline pool's absolute means prepended as one row."""
+    pool = views.pool if views.pool is not None else pd.DataFrame()
     records = []
     for metric in metrics:
         stats = views.baseline_summary.get(metric)
@@ -456,6 +402,7 @@ def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: lis
             "row_kind": "baseline", by: label, "strategist": label, "condition": "",
             "row_label": label, "metric": metric, "metric_group": (groups or {}).get(metric, ""),
             "mean": stats["mean"], "sd": stats["sd"],
+            **_companion_means(pool, (companions or {}).get(metric)),
             "n_players": stats["n_players"], "n_games": stats["n_games"],
         })
     if not records:
@@ -465,27 +412,36 @@ def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: lis
     return pd.concat([rows, table], ignore_index=True)
 
 
-def _attach_ranges(summary: pd.DataFrame, rows: pd.DataFrame, by: str, ranges: dict) -> pd.DataFrame:
-    """Per-group means of each metric's per-player ``(min, max)`` columns."""
-    lows, highs = [], []
+def _attach_means(summary: pd.DataFrame, rows: pd.DataFrame, by: str, companions: dict) -> pd.DataFrame:
+    """Per-group means of other per-player columns, keyed ``{metric: {out: source}}``.
+
+    Each metric's cells get its ``out`` columns; other cells read NaN there.
+    """
+    columns = sorted({column for pairs in companions.values() for column in pairs})
+    groups = rows[by].astype(str)
     means = {}
-    for metric, (low, high) in ranges.items():
-        if low in rows.columns and high in rows.columns:
-            means[metric] = rows.groupby(rows[by].astype(str))[[low, high]].mean()
+    for metric, pairs in companions.items():
+        sources = sorted({src for src in pairs.values() if src in rows.columns})
+        if sources:
+            means[metric] = rows.groupby(groups)[sources].mean()
+    values = {column: [] for column in columns}
     for rec in summary.itertuples(index=False):
         frame = means.get(rec.metric)
+        pairs = companions.get(rec.metric, {})
         group = str(getattr(rec, by))
-        if frame is None or group not in frame.index:
-            lows.append(float("nan"))
-            highs.append(float("nan"))
-            continue
-        low, high = ranges[rec.metric]
-        lows.append(float(frame.loc[group, low]))
-        highs.append(float(frame.loc[group, high]))
+        for column in columns:
+            src = pairs.get(column)
+            found = frame is not None and src in frame.columns and group in frame.index
+            values[column].append(float(frame.loc[group, src]) if found else float("nan"))
     out = summary.copy()
-    out["mean_min"], out["mean_max"] = lows, highs
+    for column in columns:
+        out[column] = values[column]
     return out
 
 
-def _pick(summary: pd.DataFrame, colors: dict, by: str):
-    return C.largest_departure(summary, colors, by, min_players=3) or C.largest_departure(summary, colors, by)
+def _companion_means(rows: pd.DataFrame, pairs: dict | None) -> dict:
+    """``{out: mean of rows[source]}`` for one cell; NaN for a missing column."""
+    return {
+        column: float(rows[src].mean()) if src in rows.columns and not rows.empty else float("nan")
+        for column, src in (pairs or {}).items()
+    }

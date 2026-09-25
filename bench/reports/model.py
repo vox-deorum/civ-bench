@@ -152,13 +152,14 @@ class ReportDocument:
 class MatchedMapTab:
     """One extra Matched Maps tab from another analysis (``uses.analyses``).
 
-    The analysis declares it through ``metadata["matched_maps"]``: a short
-    label plus one long heatmap table keyed by ``seed`` (the overview) and one
-    keyed by ``seed`` and ``player_id`` (the seat pages), each with its layout
-    spec in ``metadata["heatmaps"]``. The chapter slices both by seed or seat.
+    The analysis declares it through ``metadata["matched_maps"]`` (one entry
+    or a list): a short label plus one long heatmap table keyed by ``seed``
+    (the overview) and one keyed by ``seed`` and ``player_id`` (the seat
+    pages), each with its layout spec in ``metadata["heatmaps"]``. The chapter
+    slices both by seed or seat.
     """
 
-    name: str  # the analysis stage id, also the view name
+    name: str  # the analysis stage id (plus "-<key>"), also the view name
     label: str
     tip: str = ""
     seed_table: pd.DataFrame = field(default_factory=pd.DataFrame)

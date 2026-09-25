@@ -10,6 +10,16 @@ from typing import Iterable, Optional
 
 from ..catalog import Catalog
 
+# Stable categorical colors for the four victory types. The Matched Maps Focus
+# tab and the behavior pages' grand-strategy tables share them, so a strategy
+# reads in one color everywhere.
+VICTORY_COLORS = {
+    "Domination": "#b3452f",
+    "Culture": "#c28e21",
+    "Diplomatic": "#4f81bd",
+    "Science": "#4e9b4e",
+}
+
 
 def sort_player_types(player_types: Iterable[str]) -> list[str]:
     pinned = ["Null", "Vanilla"]

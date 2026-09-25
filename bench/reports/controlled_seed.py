@@ -12,10 +12,11 @@ The pages are self-contained and deterministic. Each controlled seed on the
 overview gets one tab group: Strength (mean adjusted strength on a fixed RdYlBu
 scale, red at 0, yellow at 0.5, blue at 1, with a leading Avg column pooling each
 condition row's runs), Focus (the dominant victory focus with a stable
-categorical color per strategy), then one tab per analysis the stage lists in
-``uses.analyses`` (:class:`~bench.reports.model.MatchedMapTab`, such as the
-Strategy tab from ``behavior.flavors`` and the Diplomacy tab from
-``behavior.diplomacy``). Each ``(seed, player_id)`` detail page
+categorical color per strategy), then the tabs of each analysis the stage lists
+in ``uses.analyses`` (:class:`~bench.reports.model.MatchedMapTab`: Strategy from
+``behavior.flavors``, Diplomacy from ``behavior.diplomacy``, Commitment and the
+Focus-style Grand strategy from ``behavior.commitment``, and Policies from
+``behavior.policies``). Each ``(seed, player_id)`` detail page
 repeats the same tabs for its seat under the probability-curve chart. Every
 table renders through the shared :func:`~bench.reports.heatmap.render_heatmap_html`,
 so tooltips, the pinned VPAI row, and click-to-sort match the rest of the report.
@@ -52,8 +53,9 @@ from bench.reports.content import (
     render_view_group, report_summary, metadata_text,
 )
 from .errors import ReportError
+from bench.plotting.styles import VICTORY_COLORS
 from .heatmap import (
-    HEATMAP_METADATA_KEY, interpolate as _interpolate, plural, render_heatmap_html, tip_row,
+    HEATMAP_METADATA_KEY, category_background, plural, render_heatmap_html, tip_row,
 )
 from .model import ControlledSeedDocument, MatchedMapTab
 
@@ -125,30 +127,35 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
 def _matched_map_tabs(ctx: ReportBuildContext, stage_ids: list) -> list[MatchedMapTab]:
     """The extra tabs the analysis lists (its ``uses.analyses``), in order.
 
-    Each listed section declares its tab through ``metadata["matched_maps"]``. A
-    section that is not in the report, is empty, or declares no tab (for
-    example an uncontrolled run) is skipped with a warning.
+    Each listed section declares its tab through ``metadata["matched_maps"]``,
+    one dict or a list of them; a tab with a ``key`` is named
+    ``<stage id>-<key>``. A section that is not in the report, is empty, or
+    declares no tab (for example an uncontrolled run) is skipped with a warning.
     """
     by_id = {s.id: s for s in ctx.sections}
     tabs = []
     for stage_id in map(str, stage_ids):
         section = by_id.get(stage_id)
         declared = (section.metadata or {}).get("matched_maps") if section is not None else None
-        if section is None or section.empty or not isinstance(declared, dict):
+        entries = [declared] if isinstance(declared, dict) else list(declared or [])
+        entries = [e for e in entries if isinstance(e, dict)]
+        if section is None or section.empty or not entries:
             reason = "is not among the report sections" if section is None else "offers no Matched Maps tab"
             ctx.warnings.append(f"Matched Maps: analysis '{stage_id}' {reason}; its tab is skipped.")
             continue
         specs = (section.metadata or {}).get(HEATMAP_METADATA_KEY) or {}
-        seed_name, seat_name = str(declared["seed_table"]), str(declared["seat_table"])
-        tabs.append(MatchedMapTab(
-            name=stage_id,
-            label=str(declared.get("label") or section.title),
-            tip=str(declared.get("tip") or section.title),
-            seed_table=ctx.load_table(stage_id, seed_name),
-            seat_table=ctx.load_table(stage_id, seat_name),
-            seed_spec=dict(specs.get(seed_name) or {}),
-            seat_spec=dict(specs.get(seat_name) or {}),
-        ))
+        for entry in entries:
+            seed_name, seat_name = str(entry["seed_table"]), str(entry["seat_table"])
+            key = str(entry.get("key") or "")
+            tabs.append(MatchedMapTab(
+                name=f"{stage_id}-{key}" if key else stage_id,
+                label=str(entry.get("label") or section.title),
+                tip=str(entry.get("tip") or section.title),
+                seed_table=ctx.load_table(stage_id, seed_name),
+                seat_table=ctx.load_table(stage_id, seat_name),
+                seed_spec=dict(specs.get(seed_name) or {}),
+                seat_spec=dict(specs.get(seat_name) or {}),
+            ))
     return tabs
 
 
@@ -157,12 +164,7 @@ def chapter_seeds(doc: ControlledSeedDocument) -> list[int]:
     return sorted({int(row["seed"]) for row in doc.index_table.to_dict("records")})
 
 # Stable categorical colors for the four victory-focus strategies.
-FOCUS_COLORS = {
-    "Domination": "#b3452f",
-    "Culture": "#c28e21",
-    "Diplomatic": "#4f81bd",
-    "Science": "#4e9b4e",
-}
+FOCUS_COLORS = VICTORY_COLORS
 
 # The adjusted-strength scale is the shared RdYlBu scale (bench.reports.heatmap),
 # fixed from 0 to 1 across every seed so the panels compare directly: 0 is red,
@@ -194,10 +196,7 @@ def _vpai_tooltip(doc: ControlledSeedDocument, strategist: str, condition: str) 
 
 
 def _focus_background(label: str, pct: float) -> str:
-    base = FOCUS_COLORS.get(label, "#7a7f88")
-    t = 0.0 if not np.isfinite(pct) else min(1.0, max(0.0, pct / 100.0))
-    intensity = 0.22 + 0.78 * t
-    return _interpolate("#ffffff", base, intensity)
+    return category_background(FOCUS_COLORS.get(label, "#7a7f88"), pct / 100.0)
 
 
 def _page_filename(seed: int, player_id: int) -> str:
@@ -463,12 +462,23 @@ def _tab_slice(frame: pd.DataFrame, **keys) -> pd.DataFrame:
 
 
 def _extra_views(doc: ControlledSeedDocument, anchor: str, seat: bool, **keys) -> list[tuple]:
-    """One view per extra tab (``doc.tabs``), sliced to this seed or seat."""
+    """One view per extra tab (``doc.tabs``), sliced to this seed or seat.
+
+    A seed spec with ``seat_columns`` lays its columns out like the Focus tab:
+    one per seat of this seed, headed ``1: China``, with every row and seat
+    shown even when a cell has no data.
+    """
     views = []
     where = "seat" if seat else "seed"
     for tab in doc.tabs:
         frame = _tab_slice(tab.seat_table if seat else tab.seed_table, **keys)
         spec = tab.seat_spec if seat else tab.seed_spec
+        if spec and spec.get("seat_columns") and not seat:
+            columns, labels = _seat_columns(doc, int(keys["seed"]), _grid(doc)[3])
+            spec = {**spec, "column_order": columns, "column_labels": labels,
+                    "column_names": labels, "complete_grid": True}
+            frame = frame.assign(**{spec["column"]: frame[spec["column"]].astype(int).astype(str)}) \
+                if not frame.empty else frame
         if frame.empty or not spec:
             body = f'<p class="empty">No {_esc(tab.label.lower())} data for this {where}.</p>'
         else:

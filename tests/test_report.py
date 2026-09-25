@@ -1076,9 +1076,12 @@ def views_env(tmp_path, write_spec, dev_spec):
         {"id": "beh_one", "module": "behavior.commitment", "enabled": True,
          "params": {}},
     ]
+    # The behavior pages draw HTML heatmaps now; these sections inline PNGs on request.
+    figures = {"tables": [], "figures": ["commitment_relative", "commitment_absolute"]}
     spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
-                      "overview_sections": None, "section_overrides": {}, "title": None,
-                      "include_disabled": False}
+                      "overview_sections": None,
+                      "section_overrides": {"beh_two": figures, "beh_one": figures},
+                      "title": None, "include_disabled": False}
     cfg = load_config(write_spec(spec))
     _emit(cfg, "perf_usage_efficiency", "performance.usage_efficiency", summary="Usage.",
           figures=[{"name": "usage_efficiency", "format": "plotly"}])
@@ -1294,6 +1297,60 @@ def test_heatmap_range_uses_the_table_number_format():
     del spec["range_note"]
     frame = frame.assign(mean_min=2.0, mean_max=4.0)
     assert "Range		2.0 to 4.0 (mean min to max)" in render_heatmap_html(frame, spec)
+
+
+def test_heatmap_columns_carry_their_own_format_units_and_labels():
+    import html as _html
+
+    from bench.reports.heatmap import render_heatmap_html, render_heatmap_md
+
+    frame = pd.DataFrame([
+        {"row_label": "Base", "metric": "acts", "mean": 64.94, "sd": 30.0, "color_position": 0.5},
+        {"row_label": "Base", "metric": "step", "mean": 9.87, "sd": 3.0, "color_position": 0.5},
+        {"row_label": "Kimi", "metric": "acts", "mean": 28.44, "ci_lower": 25.0, "ci_upper": 31.4,
+         "color_position": 0.9},
+        {"row_label": "Kimi", "metric": "step", "mean": -1.25, "color_position": 0.4,
+         "shift": 30.0},
+    ])
+    spec = {"row": "row_label", "column": "metric", "decimals": 0, "signed": True,
+            "value_label": "Difference", "baseline_rows": ["Base"], "ci_level": 0.95,
+            "column_decimals": {"step": 1},
+            "column_units": {"acts": "pts", "step": "points"},
+            "baseline_units": {"acts": "%", "step": "points"},
+            "column_value_labels": {"step": "Change"},
+            "tip_rows": [{"column": "shift", "label": "Total", "unit": "points", "decimals": 1}]}
+    page = _html.unescape(render_heatmap_html(frame, spec))
+    # Cell text follows each column's decimals; tooltips add one place and the unit.
+    assert ">+28</td>" in page and ">-1.2</td>" in page
+    assert "Difference\t+28.4 pts" in page
+    assert "95% CI\t\t+25.0 pts to +31.4 pts" in page
+    assert "Change\t-1.25 points" in page and "Total\t30.0 points" in page
+    # The pinned baseline row is absolute, so it takes the baseline units.
+    assert "Average\t64.9%" in page
+    assert "| Kimi | +28 | -1.2 |" in render_heatmap_md(frame, spec)
+
+
+def test_heatmap_category_cells_take_their_category_color():
+    import html as _html
+
+    from bench.reports.heatmap import category_background, render_heatmap_html
+
+    frame = pd.DataFrame([
+        {"row_label": "Kimi", "metric": "main", "mean": 62.0, "color_position": 0.62,
+         "category": "Spaceship", "text": "Spaceship 62%", "strategy": "Spaceship"},
+        {"row_label": "Kimi", "metric": "switches", "mean": 0.5, "color_position": float("nan"),
+         "category": "", "text": "", "strategy": ""},
+    ])
+    spec = {"row": "row_label", "column": "metric", "decimals": 0, "value_label": "Share of turns",
+            "text_column": "text", "category_column": "category",
+            "category_colors": {"Spaceship": "#4e9b4e"}, "column_decimals": {"switches": 2},
+            "column_units": {"main": "%"},
+            "tip_rows": [{"column": "strategy", "label": "Strategy", "text": True}]}
+    page = _html.unescape(render_heatmap_html(frame, spec))
+    assert f"background-color:{category_background('#4e9b4e', 0.62)}" in page
+    assert ">Spaceship 62%</td>" in page and "Strategy\tSpaceship" in page
+    # A cell without a category or color stays plain.
+    assert '<td class="heat-cell heat-cell-value" data-value="0.5"' in page and ">0.50</td>" in page
 
 
 def test_a_heatmap_spec_that_does_not_fit_renders_a_plain_table(heatmap_env):
