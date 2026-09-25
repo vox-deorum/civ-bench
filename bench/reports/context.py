@@ -34,6 +34,7 @@ class ReportBuildContext:
 
     meta: dict
     sections: list[Section] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # shared with the runner
     _table_sources: dict[tuple[str, str], _TableSource] = field(default_factory=dict)
 
     def record_table(self, stage_id: str, name: str, analysis_dir: Path, rel_file: str) -> None:

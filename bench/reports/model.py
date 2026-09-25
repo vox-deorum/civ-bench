@@ -71,6 +71,7 @@ class View:
     label: str
     figures: list[Figure] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
+    tip: str = ""  # the long wording behind a short label, shown on hover
 
 
 @dataclass
@@ -148,6 +149,25 @@ class ReportDocument:
 
 
 @dataclass
+class MatchedMapTab:
+    """One extra Matched Maps tab from another analysis (``uses.analyses``).
+
+    The analysis declares it through ``metadata["matched_maps"]``: a short
+    label plus one long heatmap table keyed by ``seed`` (the overview) and one
+    keyed by ``seed`` and ``player_id`` (the seat pages), each with its layout
+    spec in ``metadata["heatmaps"]``. The chapter slices both by seed or seat.
+    """
+
+    name: str  # the analysis stage id, also the view name
+    label: str
+    tip: str = ""
+    seed_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    seat_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    seed_spec: dict = field(default_factory=dict)
+    seat_spec: dict = field(default_factory=dict)
+
+
+@dataclass
 class ControlledSeedDocument:
     """The document behind the report's controlled-seed heatmap pages.
 
@@ -174,6 +194,7 @@ class ControlledSeedDocument:
     downloads: list[Download] = field(default_factory=list)
     footer: str = REPORT_DEFAULT_FOOTER
     game_log: Optional["GameLogDocument"] = None
+    tabs: list[MatchedMapTab] = field(default_factory=list)
 
     @property
     def vanilla_label(self) -> str:

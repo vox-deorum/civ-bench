@@ -194,6 +194,123 @@ class BehaviorAnalysis(Analysis):
                 baseline_rows=[pinned] if pinned else None,
             )
 
+    def add_matched_map_tables(
+        self,
+        ctx: AnalysisContext,
+        views: C.BehaviorViews,
+        pool: pd.DataFrame,
+        cells: pd.DataFrame | None,
+        out: MetricViews,
+        slug: str,
+        *,
+        label: str,
+        tip: str,
+        title: str,
+        help_text: str,
+        names: dict,
+        short_names: dict | None = None,
+        column_tips: dict | None = None,
+        groups: dict | None = None,
+        fixed: dict | None = None,
+        legend: list,
+        decimals: int = 1,
+    ) -> dict | None:
+        """Write ``<slug>_by_seed`` / ``<slug>_by_seat`` for a Matched Maps tab.
+
+        Both are absolute heatmap tables over controlled games, one keyed by
+        ``seed`` and one by ``seed`` and ``player_id``, each pinning the
+        baseline pool's average for that seed or seat as its top row. A cell's
+        ``difference`` is the mean relative value there (the player minus the
+        baseline at its own seed and seat), shown in the tooltip. No bootstrap:
+        the Matched Maps tables report plain means. Returns the
+        ``metadata["matched_maps"]`` entry, or ``None`` without a relative view.
+        """
+        if views.relative is None or cells is None or cells.empty or not views.baseline_summary:
+            return None
+        metrics = [m for m in names if m in views.relative_metrics]
+        if not metrics:
+            return None
+        label_text = views.baseline.label
+        pinned = label_text[:1].upper() + label_text[1:]
+        rows = views.absolute.merge(cells, on="game_id", how="inner")
+        base = pool.merge(cells, on="game_id", how="inner")
+        declared = {"label": label, "tip": tip}
+        for keys, name, key in ((["seed"], f"{slug}_by_seed", "seed_table"),
+                                (["seed", "player_id"], f"{slug}_by_seat", "seat_table")):
+            table, order = self._matched_map_table(ctx, rows, base, views, metrics, keys,
+                                                   pinned, groups, fixed)
+            if table.empty:
+                return None
+            out.tables[name] = table
+            spec = C.heatmap_spec(
+                view=C.ABSOLUTE,
+                title=title,
+                help_text=help_text,
+                row_order=[pinned] + order,
+                reference_rows=[pinned],
+                row_tips={},
+                column_order=metrics,
+                column_names={m: names[m] for m in metrics},
+                column_labels={m: (short_names or names)[m] for m in metrics},
+                column_tips={m: (column_tips or {}).get(m, names[m]) for m in metrics},
+                grouped=bool(groups),
+                decimals=decimals,
+                value_label="Average",
+                ci_level=self.ci_level,
+                legend=legend,
+                baseline_rows=[pinned],
+            )
+            spec["tip_rows"] = [{"column": "difference", "label": "Vs. baseline",
+                                 "signed": True, "decimals": decimals + 1}]
+            out.heatmaps[name] = spec
+            declared[key] = name
+        return declared
+
+    def _matched_map_table(self, ctx, rows, base, views, metrics, keys, pinned, groups, fixed):
+        """One long absolute table per ``keys`` cell, the baseline row first."""
+        by = self.by
+        difference = views.relative.groupby(keys + [by])[metrics].mean()
+        records = []
+        for values, grp in rows.groupby(keys + [by], sort=True):
+            cell, group = tuple(values[:-1]), values[-1]
+            for metric in metrics:
+                col = grp[["game_id", metric]].dropna()
+                if col.empty:
+                    continue
+                diff = difference[metric].get(tuple(values), float("nan"))
+                records.append({**dict(zip(keys, cell)), by: group, "metric": metric,
+                                "mean": float(col[metric].mean()), "difference": float(diff),
+                                "n_players": int(len(col)), "n_games": int(col["game_id"].nunique())})
+        if not records:
+            return pd.DataFrame(), []
+        summary = pd.DataFrame(records)
+        summary, order = C.heatmap_rows(ctx, summary, by)
+        summary.insert(0, "row_kind", "group")
+        baseline = []
+        for values, grp in base.groupby(keys, sort=True):
+            values = values if isinstance(values, tuple) else (values,)
+            for metric in metrics:
+                col = grp[["game_id", metric]].dropna()
+                if col.empty:
+                    continue
+                baseline.append({"row_kind": "baseline", **dict(zip(keys, values)), by: pinned,
+                                 "strategist": pinned, "condition": "", "row_label": pinned,
+                                 "metric": metric, "mean": float(col[metric].mean()),
+                                 "difference": float("nan"), "n_players": int(len(col)),
+                                 "n_games": int(col["game_id"].nunique())})
+        table = pd.concat([pd.DataFrame(baseline), summary], ignore_index=True) if baseline else summary
+        table["metric_group"] = table["metric"].map(lambda m: (groups or {}).get(m, ""))
+        table["color_position"] = C.color_positions(table, C.ABSOLUTE, views, fixed)
+        # Deterministic order: cell keys, baseline row first, rows, then metrics.
+        rank = {label: i for i, label in enumerate([pinned] + order)}
+        metric_rank = {m: i for i, m in enumerate(metrics)}
+        table = table.assign(
+            _row=table["row_label"].map(rank), _metric=table["metric"].map(metric_rank),
+        ).sort_values(keys + ["_row", "_metric"], kind="mergesort").drop(columns=["_row", "_metric"])
+        leading = ["row_kind", *keys, by, "strategist", "condition", "row_label"]
+        table = table[leading + [c for c in table.columns if c not in leading]]
+        return table.reset_index(drop=True), order
+
     def heatmap_headline(self, ctx: AnalysisContext, out: MetricViews, views: C.BehaviorViews,
                          slug: str, names: dict, decimals: int = 1) -> str:
         """One sentence on the strongest-colored cell, leaving out Null and Vanilla rows."""

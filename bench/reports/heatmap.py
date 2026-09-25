@@ -35,7 +35,33 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
 ``range_columns``, ``range_label``
     Optional ``[low, high]`` columns shown as one more tooltip line.
 ``legend``
-    ``[[position, label], ...]`` swatches under the table.
+    ``[[position, label], ...]`` swatches under the table; a ``#rrggbb`` string
+    in place of the position gives the swatch color directly.
+``complete_grid``
+    When true, ``row_order`` and ``column_order`` are the full grid: listed
+    rows and columns render even without data, as blank cells.
+``tip_rows``
+    Optional ``[{"column", "label", "signed", "decimals"}, ...]``: more tooltip
+    lines from other columns, such as a difference from the baseline.
+
+Some tables need more than one number per cell. These optional keys each name
+a column of the long table that overrides one part of a cell:
+
+``text_column``
+    The cell text (for example ``Science 45%``) instead of the formatted value.
+``background_column``
+    A ``#rrggbb`` background instead of the ``color_position`` color.
+``link_column``
+    A link target; the cell text becomes a link.
+``tip_column``
+    The whole tooltip text instead of the default one.
+
+``divider_columns`` lists columns followed by a thick border (such as a
+leading average column).
+
+Every value cell carries its raw value as ``data-value`` and every column
+header its position as ``data-col``, which the shared report script uses to
+sort a table by a numeric column.
 
 A cell tooltip follows the report script's tip format: the first line is the
 title, other plain lines are subtitles, and ``label<TAB>value[<TAB>note]``
@@ -64,6 +90,7 @@ TEXT_LIGHT = "#ffffff"
 
 HEATMAP_METADATA_KEY = "heatmaps"
 COLOR_COLUMN = "color_position"
+OVERRIDE_KEYS = ("text_column", "background_column", "link_column", "tip_column")
 
 
 # ── colors ────────────────────────────────────────────────────────────────────
@@ -116,11 +143,13 @@ def spec_fits(spec: Optional[dict], frame: pd.DataFrame) -> bool:
     if not isinstance(row, str) or not isinstance(column, str):
         return False
     needed = {row, column, str(spec.get("value", "mean")), COLOR_COLUMN}
-    group = spec.get("column_group")
-    if group is not None:
-        if not isinstance(group, str):
+    for key in ("column_group", *OVERRIDE_KEYS):
+        name = spec.get(key)
+        if name is None:
+            continue
+        if not isinstance(name, str):
             return False
-        needed.add(group)
+        needed.add(name)
     return needed <= set(frame.columns)
 
 
@@ -136,8 +165,14 @@ def _ordered(observed: list[str], preferred) -> list[str]:
 
 def _layout(frame: pd.DataFrame, spec: dict):
     row, column = spec["row"], spec["column"]
-    rows = _ordered(list(dict.fromkeys(frame[row].astype(str))), spec.get("row_order"))
-    columns = _ordered(list(dict.fromkeys(frame[column].astype(str))), spec.get("column_order"))
+    observed_rows = list(dict.fromkeys(frame[row].astype(str)))
+    observed_columns = list(dict.fromkeys(frame[column].astype(str)))
+    if spec.get("complete_grid"):
+        # The declared order is the full grid; unobserved cells render blank.
+        observed_rows = [str(v) for v in spec.get("row_order") or []] + observed_rows
+        observed_columns = [str(v) for v in spec.get("column_order") or []] + observed_columns
+    rows = _ordered(observed_rows, spec.get("row_order"))
+    columns = _ordered(observed_columns, spec.get("column_order"))
     reference = [r for r in rows if r in {str(v) for v in spec.get("reference_rows") or []}]
     body = [r for r in rows if r not in set(reference)]
     cells = {
@@ -165,9 +200,31 @@ def _signed(spec: dict, row: str) -> bool:
     return bool(spec.get("signed", False)) and row not in set(spec.get("baseline_rows") or [])
 
 
+def _text(rec: dict, column) -> str:
+    """A string cell of an override column; blank for missing values."""
+    if not column:
+        return ""
+    value = rec.get(column)
+    if value is None or (isinstance(value, float) and not np.isfinite(value)):
+        return ""
+    return str(value)
+
+
 def _cell_value(rec: dict, spec: dict, row: str) -> str:
+    text = _text(rec, spec.get("text_column"))
+    if text:
+        return text
     return _number(rec.get(spec.get("value", "mean")), int(spec.get("decimals", 1)),
                    _signed(spec, row))
+
+
+def _raw_value(rec: dict, spec: dict) -> str:
+    """The unrounded value a sort compares, or blank."""
+    try:
+        value = float(rec.get(spec.get("value", "mean")))
+    except (TypeError, ValueError):
+        return ""
+    return f"{value:.6g}" if np.isfinite(value) else ""
 
 
 def tip_row(label: str, value: str = "", note: str = "") -> str:
@@ -189,6 +246,9 @@ def _column_label(spec: dict, column: str) -> str:
 
 def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
     """Row and column name, then value, CI, spread, range, and sample size as grid lines."""
+    override = _text(rec, spec.get("tip_column"))
+    if override:
+        return override
     decimals = int(spec.get("decimals", 1)) + 1
     baseline = row in set(spec.get("baseline_rows") or [])
     signed = _signed(spec, row)
@@ -211,6 +271,13 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
         if low and high:
             lines.append(tip_row(str(spec.get("range_label", "Range")), "",
                                  f"{low} to {high} (mean min to max)"))
+    for extra in spec.get("tip_rows") or []:
+        if not isinstance(extra, dict) or not extra.get("column"):
+            continue
+        text = _number(rec.get(extra["column"]), int(extra.get("decimals", decimals)),
+                       bool(extra.get("signed", False)))
+        if text:
+            lines.append(tip_row(str(extra.get("label", extra["column"])), text))
     n_players, n_games = rec.get("n_players"), rec.get("n_games")
     if n_players is not None and n_games is not None and np.isfinite(float(n_players)):
         players, games = int(n_players), int(float(n_games))
@@ -224,22 +291,39 @@ def _label_html(label: str, tip: str) -> str:
     return _esc(label)
 
 
-def _cell_html(rec: Optional[dict], spec: dict, row: str, column: str) -> str:
-    if rec is None:
-        return '<td class="heat-cell heat-cell-empty" aria-label="no data"></td>'
-    text = _cell_value(rec, spec, row)
-    position = rec.get(COLOR_COLUMN)
+def _background(rec: dict, spec: dict) -> str:
+    override = _text(rec, spec.get("background_column"))
+    if override.startswith("#") and len(override) == 7:
+        return override
     try:
-        position = float(position)
+        position = float(rec.get(COLOR_COLUMN))
     except (TypeError, ValueError):
-        position = float("nan")
+        return ""
+    return position_background(position) if np.isfinite(position) else ""
+
+
+def _cell_html(rec: Optional[dict], spec: dict, row: str, column: str) -> str:
+    divider = " col-divider" if column in set(spec.get("divider_columns") or []) else ""
+    if rec is None:
+        return f'<td class="heat-cell heat-cell-empty{divider}" aria-label="no data"></td>'
+    text = _cell_value(rec, spec, row)
     tip = _esc(_cell_tooltip(rec, spec, row, column))
-    if not text or not np.isfinite(position):
-        return f'<td class="heat-cell heat-cell-value" data-tip="{tip}">{_esc(text)}</td>'
-    background = position_background(position)
+    value = _raw_value(rec, spec)
+    value_attr = f' data-value="{value}"' if value else ""
+    background = _background(rec, spec) if text else ""
+    style = (
+        f' style="background-color:{background};color:{cell_text_color(background)}"'
+        if background else ""
+    )
+    href = _text(rec, spec.get("link_column"))
+    if href and text:
+        return (
+            f'<td class="heat-cell heat-cell-link{divider}"{style}{value_attr} data-tip="{tip}">'
+            f'<a href="{_esc(href)}">{_esc(text)}</a></td>'
+        )
     return (
-        f'<td class="heat-cell heat-cell-value" style="background-color:{background};'
-        f'color:{cell_text_color(background)}" data-tip="{tip}">{_esc(text)}</td>'
+        f'<td class="heat-cell heat-cell-value{divider}"{style}{value_attr} '
+        f'data-tip="{tip}">{_esc(text)}</td>'
     )
 
 
@@ -248,10 +332,14 @@ def _header_html(frame: pd.DataFrame, spec: dict, columns: list[str]) -> list[st
     tips = spec.get("column_tips") or {}
     group_col = spec.get("column_group")
     parts = ["<thead>"]
-    headers = "".join(
-        f'<th scope="col">{_label_html(_column_label(spec, c), str(tips.get(c, "")))}</th>'
-        for c in columns
-    )
+    dividers = set(spec.get("divider_columns") or [])
+
+    def header(index: int, column: str) -> str:
+        divider = ' class="col-divider"' if column in dividers else ""
+        label = _label_html(_column_label(spec, column), str(tips.get(column, "")))
+        return f'<th scope="col"{divider} data-col="{index + 1}">{label}</th>'
+
+    headers = "".join(header(i, c) for i, c in enumerate(columns))
     if group_col:
         group_of = dict(zip(frame[spec["column"]].astype(str), frame[group_col].astype(str)))
         runs: list[list] = []
@@ -293,12 +381,15 @@ def _legend_html(spec: dict) -> str:
     for entry in spec.get("legend") or []:
         if not isinstance(entry, (list, tuple)) or len(entry) != 2:
             continue
-        try:
-            position = float(entry[0])
-        except (TypeError, ValueError):
-            continue
+        if isinstance(entry[0], str) and entry[0].startswith("#"):
+            color = entry[0]
+        else:
+            try:
+                color = position_background(float(entry[0]))
+            except (TypeError, ValueError):
+                continue
         items.append(
-            f'<li><span class="swatch" style="background-color:{position_background(position)}"></span>'
+            f'<li><span class="swatch" style="background-color:{_esc(color)}"></span>'
             f"{_esc(entry[1])}</li>"
         )
     return f'<ul class="focus-legend">{"".join(items)}</ul>' if items else ""

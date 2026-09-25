@@ -23,6 +23,7 @@ from bench.reports.content import (
     render_footer_html,
     render_summary_html,
     render_help_html,
+    render_view_group,
     metadata_text,
     report_summary,
 )
@@ -380,15 +381,14 @@ table.heatmap { font-size: .85rem; }
 table.heatmap th, table.heatmap td { text-align: center; white-space: nowrap; }
 table.heatmap .row-label { text-align: left; white-space: normal; min-width: 13rem; }
 .heat-cell { padding: 0; }
-.heat-cell a { display: block; padding: .38rem .55rem; color: inherit; text-decoration: none; }
+.heat-cell-link a { display: block; padding: .38rem .55rem; color: inherit; text-decoration: none; }
 .heat-cell a:hover, .heat-cell a:focus-visible { outline: 2px solid #175ca8; outline-offset: -2px; }
 .heat-cell-empty { background: transparent; }
 .heat-cell-value { padding: .38rem .55rem; }
 table.heatmap th.heat-group { border-left: 2px solid #b6c1cd; color: #445164; font-size: .8rem; letter-spacing: .03em; }
 table.heatmap .row-label { position: sticky; left: 0; z-index: 1; background: #f0f3f7; }
 table.heatmap tbody .row-label { background: #fbfcfd; }
-table.heatmap .col-avg { border-right: 2px solid #b6c1cd; }
-.heat-cell-avg { padding: .38rem .55rem; font-weight: 650; }
+table.heatmap .col-divider { border-right: 2px solid #b6c1cd; }
 tbody.vanilla-body tr.vanilla-row th, tbody.vanilla-body tr.vanilla-row td { border-top: 3px double #8d99a9; border-bottom: 3px double #8d99a9; background: #f3f0e8; }
 tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient(rgba(255,255,255,.35), rgba(255,255,255,.35)); }
 .heat-tooltip { position: absolute; z-index: 30; display: none; max-width: 22rem; border: 1px solid #445164; border-radius: .3rem; padding: .4rem .6rem; color: #18202a; background: #fffdf5; box-shadow: 0 2px 8px rgb(0 0 0 / 18%); font-size: .82rem; line-height: 1.35; pointer-events: none; }
@@ -405,7 +405,6 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .chart-controls { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; margin: .75rem 0; }
 .chart-controls .controls-label { color: #445164; font-weight: 650; }
 .chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
-table.comparison td.vanilla-value { font-weight: 700; }
 .content.game-log { max-width: none; }
 #game-log-table { width: 100%; }
 #game-log-table th, #game-log-table td { vertical-align: top; }
@@ -418,9 +417,10 @@ table.comparison td.vanilla-value { font-weight: 700; }
 .game-log-filters { display: flex; flex-wrap: wrap; gap: .7rem 1rem; align-items: center; margin: 1.2rem 0; }
 .game-log-filters label { display: inline-flex; align-items: center; gap: .3rem; }
 .game-log-filters select, .game-log-filters button { font: inherit; padding: .25rem; }
-.game-log th button { font: inherit; font-weight: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-.game-log [aria-sort="descending"] button::after { content: " ▾"; }
-.game-log [aria-sort="ascending"] button::after { content: " ▴"; }
+.game-log th button, th .sort-button { font: inherit; font-weight: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+th .sort-button:focus-visible { outline: 2px solid #175ca8; outline-offset: 2px; }
+[aria-sort="descending"] > button::after { content: " ▾"; }
+[aria-sort="ascending"] > button::after { content: " ▴"; }
 .replay-link { white-space: nowrap; }
 .muted { color: #64748b; }
 .latest-game p:last-child { margin-bottom: 0; }
@@ -651,32 +651,13 @@ def _render_artifacts_html(figures, tables, parts: list[str], anchor: str = "") 
 
 
 def _render_views_html(section: Section, parts: list[str], anchor: str) -> None:
-    """Render a section's views; the shared script turns them into a toggle.
-
-    Without JavaScript every view stays visible under its own heading. With it,
-    the first view is shown, and choosing a view switches every section on the
-    page that offers a view of the same name.
-    """
-    parts.append('<div class="view-group">')
-    if len(section.views) > 1:
-        parts.append('<div class="view-switch" role="group" aria-label="Choose a view">')
-        for index, view in enumerate(section.views):
-            pressed = "true" if index == 0 else "false"
-            parts.append(
-                f'<button type="button" class="view-button" data-view="{_html.escape(view.name)}" '
-                f'aria-controls="{anchor}-view-{_slug(view.name)}" aria-pressed="{pressed}">'
-                f"{_html.escape(view.label)}</button>"
-            )
-        parts.append("</div>")
+    """Render a section's views behind the shared tab switch (see render_view_group)."""
+    views = []
     for view in section.views:
-        parts.append(
-            f'<div class="view-panel" id="{anchor}-view-{_slug(view.name)}" '
-            f'data-view="{_html.escape(view.name)}">'
-        )
-        parts.append(f'<p class="view-heading"><strong>{_html.escape(view.label)}</strong></p>')
-        _render_artifacts_html(view.figures, view.tables, parts, anchor)
-        parts.append("</div>")
-    parts.append("</div>")
+        body: list[str] = []
+        _render_artifacts_html(view.figures, view.tables, body, anchor)
+        views.append((_slug(view.name), view.label, view.tip, "\n".join(body)))
+    parts.append(render_view_group(anchor, views))
 
 
 def _render_table_html(table: Table, parts: list[str], anchor: str = "") -> None:

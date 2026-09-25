@@ -331,7 +331,8 @@ def _assign_views(section: Section, inline_by_name: dict) -> None:
     for name, spec in declared.items():
         if not isinstance(spec, dict):
             continue
-        view = View(name=str(name), label=str(spec.get("label") or name))
+        view = View(name=str(name), label=str(spec.get("label") or name),
+                    tip=str(spec.get("tip") or ""))
         for kind, target in (("figures", view.figures), ("tables", view.tables)):
             for artifact in spec.get(kind) or []:
                 item = inline_by_name.get((kind, str(artifact)))
@@ -562,7 +563,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
             cfg.data.get("filter"), cfg.filters, "data.filter",
         ).get("min_condition_completeness") is not None,
     }
-    context = ReportBuildContext(meta=meta)
+    context = ReportBuildContext(meta=meta, warnings=warnings)
     try:
         sections = [
             _build_section(

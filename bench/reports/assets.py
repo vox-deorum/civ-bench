@@ -22,7 +22,11 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
    floating tooltip on hover or keyboard focus. A tip's first line is its bold
    title when there are more; "label<TAB>value<TAB>note" lines form a grid with
    the value and the note's numbers in an accent color, and other lines are
-   muted subtitles. */
+   muted subtitles. A ?view=<name> query picks the initial view. Finally it
+   makes every table sortable by its numeric columns: a header click sorts
+   descending, then ascending, then back to the original order; pinned
+   reference rows (tbody.vanilla-body) never move, and tables marked
+   no-auto-sort keep their own sorting. */
 (function () {
   "use strict";
   var tooltip = null;
@@ -115,11 +119,13 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
       button.setAttribute("aria-pressed", String(button.getAttribute("data-view") === name));
     });
   }
+  var requestedView = new URLSearchParams(window.location.search).get("view");
   if (groups.length) {
     document.documentElement.classList.add("views-ready");
     groups.forEach(function (group) {
       var first = group.querySelector(".view-panel");
       if (first) { showView(group, first.getAttribute("data-view")); }
+      if (requestedView) { showView(group, requestedView); }
       group.querySelectorAll(".view-button").forEach(function (button) {
         button.addEventListener("click", function () {
           var name = button.getAttribute("data-view");
@@ -168,6 +174,77 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
       if (!help.contains(event.target)) { dismiss(); }
     });
   });
+
+  /* Click-to-sort. A cell's value is its data-value, else its text with
+     %, commas, a leading + and the unicode minus handled. A column is
+     numeric when at least two cells hold numbers and no non-empty cell is
+     text. Headers map to columns by data-col, else their position in the
+     last header row. */
+  function cellNumber(cell) {
+    if (!cell) { return null; }
+    var raw = cell.hasAttribute("data-value") ? cell.getAttribute("data-value")
+      : cell.textContent.trim();
+    if (raw === "") { return null; }
+    var text = raw.replace(/\\u2212/g, "-").replace(/[,%]/g, "").replace(/^\\+/, "");
+    if (!/^-?(\\d+\\.?\\d*|\\.\\d+)(e[+-]?\\d+)?$/i.test(text)) { return NaN; }
+    return parseFloat(text);
+  }
+  function sortableTable(table) {
+    var head = table.tHead;
+    if (!head || !head.rows.length || table.classList.contains("no-auto-sort")) { return; }
+    var bodies = Array.prototype.filter.call(table.tBodies, function (body) {
+      return !body.classList.contains("vanilla-body");
+    });
+    if (!bodies.length) { return; }
+    bodies.forEach(function (body) {
+      Array.prototype.forEach.call(body.rows, function (row, index) {
+        row.setAttribute("data-order", String(index));
+      });
+    });
+    var headerRow = head.rows[head.rows.length - 1];
+    var single = head.rows.length === 1;
+    Array.prototype.forEach.call(headerRow.cells, function (th, position) {
+      var column = th.hasAttribute("data-col") ? parseInt(th.getAttribute("data-col"), 10)
+        : (single ? position : -1);
+      if (column < 0) { return; }
+      var numbers = 0, text = false;
+      bodies.forEach(function (body) {
+        Array.prototype.forEach.call(body.rows, function (row) {
+          var value = cellNumber(row.cells[column]);
+          if (value === null) { return; }
+          if (isNaN(value)) { text = true; } else { numbers += 1; }
+        });
+      });
+      if (text || numbers < 2) { return; }
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "sort-button";
+      while (th.firstChild) { button.appendChild(th.firstChild); }
+      th.appendChild(button);
+      th.setAttribute("aria-sort", "none");
+      button.addEventListener("click", function () {
+        var state = th.getAttribute("aria-sort");
+        var next = state === "descending" ? "ascending" : (state === "ascending" ? "none" : "descending");
+        headerRow.parentNode.parentNode.querySelectorAll("th[aria-sort]").forEach(function (other) {
+          other.setAttribute("aria-sort", "none");
+        });
+        th.setAttribute("aria-sort", next);
+        bodies.forEach(function (body) {
+          var rows = Array.prototype.slice.call(body.rows);
+          rows.sort(function (a, b) {
+            var order = parseInt(a.getAttribute("data-order"), 10) - parseInt(b.getAttribute("data-order"), 10);
+            if (next === "none") { return order; }
+            var x = cellNumber(a.cells[column]), y = cellNumber(b.cells[column]);
+            if (x === null || isNaN(x)) { return (y === null || isNaN(y)) ? order : 1; }
+            if (y === null || isNaN(y)) { return -1; }
+            return (next === "descending" ? y - x : x - y) || order;
+          });
+          rows.forEach(function (row) { body.appendChild(row); });
+        });
+      });
+    });
+  }
+  document.querySelectorAll(".table-scroll table").forEach(sortableTable);
 }());
 """
 

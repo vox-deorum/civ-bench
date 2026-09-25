@@ -215,7 +215,8 @@ def test_relative_subtracts_the_matched_seed_seat_baseline(behavior_env):
     assert meta["baseline_experiments"] == [BASELINE]
     assert list(meta["views"]) == ["relative", "absolute"]
     assert meta["views"]["relative"]["tables"] == ["flavors_relative"]
-    assert meta["views"]["relative"]["label"] == f"Relative to matched '{BASELINE}'"
+    assert meta["views"]["relative"]["label"] == "Relative"
+    assert meta["views"]["relative"]["tip"] == f"Relative to matched '{BASELINE}'"
     assert result.summary.startswith(f"Against the matched '{BASELINE}' on the same map and seat")
     assert f"**{LLM}** on Offense (**+3**)" in result.summary
 
@@ -264,7 +265,8 @@ def test_completed_baseline_averages_complete_strategist_experiments(behavior_en
     # The Null strategist never moves off 50, so it is left out of both tables.
     absolute = _table(result, "flavors_absolute")
     assert "Null" not in set(rel["player_type"]) | set(absolute["player_type"])
-    assert meta["views"]["relative"]["label"] == "Relative to completed-experiment average"
+    assert meta["views"]["relative"]["label"] == "Relative"
+    assert meta["views"]["relative"]["tip"] == "Relative to completed-experiment average"
     # Both views pin the baseline pool itself as the first row, in absolute
     # terms on the 0 to 100 scale, without a CI or a median.
     pinned = "Completed-experiment average"
@@ -328,7 +330,7 @@ def test_baseline_defaults_to_the_strength_stage(behavior_env):
     result, _ = behavior_env("behavior.diplomacy", {"traits": ["Friendliness"], "bootstrap_n": 20},
                              adjust_baseline=BASELINE)
     assert result.metadata["baseline_experiments"] == [BASELINE]
-    assert result.metadata["views"]["relative"]["label"] == "Relative to matched in-game AI"
+    assert result.metadata["views"]["relative"]["tip"] == "Relative to matched in-game AI"
     assert result.summary.startswith("Against the matched in-game AI")
 
 
@@ -372,6 +374,39 @@ def test_tables_are_byte_stable(behavior_env):
     absolute = _table(first, "flavors_absolute")
     ci = absolute.loc[absolute["row_kind"] == "group", ["ci_lower", "ci_upper"]]
     assert ci.notna().all().all()
+
+
+def test_flavors_write_matched_map_tables_per_seed_and_seat(behavior_env, tmp_path):
+    _add_complete_experiments(tmp_path)
+    result, _ = behavior_env("behavior.flavors", {"bootstrap_n": 20})
+    assert result.metadata["matched_maps"] == {
+        "label": "Strategic", "tip": "Strategic settings: average flavor settings",
+        "seed_table": "flavors_by_seed", "seat_table": "flavors_by_seat",
+    }
+    pinned = "Completed-experiment average"
+    seed = _table(result, "flavors_by_seed")
+    seat = _table(result, "flavors_by_seat")
+    # Each seed (and seat) pins its own baseline average first: seed 1 pools
+    # the complete experiment's 40 and 60 on seat 0.
+    first = seed[seed["seed"] == 1].iloc[0]
+    assert (first["row_kind"], first["row_label"], first["mean"]) == ("baseline", pinned, 50.0)
+    llm = seed[(seed["seed"] == 1) & (seed["player_type"] == LLM)].iloc[0]
+    assert llm["mean"] == pytest.approx(8.0)
+    assert llm["difference"] == pytest.approx(8.0 - 50.0)
+    assert llm["color_position"] == pytest.approx(0.08)
+    assert set(seat.columns) >= {"seed", "player_id", "difference", "color_position"}
+    assert set(seat.loc[seat["row_kind"] == "baseline", "player_id"]) == {0}
+    spec = result.metadata["heatmaps"]["flavors_by_seat"]
+    assert spec["reference_rows"] == [pinned] and spec["baseline_rows"] == [pinned]
+    assert spec["tip_rows"][0]["column"] == "difference"
+    # The seed and seat tables stay downloads, off the behavior page.
+    assert "flavors_by_seed" not in sum((v["tables"] for v in result.metadata["views"].values()), [])
+
+
+def test_uncontrolled_flavors_offer_no_matched_map_tab(behavior_env):
+    result, _ = behavior_env("behavior.flavors", FLAVORS, games=False)
+    assert "matched_maps" not in result.metadata
+    assert "flavors_by_seed" not in result.table_paths
 
 
 def test_flavors_skip_columns_an_older_extract_lacks(behavior_env):

@@ -39,7 +39,9 @@ from ..errors import AnalysisError
 
 RELATIVE = "relative"
 ABSOLUTE = "absolute"
-VIEW_LABELS = {RELATIVE: "Relative to matched in-game AI", ABSOLUTE: "Absolute"}
+# Short tab labels; the long wording rides along as the tab's tooltip.
+VIEW_LABELS = {RELATIVE: "Relative", ABSOLUTE: "Absolute"}
+VIEW_TIPS = {RELATIVE: "Relative to matched in-game AI", ABSOLUTE: "Absolute values"}
 COMPLETED = S.BEHAVIOR_BASELINE_COMPLETED
 # A relative cell reaches full color at this many pool SDs from the baseline.
 RELATIVE_COLOR_SD = 2.0
@@ -450,14 +452,14 @@ def relative_colors(summary: pd.DataFrame, baseline_sd: dict, by: str) -> dict:
 
 def views_metadata(declared: dict, baseline: Optional[Baseline] = None) -> dict:
     """``metadata["views"]`` in display order, relative first, skipping empty views."""
-    labels = dict(VIEW_LABELS)
+    tips = dict(VIEW_TIPS)
     if baseline is not None:
-        labels[RELATIVE] = baseline.view_label
+        tips[RELATIVE] = baseline.view_label
     out = {}
     for name in (RELATIVE, ABSOLUTE):
         spec = declared.get(name)
         if spec and (spec.get("tables") or spec.get("figures")):
-            out[name] = {"label": labels[name], **spec}
+            out[name] = {"label": VIEW_LABELS[name], "tip": tips[name], **spec}
     return out
 
 

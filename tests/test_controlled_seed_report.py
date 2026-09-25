@@ -11,6 +11,7 @@ real artifacts by running the analysis once, then render through
 from __future__ import annotations
 
 import json
+import re
 
 import numpy as np
 import pandas as pd
@@ -26,7 +27,7 @@ from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.reports import run_report
 from bench.reports.controlled_seed import render_controlled_seed_site
-from bench.reports.model import ControlledSeedDocument, GameLogDocument
+from bench.reports.model import ControlledSeedDocument, GameLogDocument, MatchedMapTab
 from bench.reports.runner import report_dir
 
 BASELINE_EXP = "vanilla-standard-fixed"
@@ -499,6 +500,21 @@ def test_config_rejects_two_enabled_controlled_seed_analyses(
         load_config(write_spec(spec))
 
 
+def test_config_tabs_must_offer_a_matched_maps_tab(tmp_path, write_spec, dev_spec):
+    paths = _build_csvs(tmp_path)
+    spec = _make_spec(dev_spec, paths, tmp_path)
+    spec["analyses"].append({"id": "flavors", "module": "behavior.flavors", "enabled": True,
+                             "params": {}})
+    spec["analyses"].append({"id": "coverage", "module": "performance.experiment_completeness",
+                             "enabled": True, "uses": {"tables": ["strength"]}, "params": {}})
+    spec["analyses"][0]["uses"]["analyses"] = ["flavors"]
+    cfg = load_config(write_spec(spec))
+    assert cfg.analyses[0].uses_analyses == ["flavors"]
+    spec["analyses"][0]["uses"]["analyses"] = ["flavors", "coverage"]
+    with pytest.raises(ConfigError, match="offer a Matched Maps tab"):
+        load_config(write_spec(spec))
+
+
 # ── report: rendering the controlled-seed chapter ─────────────────────────────
 @pytest.fixture
 def rendered(env):
@@ -611,20 +627,18 @@ def test_vanilla_is_separate_condition_row(rendered):
     assert '<tr class="vanilla-row">' in detail
     # The strength cell is colored like the overview heatmap: the baseline 0.40 sits
     # exactly on the RdYlBu 0.4 anchor.
-    assert (
-        '<td class="vanilla-value" style="background-color:#fee090;'
-        'color:#18202a">0.40</td>' in detail
-    )
+    assert 'style="background-color:#fee090;color:#18202a" data-value="0.4"' in detail
+    assert '<tbody class="vanilla-body"><tr class="vanilla-row">' in detail
 
 
 def test_overview_columns_pair_player_with_civilization(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
-    assert '<th scope="col">1: Greece</th>' in index
-    assert '<th scope="col">0: Rome</th>' in index  # seed 2 has only Rome
+    assert re.search(r'<th scope="col" data-col="\d+">1: Greece</th>', index)
+    assert re.search(r'<th scope="col" data-col="\d+">0: Rome</th>', index)  # seed 2 has only Rome
     # The kimi game gives seed-1 player 0 a second civilization, so the heading
     # lists both rather than hiding the comparability problem.
-    assert '<th scope="col">0: Egypt, Rome</th>' in index
+    assert re.search(r'<th scope="col" data-col="\d+">0: Egypt, Rome</th>', index)
     assert "Player 0" not in index and "Player 1" not in index
 
 
@@ -673,20 +687,20 @@ def test_strength_heatmap_leads_with_avg_column(rendered):
     index = _read(out, "controlled-seed/index.html")
     # One Avg column per strength heatmap (one per seed), none on the focus
     # heatmaps.
-    assert index.count('<th scope="col" class="col-avg"') == 2
+    assert index.count('<th scope="col" class="col-divider" data-col="1">') == 2
     # The vanilla row pools both seats' runs; a one-seat row pools its own.
     assert ('data-tip="VPAI\nSeed average\nStrength\t0.400\nRuns\t4\tover 2 seats"'
             in index)
     assert 'Strength\t0.700\nRuns\t1\tover 1 seat"' in index
     # The avg cell is a colored summary, not a link into a detail page.
     assert (
-        '<td class="heat-cell heat-cell-avg col-avg" '
-        'style="background-color:#fee090;color:#18202a" '
+        '<td class="heat-cell heat-cell-value col-divider" '
+        'style="background-color:#fee090;color:#18202a" data-value="0.4" '
         'data-tip="VPAI\nSeed average\nStrength\t0.400\n'
         'Runs\t4\tover 2 seats">0.40</td>' in index
     )
     # Seed 2's uncovered rows leave the avg cell blank (Kimi x 2, vanilla).
-    assert index.count('class="heat-cell heat-cell-empty col-avg"') == 3
+    assert index.count('class="heat-cell heat-cell-empty col-divider"') == 3
 
 
 def test_shared_color_util_and_adaptive_axis(rendered):
@@ -710,13 +724,16 @@ def test_shared_color_util_and_adaptive_axis(rendered):
 def test_detail_page_columns_and_run_counts(rendered):
     env, result, out = rendered
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
-    assert "per-condition means over every unique run" in detail
-    # Condensed headers carry the full wording as title tooltips.
-    assert 'title="Unique runs averaged">Runs<' in detail
-    assert 'title="Mean weighted victory probability">Win prob<' in detail
-    assert 'title="Mean adjusted strength">Adj strength<' in detail
-    assert 'title="Dominant victory focus">Focus<' in detail
-    assert 'title="Domination focus %">Dom %<' in detail
+    assert "Per-condition means over every unique run" in detail
+    # The comparison is tabbed like the overview, each tab a shared heatmap.
+    assert 'data-view="strength"' in detail and 'data-view="focus"' in detail
+    assert 'class="comparison"' not in detail
+    # Condensed headers carry the full wording as tooltips.
+    assert 'data-tip="Unique runs averaged">Runs<' in detail
+    assert 'data-tip="Mean weighted victory probability">Win prob<' in detail
+    assert 'data-tip="Mean adjusted strength">Adj strength<' in detail
+    assert 'data-tip="Dominant victory focus">Focus<' in detail
+    assert 'data-tip="Domination focus %">Dom %<' in detail
     assert "rotations and repeated runs contribute equally" in detail
     # The difference column is gone; strength and focus cells are colored like
     # the overview heatmaps.
@@ -922,8 +939,10 @@ def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
     assert "strategist=Vanilla&amp;condition=Every-turn" in overview
 
     detail = pages["controlled-seed/seed-1-player-0.html"]
-    assert detail.count('<tr class="vanilla-row">') == 1
-    assert ">VPAI</span></td><td>Every-turn</td>" in detail
+    # One pinned self-play row per tab (Strength, Focus); the mixed VPAI row is
+    # an ordinary condition row.
+    assert detail.count('<tr class="vanilla-row">') == 2
+    assert ">VPAI | Every-turn</span></th>" in detail
     assert 'value="Vanilla" checked> VPAI</label>' in detail
     # Trace metadata keeps the baseline distinct from the mixed VPAI condition
     # without embedding a second chart-data payload.
@@ -1005,3 +1024,107 @@ def test_renderer_escapes_labels_and_query_parameters():
     assert pages["assets/report-common.js"].startswith("/* civ-bench")
     assert "distinguishColors" in pages["assets/report-common.js"]
     assert pages["assets/controlled-seed-report.js"].startswith("/* civ-bench")
+
+
+def test_each_seed_offers_strength_and_focus_tabs(rendered):
+    env, result, out = rendered
+    index = _read(out, "controlled-seed/index.html")
+    # One tab group per seed; the same view names switch every seed together.
+    assert index.count('<div class="view-group">') == 2
+    assert index.count('data-view="strength" aria-controls=') == 2
+    assert 'aria-controls="seed-2-view-focus"' in index
+    assert 'data-tip="Mean adjusted strength">Strength</button>' in index
+    # A Focus cell opens the seat page on its Focus tab.
+    assert "condition=Every-turn&amp;view=focus" in index
+    assert "condition=Every-turn&amp;view=strength" not in index
+    script = _read(out, "assets/report-help.js")
+    assert 'get("view")' in script
+
+
+def _strategic_tab() -> MatchedMapTab:
+    """A Strategic tab like behavior.flavors writes it, for seed 1 seat 0."""
+    def rows(keys):
+        base = [
+            {"row_kind": "baseline", "row_label": "Completed-experiment average",
+             "metric": "flavor_offense_avg", "metric_group": "Military", "mean": 50.0,
+             "difference": np.nan, "n_players": 4, "n_games": 4, "color_position": 0.5},
+            {"row_kind": "group", "row_label": "Weird & <Model> | Per 5",
+             "metric": "flavor_offense_avg", "metric_group": "Military", "mean": 80.0,
+             "difference": 30.0, "n_players": 2, "n_games": 2, "color_position": 0.8},
+        ]
+        return pd.DataFrame([{**keys, **row} for row in base])
+
+    def spec(title):
+        return {
+            "title": title, "help": "Flavor help.", "row": "row_label", "column": "metric",
+            "value": "mean", "row_heading": "Strategist | Condition",
+            "row_order": ["Completed-experiment average", "Weird & <Model> | Per 5"],
+            "reference_rows": ["Completed-experiment average"],
+            "baseline_rows": ["Completed-experiment average"],
+            "column_order": ["flavor_offense_avg"],
+            "column_names": {"flavor_offense_avg": "Offense"},
+            "column_labels": {"flavor_offense_avg": "Off"},
+            "column_group": "metric_group", "decimals": 0, "value_label": "Average",
+            "tip_rows": [{"column": "difference", "label": "Vs. baseline", "signed": True,
+                          "decimals": 1}],
+        }
+
+    return MatchedMapTab(
+        name="beh_flavors", label="Strategic", tip="Strategic settings",
+        seed_table=rows({"seed": 1}), seat_table=rows({"seed": 1, "player_id": 0}),
+        seed_spec=spec("Seed flavors"), seat_spec=spec("Seat flavors"),
+    )
+
+
+def test_strategic_tab_renders_on_overview_and_seat_pages():
+    doc = _tiny_doc()
+    doc.tabs = [_strategic_tab()]
+    pages = render_controlled_seed_site(doc)
+    overview = pages["controlled-seed/index.html"]
+    detail = pages["controlled-seed/seed-1-player-0.html"]
+    for page, title in ((overview, "Seed flavors"), (detail, "Seat flavors")):
+        assert 'data-tip="Strategic settings">Strategic</button>' in page
+        assert f"<figcaption>{title}" in page
+        # The baseline row is pinned; the tooltip carries the difference.
+        assert '<tbody class="vanilla-body"><tr class="vanilla-row"><th scope="row" ' \
+               'class="row-label">Completed-experiment average</th>' in page
+        assert "Vs. baseline\t+30.0" in page
+        assert ">80</td>" in page
+    assert 'aria-controls="seed-1-view-beh_flavors"' in overview
+    assert 'aria-controls="seat-view-beh_flavors"' in detail
+
+
+def test_strategic_tab_without_rows_for_a_seat_says_so():
+    doc = _tiny_doc()
+    tab = _strategic_tab()
+    tab.seat_table = tab.seat_table.assign(player_id=5)
+    doc.tabs = [tab]
+    detail = render_controlled_seed_site(doc)["controlled-seed/seed-1-player-0.html"]
+    assert "No strategic data for this seat." in detail
+
+
+def test_tabs_load_from_listed_sections_and_warn_on_unusable_ones(tmp_path):
+    from bench.reports.context import ReportBuildContext
+    from bench.reports.controlled_seed import _matched_map_tabs
+    from bench.reports.model import Section
+
+    tab = _strategic_tab()
+    tab.seed_table.to_csv(tmp_path / "flavors_by_seed.csv", index=False)
+    tab.seat_table.to_csv(tmp_path / "flavors_by_seat.csv", index=False)
+    flavors = Section(id="beh_flavors", module="behavior.flavors", metadata={
+        "matched_maps": {"label": "Strategic", "tip": "Strategic settings",
+                         "seed_table": "flavors_by_seed", "seat_table": "flavors_by_seat"},
+        "heatmaps": {"flavors_by_seed": tab.seed_spec, "flavors_by_seat": tab.seat_spec},
+    })
+    plain = Section(id="beh_other", module="behavior.flavors", metadata={})
+    ctx = ReportBuildContext(meta={}, sections=[flavors, plain])
+    for name in ("flavors_by_seed", "flavors_by_seat"):
+        ctx.record_table("beh_flavors", name, tmp_path, f"{name}.csv")
+    tabs = _matched_map_tabs(ctx, ["beh_flavors", "beh_other", "gone"])
+    assert [t.name for t in tabs] == ["beh_flavors"]
+    assert tabs[0].label == "Strategic" and tabs[0].seed_spec["title"] == "Seed flavors"
+    assert list(tabs[0].seat_table["player_id"]) == [0, 0]
+    assert ctx.warnings == [
+        "Matched Maps: analysis 'beh_other' offers no Matched Maps tab; its tab is skipped.",
+        "Matched Maps: analysis 'gone' is not among the report sections; its tab is skipped.",
+    ]

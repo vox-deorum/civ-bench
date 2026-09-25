@@ -318,6 +318,10 @@ STRENGTH_RATING_MODULES = {
     "ratings.matchups",
 }
 
+# Modules the controlled-seed report may list in uses.analyses: each one adds a
+# tab to the Matched Maps overview and seat pages (§7.1).
+MATCHED_MAPS_TAB_MODULES = {"behavior.flavors"}
+
 # Params every behavior.* module accepts (§6.2). `baseline` is "completed", one
 # experiment id, or a list of experiment ids.
 BEHAVIOR_COMMON_PARAMS = {"baseline", "rate", "by", "bootstrap_n", "ci_level", "condition_pairing"}

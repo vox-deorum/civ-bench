@@ -13,7 +13,11 @@ over the turns it held a setting), per player type:
 
 Both views are HTML heatmaps: one column per flavor under its short name, in
 five groups, with the full name and the tool's description in the header
-tooltip (:data:`bench.config.schema.FLAVOR_INFO`). The Null strategist, which
+tooltip (:data:`bench.config.schema.FLAVOR_INFO`). In controlled runs the module
+also writes ``flavors_by_seed`` and ``flavors_by_seat``, the absolute settings
+per controlled seed and per seed and seat, for the Matched Maps chapter's
+Strategic tab (list this stage in the controlled-seed report's
+``uses.analyses``). The Null strategist, which
 never moves off 50, is left out. In controlled runs both views pin the baseline
 average as the top row, in absolute terms on the 0 to 100 scale. Flavors gated
 by ``data.extract.behavior.flavor_gates`` (nuclear and air) count only from the
@@ -30,6 +34,8 @@ from . import common as C
 from .base import BehaviorAnalysis, MetricViews
 
 FLAVOR_RANGE = (0.0, 100.0)
+ABSOLUTE_LEGEND = [[0.0, "0 forbid"], [0.3, "30 enough"], [0.5, "50 balanced (in-game AI)"],
+                   [0.7, "70 prioritize"], [1.0, "100 emergency focus"]]
 
 
 def flavor_column(name: str, stat: str = "avg") -> str:
@@ -73,7 +79,8 @@ class BehaviorFlavors(BehaviorAnalysis):
             return AnalysisResult(summary="No behavior rows remain after filtering.")
 
         metrics = [flavor_column(f) for f in flavors]
-        views = C.build_views(rows, pool, metrics, C.controlled_cells(ctx), baseline)
+        cells = C.controlled_cells(ctx)
+        views = C.build_views(rows, pool, metrics, cells, baseline)
         names = {flavor_column(f): f for f in flavors}
         ranges = {
             flavor_column(f): (flavor_column(f, "min"), flavor_column(f, "max"))
@@ -93,14 +100,13 @@ class BehaviorFlavors(BehaviorAnalysis):
             notes.append(f"The top row is the {baseline_label} itself, as an average setting "
                          "on the 0 to 100 scale.")
         gated = [f for f in flavors if f in gates]
-        if gated:
-            notes.append(f"{', '.join(gated)} count only from the turn a player gains access.")
-        note = "".join(f" {n}" for n in notes)
+        gate_note = f" {', '.join(gated)} count only from the turn a player gains access." if gated else ""
+        note = "".join(f" {n}" for n in notes) + gate_note
         out = MetricViews()
         self.add_heatmap_views(
             ctx, views, out, "flavors",
             titles={
-                C.RELATIVE: f"Flavor setting against the {baseline_label}",
+                C.RELATIVE: "Relative flavor setting",
                 C.ABSOLUTE: "Average flavor setting",
             },
             help_texts={
@@ -126,8 +132,7 @@ class BehaviorFlavors(BehaviorAnalysis):
             legends={
                 C.RELATIVE: [[0.0, "2 SD below"], [0.25, "1 SD below"], [0.5, "same as the baseline"],
                              [0.75, "1 SD above"], [1.0, "2 SD above"]],
-                C.ABSOLUTE: [[0.0, "0 forbid"], [0.3, "30 enough"], [0.5, "50 balanced (in-game AI)"],
-                             [0.7, "70 prioritize"], [1.0, "100 emergency focus"]],
+                C.ABSOLUTE: ABSOLUTE_LEGEND,
             },
             value_labels={C.RELATIVE: "Difference", C.ABSOLUTE: "Average"},
             decimals=0,
@@ -135,12 +140,34 @@ class BehaviorFlavors(BehaviorAnalysis):
             range_label="Range",
             baseline_row=True,
         )
+        matched_maps = self.add_matched_map_tables(
+            ctx, views, pool, cells, out, "flavors",
+            label="Strategic",
+            tip="Strategic settings: average flavor settings",
+            title="Average flavor setting",
+            help_text=(
+                "Each cell is the mean, over players on this map (and seat), of the player's "
+                "turn-weighted average flavor. The top row is the "
+                f"{baseline_label} on the same map (and seat); the tooltip shows each cell's "
+                "difference from it, matched seat by seat. Colors are fixed from 0 (red) "
+                f"through 50 (yellow) to 100 (blue).{gate_note}"
+            ),
+            names=names,
+            short_names={flavor_column(f): S.FLAVOR_INFO[f][0] for f in flavors},
+            column_tips=tips,
+            groups={flavor_column(f): S.FLAVOR_INFO[f][1] for f in flavors},
+            fixed={m: FLAVOR_RANGE for m in metrics},
+            legend=ABSOLUTE_LEGEND,
+            decimals=0,
+        )
         metadata = {
             **views.metadata(),
             "flavors": flavors,
             "views": C.views_metadata(out.declared, baseline),
             "heatmaps": out.heatmaps,
         }
+        if matched_maps is not None:
+            metadata["matched_maps"] = matched_maps
         missing = [f for f in requested if f not in flavors]
         if missing:
             metadata["flavors_not_extracted"] = missing

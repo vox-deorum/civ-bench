@@ -214,7 +214,7 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
     parts.append('<label><input type="checkbox" name="controlled" checked> Controlled only</label>'
                  f'<span id="game-log-count" aria-live="polite">Showing {len(records)} of {len(records)}</span>'
                  '<button type="reset">Reset</button></form>')
-    parts.append('<div class="table-scroll"><table id="game-log-table"><thead><tr>')
+    parts.append('<div class="table-scroll"><table id="game-log-table" class="no-auto-sort"><thead><tr>')
     for key, label in (("timestamp", "Date"), ("label", "Strategist | Condition"), ("seed", "Seed"),
                        ("rotation", "Rot"), ("turns", "Turns"), (None, "Seats"),
                        ("victory", "Victory"), (None, "Replay")):

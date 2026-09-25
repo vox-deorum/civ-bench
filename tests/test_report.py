@@ -14,6 +14,7 @@ fast and hermetic while testing exactly the report-stage contract.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
@@ -1199,7 +1200,7 @@ def heatmap_env(tmp_path, write_spec, dev_spec):
                       "include_disabled": False}
     cfg = load_config(write_spec(spec))
     views = {
-        "relative": {"label": "Relative to completed-experiment average",
+        "relative": {"label": "Relative", "tip": "Relative to completed-experiment average",
                      "tables": ["flavors_relative"], "figures": []},
         "absolute": {"label": "Absolute", "tables": ["flavors_absolute"], "figures": []},
     }
@@ -1226,8 +1227,15 @@ def test_heatmap_tables_render_in_the_matched_maps_style(heatmap_env):
     assert (page.index(f">{BASELINE_ROW}</th>") < page.index('data-tip="Never changes flavors.">Null')
             < page.index(">Model-02<") < page.index(">Model-01<"))
     # Positions 0, 0.5, and 1 take the red, yellow, and blue anchors.
-    assert 'background-color:#a50026;color:#ffffff" data-tip="Model-01\nOffense' in page
-    assert 'background-color:#313695;color:#ffffff" data-tip="Model-01\nScience' in page
+    assert re.search(r'background-color:#a50026;color:#ffffff" data-value="[^"]+" '
+                     r'data-tip="Model-01\nOffense', page)
+    assert re.search(r'background-color:#313695;color:#ffffff" data-value="[^"]+" '
+                     r'data-tip="Model-01\nScience', page)
+    # Short tab labels carry the long wording as their tooltip.
+    assert 'data-tip="Relative to completed-experiment average">Relative</button>' in page
+    # Headers carry their column position for the shared click-to-sort script.
+    assert 'data-col="1"><span tabindex="0" data-tip="Offense' in page
+    assert "sortableTable" in (out / "assets/report-help.js").read_text(encoding="utf-8")
     assert "background-color:#ffffbf" in page
     assert ">+12</td>" in page and ">62</td>" in page
     # Cell tooltips are grid lines: label, value, CI, and counts (decimals + 1).

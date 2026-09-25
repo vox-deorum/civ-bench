@@ -77,6 +77,7 @@ def resolve_stage_graph(cfg: RunConfig) -> ResolvedGraph:
             _check_ratings_strength_ref(stage, strength_table_ids)
         if stage.enabled and stage.module == "performance.controlled_seed_report":
             _check_controlled_seed_strength_ref(stage, strength_table_ids)
+            _check_controlled_seed_tabs(stage, {s.id: s.module for s in cfg.analyses})
 
     _check_single_controlled_seed_report(cfg)
     _check_single_game_log(cfg)
@@ -236,6 +237,19 @@ def _check_controlled_seed_strength_ref(stage: Stage, strength_table_ids: set[st
             f"exactly one strength table via uses.tables (one of "
             f"{sorted(strength_table_ids)}; got {refs})."
         )
+
+
+def _check_controlled_seed_tabs(stage: Stage, modules: dict) -> None:
+    """Each ``uses.analyses`` entry of the controlled-seed report is one extra
+    Matched Maps tab, so it must name a module that offers one."""
+    for analysis_id in stage.uses_analyses:
+        module = modules.get(analysis_id)
+        if module not in S.MATCHED_MAPS_TAB_MODULES:
+            raise ConfigError(
+                f"analysis '{stage.id}' (performance.controlled_seed_report) lists "
+                f"'{analysis_id}' ({module}) in uses.analyses, but only "
+                f"{sorted(S.MATCHED_MAPS_TAB_MODULES)} offer a Matched Maps tab."
+            )
 
 
 def _build_enabled_nodes(cfg: RunConfig, table_keys: set[str]) -> dict[str, ResolvedNode]:

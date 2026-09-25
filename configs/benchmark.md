@@ -670,8 +670,10 @@ Two single-purpose views of how well estimator probabilities are calibrated: one
 // performance.controlled_seed_report: report-ready tables for the controlled-seed chapter
 //   the report renders automatically (§7.1). Emits seed_player_summary,
 //   seed_player_probability, and seed_player_index; the renderer completes the grid.
+//   uses.analyses optionally lists stages whose Matched Maps tabs render beside
+//   Strength and Focus (§7.1).
 { "module": "performance.controlled_seed_report",
-  "uses": { "estimators": ["attention"], "tables": ["strength"] },
+  "uses": { "estimators": ["attention"], "tables": ["strength"], "analyses": ["beh_flavors"] },
   "params": {} }
 ```
 
@@ -741,6 +743,12 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
   baseline rows keeps its treatment rows with blank differences and a visible
   page note; a pair without usable prediction rows keeps its scalar summary and
   marks the curve unavailable.
+- **Extra Matched Maps tabs.** An optional `uses.analyses` list adds one tab to
+  the Matched Maps chapter per entry (§7.1), rendered in list order after
+  Strength and Focus. Only modules in `MATCHED_MAPS_TAB_MODULES` (currently
+  `behavior.flavors`) may be listed; any other module is a config validation
+  error. The stage records the list as `metadata.tabs` so the report renders
+  the tabs without reading the config.
 
 The emitted tables carry ordering and color metadata in the result manifest
 (catalog strategist order, configured condition order, `configs/models.json`
@@ -847,7 +855,7 @@ Per-module params:
 
 **Two views.** Every module produces two views of the same metrics. The **relative** view (the default, shown first) covers controlled players only: each player's value minus the baseline pool's mean at the same (seed, player_id) cell. The **absolute** view covers every filtered player. Summaries per group and metric give mean, median, a bootstrap CI resampling whole games (seeded from the run seed), `n_players`, and `n_games`. If there is no baseline, no controlled games, or no complete experiment, only the absolute view is written and the reason appears in the section tooltip. The baseline pool is read from the unfiltered table, so player filters never remove it.
 
-**The flavors page.** The in-game AI records no flavor values, and 50 is its own balanced value, so the relative baseline is the completed-experiment average. Its two tables, `flavors_relative` and `flavors_absolute`, render as HTML heatmaps (§7): one column per flavor under a short name (for example Off for Offense), grouped into Military, Nuclear, Naval and air, Economy, and Other, with the full name and the set-flavors tool description in the header tooltip. The Null strategist, which never moves its flavors off 50, is left out of both tables entirely. In controlled runs both views pin one extra first row with the baseline pool itself (rows with `row_kind == "baseline"`, others `"group"`): it carries the capitalized baseline label (for example `Completed-experiment average` or `Matched 'vanilla-standard'`), holds the pool's absolute mean, SD, and player and game counts colored on the fixed 0 to 100 scale in both views, and has no CI or median. The heatmap spec lists the label under `baseline_rows`, and the report renders those rows unsigned and labels their value line `Average`. Flavors gated by `data.extract.behavior.flavor_gates` (§3.0), by default the nuclear and air ones, read blank until a player gains access, and their header tooltip adds one sentence saying when the flavor starts to count. Rows read `Strategist | Condition` when condition pairing is on, and Vanilla is pinned at the top. Absolute colors use a fixed 0 to 100 scale with 50 at the midpoint; relative colors are the difference in baseline-pool SDs, full color at 2 SDs. Cell tooltips lead with the row label and the column name, then grid lines: the value (labeled `Difference` or `Average`), the CI, an `SD` line for a baseline row in the signed table, the in-game range (`Range`, when min and max are extracted in the absolute view), and the player and game counts.
+**The flavors page.** The in-game AI records no flavor values, and 50 is its own balanced value, so the relative baseline is the completed-experiment average. Its two tables, `flavors_relative` and `flavors_absolute`, titled `Relative flavor setting` and `Average flavor setting`, render as HTML heatmaps (§7): one column per flavor under a short name (for example Off for Offense), grouped into Military, Nuclear, Naval and air, Economy, and Other, with the full name and the set-flavors tool description in the header tooltip. The Null strategist, which never moves its flavors off 50, is left out of both tables entirely. In controlled runs both views pin one extra first row with the baseline pool itself (rows with `row_kind == "baseline"`, others `"group"`): it carries the capitalized baseline label (for example `Completed-experiment average` or `Matched 'vanilla-standard'`), holds the pool's absolute mean, SD, and player and game counts colored on the fixed 0 to 100 scale in both views, and has no CI or median. The heatmap spec lists the label under `baseline_rows`, and the report renders those rows unsigned and labels their value line `Average`. Flavors gated by `data.extract.behavior.flavor_gates` (§3.0), by default the nuclear and air ones, read blank until a player gains access, and their header tooltip adds one sentence saying when the flavor starts to count. Rows read `Strategist | Condition` when condition pairing is on, and Vanilla is pinned at the top. Absolute colors use a fixed 0 to 100 scale with 50 at the midpoint; relative colors are the difference in baseline-pool SDs, full color at 2 SDs. Cell tooltips lead with the row label and the column name, then grid lines: the value (labeled `Difference` or `Average`), the CI, an `SD` line for a baseline row in the signed table, the in-game range (`Range`, when min and max are extracted in the absolute view), and the player and game counts. In controlled runs with a baseline the module also writes `flavors_by_seed` (keyed by `seed`) and `flavors_by_seat` (keyed by `seed` and `player_id`): absolute tables on the fixed 0 to 100 scale, one row per (cell, row, flavor) with `mean`, `difference` (the mean relative value, the player minus the baseline at its own seed and seat), `n_players`, `n_games`, `metric_group`, and `color_position`, each seed or seat pinning the baseline pool's average for that cell as its first row (`row_kind == "baseline"`) and carrying no bootstrap CI. They are downloadable supporting files, not inline on the behavior page, and feed the Matched Maps Strategic tab through `metadata.matched_maps` (`label`, `tip`, `seed_table`, `seat_table`). Uncontrolled runs write neither table.
 
 ### 6.3 Module friendly names and descriptions
 
@@ -940,9 +948,11 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 
 `overview_sections` controls the compact cards in `index.html`. Set it to `null` to include a card for every resolved report section, or provide an ordered list of stage ids. The tracked templates use the compact seven-section list shown above. Every card shows the analysis's one-sentence result summary, and the same sentence appears in its detailed section. A legacy or custom analysis without a summary receives an explicit fallback sentence in both views. `section_overrides` selects the inline `tables` and `figures` for a stage. Each dimension is optional and inherits the analysis default when omitted. The selected names replace that dimension's inline list. Unknown stage ids stop rendering; requested artifact names that were not emitted produce a warning and are skipped. Hidden artifacts remain downloadable supporting files.
 
-**Section views.** An analysis can offer alternative views of its results through `metadata.views`, an ordered mapping of view name to its `label`, `tables`, and `figures`. The first view is the default. The HTML page shows one view at a time behind a toggle, and one click switches every section on the page that offers a view of the same name, so all behavior sections flip between relative and absolute together. Without JavaScript every view stays visible under its label; the Markdown report renders each view under a bold label.
+**Section views.** An analysis can offer alternative views of its results through `metadata.views`, an ordered mapping of view name to its `label`, optional `tip`, `tables`, and `figures`. The first view is the default. Labels are short (`Relative` and `Absolute` for the behavior views) and the optional `tip` carries the long wording (for example `Relative to completed-experiment average`), shown as the tab button's tooltip. The HTML page shows one view at a time behind a toggle, and one click switches every section on the page that offers a view of the same name, so all behavior sections flip between relative and absolute together. A `?view=<name>` query in a page URL picks the initial view wherever a group offers it. Without JavaScript every view stays visible under its label; the Markdown report renders each view under a bold label.
 
-**HTML heatmap tables.** An analysis asks for a table to render as a colored heatmap through `metadata.heatmaps`, a mapping from table name to a layout spec: the row and column keys, their order, pinned reference rows, an optional `baseline_rows` list (rows holding the baseline's absolute values, shown unsigned and with an SD line in a signed table's tooltip), short column labels with header tooltips, an optional group column for spanning headers, the number format, and a legend. The table itself carries each cell's value and a `color_position` from 0 to 1 on the RdYlBu scale shared with Matched Maps (0 red, 0.5 pale yellow, 1 blue). Cells show hover and keyboard tooltips in the report's tip format: the first line is the tip's bold title (usually the row label), later plain lines are muted subtitles, and `label<TAB>value<TAB>note` lines form a grid with the value and any numbers in the note in an accent color. A behavior heatmap cell reads row label, column name, then the value (its label comes from the spec's `value_label`), the confidence interval, an SD line for a baseline row in a signed table, the optional range, and the player and game counts. The Markdown report shows the same grid as a pipe table with a key for the short column names. A heatmap table is kept whole instead of capped at the inline row limit. A spec that does not fit its table falls back to a plain table. Neither `views` nor `heatmaps` appears in section tooltips.
+**HTML heatmap tables.** An analysis asks for a table to render as a colored heatmap through `metadata.heatmaps`, a mapping from table name to a layout spec: the row and column keys, their order, pinned reference rows, an optional `baseline_rows` list (rows holding the baseline's absolute values, shown unsigned and with an SD line in a signed table's tooltip), short column labels with header tooltips, an optional group column for spanning headers, the number format, and a legend. The spec may also set `complete_grid` (`row_order` and `column_order` are the full grid: listed rows and columns render even without data, as blank cells), `divider_columns` (columns followed by a thick border), and `tip_rows` (extra tooltip lines from other columns, each with `column`, `label`, `signed`, and `decimals`); a legend entry may give a `#rrggbb` color instead of a position. A table that needs more than one number per cell overrides parts of a cell through keys naming its columns: `text_column` replaces the cell text, `background_column` replaces the background color with a `#rrggbb`, `link_column` turns the cell text into a link to that target, and `tip_column` replaces the whole tooltip. Every value cell carries its raw value as `data-value` and each column header its position as `data-col`. The table itself carries each cell's value and a `color_position` from 0 to 1 on the RdYlBu scale shared with Matched Maps (0 red, 0.5 pale yellow, 1 blue). Cells show hover and keyboard tooltips in the report's tip format: the first line is the tip's bold title (usually the row label), later plain lines are muted subtitles, and `label<TAB>value<TAB>note` lines form a grid with the value and any numbers in the note in an accent color. A behavior heatmap cell reads row label, column name, then the value (its label comes from the spec's `value_label`), the confidence interval, an SD line for a baseline row in a signed table, the optional range, and the player and game counts. The Markdown report shows the same grid as a pipe table with a key for the short column names. A heatmap table is kept whole instead of capped at the inline row limit. A spec that does not fit its table falls back to a plain table. None of `views`, `heatmaps`, `matched_maps`, or `tabs` appears in section tooltips.
+
+**Sorting.** Every HTML report table under `.table-scroll` can be sorted by a numeric column. Clicking a numeric column heading sorts descending, then ascending, then back to the original order. A column counts as numeric when at least two cells hold numbers and no non-empty cell is text; heatmap cells sort by `data-value`, other cells by their text (percent signs, commas, a leading plus, and the unicode minus are handled). Blank cells sort last, pinned reference rows (VPAI, the baseline row) never move, and each table body sorts on its own. The Game Log keeps its own sorting (`no-auto-sort`). Sorting happens in the browser, so the generated HTML is unchanged.
 
 **Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
@@ -952,14 +962,14 @@ The score announcement highlights each model name and shows all its available co
 
 ### 7.1 The Matched Maps chapter
 
-Matched Maps is a chapter of its own, parallel to the analysis families. It renders automatically whenever the resolved report sections carry an enabled, non-empty `performance.controlled_seed_report` analysis (§6.2); no separate template or config. The site sidebar lists it next to the families with one sub-entry per seed, the overview card (when the section is among `overview_sections`) links to it, and the chapter's pages carry the same sidebar as every other page. The section itself renders in `report.md` as a `Matched Maps` chapter; when `html` is among `report.formats`, its downloads list also carries a link to the chapter pages (a `report.formats` list without `html` skips the pages with a warning and omits the link). The chapter loads the section's three persisted tables through the report build context (a containment-checked loader for the full named CSV artifacts of each selected manifest; the report stage never reads canonical tables or estimator predictions directly), so `civ-bench report` re-renders it from artifacts alone. At most one enabled `performance.controlled_seed_report` analysis is allowed per run. Chapter and player-page header tooltips contain the benchmark description and baseline provenance; chart tooltips explain aggregation, scales, and curve interpolation. The dedicated baseline appears as VPAI in tables and chart legends.
+Matched Maps is a chapter of its own, parallel to the analysis families. It renders automatically whenever the resolved report sections carry an enabled, non-empty `performance.controlled_seed_report` analysis (§6.2); no separate template or config. The site sidebar lists it next to the families with one sub-entry per seed, the overview card (when the section is among `overview_sections`) links to it, and the chapter's pages carry the same sidebar as every other page. The section itself renders in `report.md` as a `Matched Maps` chapter; when `html` is among `report.formats`, its downloads list also carries a link to the chapter pages (a `report.formats` list without `html` skips the pages with a warning and omits the link). The chapter loads the section's three persisted tables, plus the Matched Maps tables of every analysis listed in the stage's `uses.analyses`, through the report build context (a containment-checked loader for the full named CSV artifacts of each selected manifest; the report stage never reads canonical tables or estimator predictions directly), so `civ-bench report` re-renders it from artifacts alone. At most one enabled `performance.controlled_seed_report` analysis is allowed per run. Chapter and player-page header tooltips contain the benchmark description and baseline provenance; chart tooltips explain aggregation, scales, and curve interpolation. The dedicated baseline appears as VPAI in tables and chart legends.
 
 The chapter lives in its own directory beside the family pages:
 
 ```text
 <report-dir>/
   controlled-seed/
-    index.html                       # the chapter page: two heatmap tables per controlled seed
+    index.html                       # the chapter page: tabbed tables per controlled seed
     seed-<seed>-player-<player_id>.html # one detail page per available pair
   assets/report-common.js            # shared vanilla JS util (color spreading), no packages/network
   assets/report-help.js              # shared heading tooltips on every HTML page
@@ -967,27 +977,41 @@ The chapter lives in its own directory beside the family pages:
   assets/<analysis-id>/*.csv         # the three source tables
 ```
 
-- **Seed overview.** Each seed gets two heatmaps on the same axes: rows are
+- **Seed overview.** Each seed gets one tab group on the same axes: rows are
   strategist `|` condition combinations (catalog strategist order, configured
   condition order), columns are final `player_id` values, each heading pairing
-  the position with its seat-bound civilization, such as `0: Rome`. The
+  the position with its seat-bound civilization, such as `0: Rome`. The tabs
+  are Strength (mean `adjusted_strength` on a fixed RdYlBu scale from 0 to 1,
+  red at 0, yellow at 0.5, blue at 1, the rounded value in the cell, led by
+  an `Avg` column that pools each condition row's runs as the run-weighted
+  mean over the seed's populated seats, not a link), Focus (the dominant
+  victory focus, name and percentage, a stable categorical color per strategy
+  with intensity by share), then one tab per `uses.analyses` entry (§6.2),
+  Strategic for `behavior.flavors`. Tab labels are short and the long wording
+  rides on the tab button's tooltip; choosing a tab switches every seed on
+  the page. All chapter tables render through the shared heatmap renderer
+  (§7), so they carry the same markup, the pinned VPAI body, tooltips, and
+  sorting as every other report heatmap. The Strength and Focus captions are
+  `Adjusted strength` and `Dominant victory focus`, and both carry legends:
+  0 to 1 swatches for strength, the four focus colors for focus. The
   dedicated `Vanilla | Vanilla` condition renders as a separate, visually
-  isolated row before the strategist rows. The renderer completes the global
-  row and column grid and leaves unobserved combinations blank. The first
-  heatmap shows mean `adjusted_strength` on a fixed RdYlBu scale from 0 to 1
-  (red at 0, yellow at 0.5, blue at 1; rounded value in the cell) and leads
-  with an `Avg` column that pools each condition row's runs (the run-weighted
-  mean over the seed's populated seats, not a link); the second annotates the
-  dominant victory focus (name and percentage, a stable categorical color per
-  strategy with intensity by share). Both heatmaps carry the same cell
-  tooltip: the row title (`Strategist | Condition`, or `VPAI` for the
-  self-play row), the seat line `P<player_id> · <civilization>`, then grid
-  lines for the mean adjusted strength (three decimals), the dominant victory
-  focus with its share, and the run count. The `Avg` cell's tooltip shows the
-  row title, the words `Seed average`, then the pooled strength and run lines.
-  Clicking a cell opens the matching
-  `(seed, player_id)` detail page with that strategist and condition
-  preselected (encoded in the query string).
+  isolated row before the strategist rows, and the renderer completes the
+  global row and column grid, leaving unobserved combinations blank.
+  Strength and Focus cells carry the same tooltip: the row title
+  (`Strategist | Condition`, or `VPAI` for the self-play row), the seat line
+  `P<player_id> · <civilization>`, then grid lines for the mean adjusted
+  strength (three decimals), the dominant victory focus with its share, and
+  the run count. The `Avg` cell's tooltip shows the row title, the words
+  `Seed average`, then the pooled strength and run lines. Clicking a Strength
+  cell opens the matching `(seed, player_id)` detail page with that strategist
+  and condition preselected (encoded in the query string); a Focus cell's
+  link adds `view=focus` so the detail page opens on its Focus tab. The
+  Strategic tab shows that seed's `flavors_by_seed` (§6.2): rows are
+  `Strategist | Condition`, flavor columns are grouped as on the behavior
+  page, the seed's baseline average is pinned on top, values are colored on
+  the fixed 0 to 100 scale, and each tooltip adds a `Vs. baseline` difference
+  line. If a listed analysis is missing from the report, is empty, or declares
+  no tab, the chapter skips that tab with a report warning.
 - **Seed-player detail page.** The header shows the seed, player ID, matched
   civilization, and total source runs, with previous/next player links and a
   return link to the seed overview. Multiple civilizations on one pair produce
@@ -1001,14 +1025,16 @@ The chapter lives in its own directory beside the family pages:
   local JavaScript bundle, with no network access required. Strategists that share a catalog
   color (typically one model family) are spread through the shared
   `civBench.distinguishColors` util in `assets/report-common.js` so their
-  curves stay distinguishable. The comparison table keeps one row per
-  strategist-condition combination plus the Vanilla row: strategist,
-  condition, run count, mean weighted victory probability, mean adjusted
-  strength, the dominant focus, and the four focus percentages, under short
-  headers whose full wording is the header's title tooltip. The
-  adjusted-strength and focus cells are colored exactly like the overview
-  heatmaps (RdYlBu for strength, per-strategy colors for focus shares), and
-  the Vanilla row and its adjusted-strength value are highlighted. Missing
+  curves stay distinguishable. Below the chart, the **Comparison** section
+  offers the same tabs as the overview, sliced to this seat. The Strength
+  tab keeps one row per strategist-condition combination plus the pinned
+  VPAI row and shows `Runs` (linked to the Game Log when that analysis is
+  present), `Win prob` (mean weighted victory probability), and
+  `Adj strength` (colored on the overview's 0 to 1 RdYlBu scale); the Focus
+  tab shows `Focus`, `Dom %`, `Cul %`, `Dip %`, and `Sci %`, each share in
+  its strategy color at share intensity; then one tab per `uses.analyses`
+  entry shows that entry's seat-keyed table (`flavors_by_seat` for
+  `behavior.flavors`). A tab with no rows for a seed or seat says so. Missing
   baselines and missing prediction rows are visible page notes, never fatal.
 
 ### 7.2 Game Log and replay links
@@ -1055,4 +1081,4 @@ publishing without relying on JavaScript.
 14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured `configuredSyncRandSeed` must equal `configuredMapRandSeed`: a mismatch **aborts extraction** with a policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1`; `0` is Civ's "pick random" and rejected for controlled runs; and rotations are `≥ 0`). Per-player `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.
 15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"`, `"best"`, or a `-`-prefixed suffix and, with an explicit list, a suffix must be a member (`"base"` and `"best"` need no membership). `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.
 16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.
-17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).
+17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. Each `uses.analyses` entry must name an analysis whose module offers a Matched Maps tab (`MATCHED_MAPS_TAB_MODULES`, currently `behavior.flavors`); any other module is an error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).

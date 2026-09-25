@@ -288,6 +288,9 @@ class PerformanceControlledSeedReport(Analysis):
             "strength_table": table_id,
             "baseline_experiment": baseline_experiment,
             "has_baseline": has_baseline,
+            # Extra report tabs, in order: analyses whose Matched Maps tables
+            # the chapter renders beside Strength and Focus (uses.analyses).
+            "tabs": ctx.uses_analyses(),
             "seeds": sorted(int(s) for s in rows["seed"].unique()),
             "player_ids": sorted(int(p) for p in rows["player_id"].unique()),
             "coverage": {

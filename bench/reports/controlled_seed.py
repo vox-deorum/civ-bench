@@ -4,21 +4,26 @@
 section into a :class:`~bench.reports.model.ControlledSeedDocument` (the default
 document carries it as its ``controlled_seed`` field and gives the section its
 own chapter, parallel to the analysis families); :func:`render_controlled_seed_site`
-renders that chapter: ``controlled-seed/index.html`` (one heatmap overview per
+renders that chapter: ``controlled-seed/index.html`` (one tabbed table group per
 controlled seed) plus one detail page per ``(seed, player_id)`` pair in the same
 folder, both framed by the report site's sidebar navigation.
 
-The pages are self-contained and deterministic: one overview page with two heatmap
-tables per controlled seed (mean adjusted strength on a fixed RdYlBu scale, red at
-0, yellow at 0.5, blue at 1, with a leading Avg column pooling each condition
-row's runs, plus the dominant victory focus with a stable categorical color per
-strategy), one detail page per ``(seed, player_id)`` pair, and static
-JavaScript assets for the strategist checkboxes and an offline Plotly
-probability-curve chart (cell tooltips come from the shared help script). Every value, color, link, and query string is computed
-server-side, so unchanged inputs re-render byte-identically; the browser script
-only changes trace visibility, color, and emphasis. The chart's Y axis fits the
-visible curves, and same-family strategists that share a catalog color are spread
-through the shared
+The pages are self-contained and deterministic. Each controlled seed on the
+overview gets one tab group: Strength (mean adjusted strength on a fixed RdYlBu
+scale, red at 0, yellow at 0.5, blue at 1, with a leading Avg column pooling each
+condition row's runs), Focus (the dominant victory focus with a stable
+categorical color per strategy), then one tab per analysis the stage lists in
+``uses.analyses`` (:class:`~bench.reports.model.MatchedMapTab`, such as the
+Strategic tab from ``behavior.flavors``). Each ``(seed, player_id)`` detail page
+repeats the same tabs for its seat under the probability-curve chart. Every
+table renders through the shared :func:`~bench.reports.heatmap.render_heatmap_html`,
+so tooltips, the pinned VPAI row, and click-to-sort match the rest of the report.
+Static JavaScript assets drive the strategist checkboxes and an offline Plotly
+chart (tooltips, tabs, and sorting come from the shared help script). Every
+value, color, link, and query string is computed server-side, so unchanged
+inputs re-render byte-identically; the browser script only changes trace
+visibility, color, and emphasis. The chart's Y axis fits the visible curves, and
+same-family strategists that share a catalog color are spread through the shared
 :js:func:`civBench.distinguishColors` util in :mod:`bench.reports.assets`.
 
 Rows are strategist-condition combinations and columns are final ``player_id``
@@ -35,6 +40,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import numpy as np
+import pandas as pd
 
 from bench.reports.assets import REPORT_COMMON_JS, REPORT_HELP_JS
 from bench.reports.game_log import games_url, render_seat_games
@@ -42,13 +48,13 @@ from bench.plotting.interactive import figure_html, plotly_javascript
 from .context import ReportBuildContext
 from bench.reports.content import (
     render_footer_html, render_summary_html, resolve_footer, render_help_html,
-    report_summary, metadata_text,
+    render_view_group, report_summary, metadata_text,
 )
 from .errors import ReportError
 from .heatmap import (
-    cell_text_color as _cell_text_color, interpolate as _interpolate, plural, position_background, tip_row,
+    HEATMAP_METADATA_KEY, interpolate as _interpolate, plural, render_heatmap_html, tip_row,
 )
-from .model import ControlledSeedDocument
+from .model import ControlledSeedDocument, MatchedMapTab
 
 CONTROLLED_SEED_MODULE = "performance.controlled_seed_report"
 CONTROLLED_SEED_TABLES = (
@@ -111,7 +117,38 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         probability_table=tables["seed_player_probability"],
         index_table=tables["seed_player_index"],
         downloads=list(section.downloads),
+        tabs=_matched_map_tabs(ctx, section.metadata.get("tabs") or []),
     )
+
+
+def _matched_map_tabs(ctx: ReportBuildContext, stage_ids: list) -> list[MatchedMapTab]:
+    """The extra tabs the analysis lists (its ``uses.analyses``), in order.
+
+    Each listed section declares its tab through ``metadata["matched_maps"]``. A
+    section that is not in the report, is empty, or declares no tab (for
+    example an uncontrolled run) is skipped with a warning.
+    """
+    by_id = {s.id: s for s in ctx.sections}
+    tabs = []
+    for stage_id in map(str, stage_ids):
+        section = by_id.get(stage_id)
+        declared = (section.metadata or {}).get("matched_maps") if section is not None else None
+        if section is None or section.empty or not isinstance(declared, dict):
+            reason = "is not among the report sections" if section is None else "offers no Matched Maps tab"
+            ctx.warnings.append(f"Matched Maps: analysis '{stage_id}' {reason}; its tab is skipped.")
+            continue
+        specs = (section.metadata or {}).get(HEATMAP_METADATA_KEY) or {}
+        seed_name, seat_name = str(declared["seed_table"]), str(declared["seat_table"])
+        tabs.append(MatchedMapTab(
+            name=stage_id,
+            label=str(declared.get("label") or section.title),
+            tip=str(declared.get("tip") or section.title),
+            seed_table=ctx.load_table(stage_id, seed_name),
+            seat_table=ctx.load_table(stage_id, seat_name),
+            seed_spec=dict(specs.get(seed_name) or {}),
+            seat_spec=dict(specs.get(seat_name) or {}),
+        ))
+    return tabs
 
 
 def chapter_seeds(doc: ControlledSeedDocument) -> list[int]:
@@ -126,9 +163,9 @@ FOCUS_COLORS = {
     "Science": "#4e9b4e",
 }
 
-# The adjusted-strength heatmap scale is the shared RdYlBu scale
-# (bench.reports.heatmap), fixed from 0 to 1 across every seed so the panels
-# compare directly: 0 is red, 0.5 is yellow, 1 is blue.
+# The adjusted-strength scale is the shared RdYlBu scale (bench.reports.heatmap),
+# fixed from 0 to 1 across every seed so the panels compare directly: 0 is red,
+# 0.5 is yellow, 1 is blue.
 
 # Plotly dash styles cycled by condition position, so one strategist's
 # conditions stay distinguishable while sharing its color.
@@ -155,16 +192,6 @@ def _vpai_tooltip(doc: ControlledSeedDocument, strategist: str, condition: str) 
     )
 
 
-def _label_html(label: str, tooltip: str) -> str:
-    if tooltip:
-        return f'<span tabindex="0" data-tip="{_esc(tooltip)}">{_esc(label)}</span>'
-    return _esc(label)
-
-
-def _strength_background(value: float) -> str:
-    return position_background(value)
-
-
 def _focus_background(label: str, pct: float) -> str:
     base = FOCUS_COLORS.get(label, "#7a7f88")
     t = 0.0 if not np.isfinite(pct) else min(1.0, max(0.0, pct / 100.0))
@@ -176,8 +203,13 @@ def _page_filename(seed: int, player_id: int) -> str:
     return f"seed-{seed}-player-{player_id}.html"
 
 
-def _detail_link(seed: int, player_id: int, strategist: str, condition: str) -> str:
-    query = urlencode({"strategist": strategist, "condition": condition})
+def _detail_link(seed: int, player_id: int, strategist: str, condition: str,
+                 view: str = "") -> str:
+    """The seat page with this row preselected (and a non-default tab chosen)."""
+    params = {"strategist": strategist, "condition": condition}
+    if view:
+        params["view"] = view
+    query = urlencode(params)
     return f"{_page_filename(seed, player_id)}?{query}"
 
 
@@ -194,13 +226,6 @@ def _fmt_pct_short(value) -> str:
 
 
 # ── document views ────────────────────────────────────────────────────────────
-def _summary_lookup(doc: ControlledSeedDocument) -> dict[tuple, dict]:
-    out: dict[tuple, dict] = {}
-    for row in doc.summary_table.to_dict("records"):
-        out[(int(row["seed"]), int(row["player_id"]), str(row["strategist"]), str(row["condition"]))] = row
-    return out
-
-
 def _grid(doc: ControlledSeedDocument) -> tuple[list[str], list[tuple[str, str]], list[int], list[int]]:
     """The global row and column grid: observed combos plus player columns.
 
@@ -246,12 +271,29 @@ def _civ_headings(doc: ControlledSeedDocument) -> dict[tuple[int, int], str]:
     return out
 
 
-# ── heatmaps ──────────────────────────────────────────────────────────────────
-def _cell_tooltip(doc: ControlledSeedDocument, row: dict, player_id: int) -> str:
-    """The shared cell tooltip: row and seat, then strength, focus, and runs.
+# ── heatmap tables ────────────────────────────────────────────────────────────
+# Every table in the chapter renders through the shared heatmap renderer
+# (bench.reports.heatmap) from a long frame with one record per cell. The
+# frames carry their own text, color, link, and tooltip columns, so the cells
+# keep the chapter's formats while sharing the markup, pinned VPAI body, and
+# sorting of every other report heatmap.
+STRENGTH_VIEW = "strength"
+FOCUS_VIEW = "focus"
+_ROW_HEADING = "Strategist | Condition"
+_STRENGTH_LEGEND = [[0.0, "0"], [0.25, "0.25"], [0.5, "0.5"], [0.75, "0.75"], [1.0, "1"]]
+_CELL_COLUMNS = ["row_label", "column", "value", "color_position", "text", "background", "link", "tip"]
+_CELL_SPEC = {
+    "row": "row_label", "column": "column", "value": "value", "row_heading": _ROW_HEADING,
+    "text_column": "text", "background_column": "background",
+    "link_column": "link", "tip_column": "tip",
+}
 
-    Both overview heatmaps carry the same tooltip so a cell means the same thing
-    wherever it is hovered. Lines follow the report's tip format (``tip_row``).
+
+def _cell_tooltip(doc: ControlledSeedDocument, row: dict, player_id: int) -> str:
+    """The overview cell tooltip: row and seat, then strength, focus, and runs.
+
+    Both overview tables carry the same tooltip so a cell means the same thing
+    on either tab. Lines follow the report's tip format (``tip_row``).
     """
     runs = int(row["run_count"])
     strength = float(row["mean_adjusted_strength"])
@@ -273,144 +315,165 @@ def _row_title(doc: ControlledSeedDocument, strategist: str, condition: str) -> 
     return f"{_strategist_label(doc, strategist)} | {condition}"
 
 
-def _heat_cell(doc: ControlledSeedDocument, row: dict, seed: int, player_id: int, kind: str) -> str:
-    """One populated heatmap cell: colored, tooltip-equipped, and clickable."""
-    strategist, condition = str(row["strategist"]), str(row["condition"])
-    if kind == "strength":
-        value = float(row["mean_adjusted_strength"])
-        background = _strength_background(value)
-        text = f"{value:.2f}" if np.isfinite(value) else ""
-    else:
-        label = str(row["dominant_focus"])
-        pct = float(row["dominant_focus_pct"])
-        background = _focus_background(label, pct)
-        text = f"{label} {_fmt_pct_short(pct)}" if np.isfinite(pct) else ""
-    color = _cell_text_color(background)
-    href = _detail_link(seed, player_id, strategist, condition)
-    return (
-        f'<td class="heat-cell" style="background-color:{background};'
-        f'color:{color}" data-tip="{_esc(_cell_tooltip(doc, row, player_id))}">'
-        f'<a href="{_esc(href)}" style="color:inherit">{_esc(text)}</a></td>'
-    )
+def _rows_layout(doc: ControlledSeedDocument, rows: list[tuple[str, str]]) -> dict:
+    """Row order, the pinned VPAI row, and row-label tooltips for ``rows``."""
+    vanilla = (doc.vanilla_label, doc.vanilla_label)
+    order, tips = [], {}
+    for strategist, condition in rows:
+        label = _row_title(doc, strategist, condition)
+        order.append(label)
+        tip = _vpai_tooltip(doc, strategist, condition)
+        if tip:
+            tips[label] = tip
+    return {
+        "row_order": order,
+        "reference_rows": ["VPAI"] if vanilla in rows else [],
+        "row_tips": tips,
+    }
 
 
-def _empty_heat_cell(extra_class: str = "") -> str:
-    classes = "heat-cell heat-cell-empty"
-    if extra_class:
-        classes += f" {extra_class}"
-    return f'<td class="{classes}" aria-label="no data"></td>'
+def _cell(label: str, column: str, value, **extra) -> dict:
+    record = {"row_label": label, "column": column, "value": value,
+              "color_position": float("nan"), "text": "", "background": "", "link": "", "tip": ""}
+    record.update(extra)
+    return record
 
 
-def _heatmap(
-    doc: ControlledSeedDocument,
-    summary: dict[tuple, dict],
-    seed: int,
-    players: list[int],
-    combos: list[tuple[str, str]],
-    kind: str,
-    headings: dict[tuple[int, int], str],
-) -> str:
-    vanilla = doc.vanilla_label
-    parts: list[str] = []
-    parts.append('<div class="table-scroll heat-scroll" role="region" tabindex="0">')
-    label = "Mean adjusted strength" if kind == "strength" else "Dominant victory focus"
-    parts.append(
-        f'<table class="heatmap {"strength" if kind == "strength" else "focus"}-heatmap">'
-        f'<caption class="sr-only">Seed {seed}: {label.lower()} by strategist and '
-        "condition row and final player position</caption>"
-    )
-    parts.append("<thead><tr><th scope=\"col\" class=\"row-label\">Strategist | Condition</th>")
-    if kind == "strength":
-        parts.append(
-            '<th scope="col" class="col-avg" title="Pooled mean adjusted strength '
-            "across this seed's populated seats\">Avg</th>"
-        )
+def _frame(records: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame(records, columns=_CELL_COLUMNS)
+
+
+def _seat_columns(doc: ControlledSeedDocument, seed: int, players: list[int]) -> tuple[list[str], dict]:
+    headings = _civ_headings(doc)
+    labels = {}
     for player_id in players:
         civilization = headings.get((seed, player_id))
-        column = f"{player_id}: {civilization}" if civilization else f"Player {player_id}"
-        parts.append(f'<th scope="col">{_esc(column)}</th>')
-    parts.append("</tr></thead>")
+        labels[str(player_id)] = f"{player_id}: {civilization}" if civilization else f"Player {player_id}"
+    return [str(p) for p in players], labels
 
-    def cells_for(strategist: str, condition: str) -> list[str]:
-        out = []
-        for player_id in players:
-            row = summary.get((seed, player_id, strategist, condition))
-            if row is None:
-                out.append(_empty_heat_cell())
-            else:
-                out.append(_heat_cell(doc, row, seed, player_id, kind))
-        return out
 
-    def avg_cell(strategist: str, condition: str) -> str:
-        """The strength heatmap's leading cell: the pooled mean over the row.
+def _overview_rows(doc: ControlledSeedDocument) -> list[tuple[str, str]]:
+    """The global row grid: the VPAI self-play row first, then every combination."""
+    _, combos, _, _ = _grid(doc)
+    vanilla = doc.vanilla_label
+    return ([(vanilla, vanilla)] if _has_vanilla_rows(doc) else []) + combos
 
-        Each populated seat's cell is itself a mean over its runs, so weighting
-        the seat means by their run counts yields the mean over every run of
-        this (seed, strategist, condition) row, consistent with the page's
-        equal-runs averaging.
-        """
-        rows = []
-        for player_id in players:
-            row = summary.get((seed, player_id, strategist, condition))
-            if row is not None and np.isfinite(float(row["mean_adjusted_strength"])):
-                rows.append(row)
+
+def _seed_records(doc: ControlledSeedDocument, seed: int) -> list[dict]:
+    return [row for row in doc.summary_table.to_dict("records") if int(row["seed"]) == seed]
+
+
+def _strength_table(doc: ControlledSeedDocument, seed: int, players: list[int]) -> tuple[pd.DataFrame, dict]:
+    """Mean adjusted strength by row and seat, led by the pooled Avg column."""
+    records = []
+    pooled: dict[tuple[str, str], list[dict]] = {}
+    for row in _seed_records(doc, seed):
+        strategist, condition = str(row["strategist"]), str(row["condition"])
+        player_id = int(row["player_id"])
+        value = float(row["mean_adjusted_strength"])
+        records.append(_cell(
+            _row_title(doc, strategist, condition), str(player_id), value,
+            color_position=value, tip=_cell_tooltip(doc, row, player_id),
+            link=_detail_link(seed, player_id, strategist, condition),
+        ))
+        if np.isfinite(value):
+            pooled.setdefault((strategist, condition), []).append(row)
+    for (strategist, condition), rows in pooled.items():
+        # Each seat's value is a mean over its runs, so weighting the seat means
+        # by their run counts yields the mean over every run of the row,
+        # consistent with the page's equal-runs averaging.
         runs = sum(int(row["run_count"]) for row in rows)
-        if not rows or runs <= 0:
-            return _empty_heat_cell("col-avg")
-        value = (
-            sum(
-                float(row["mean_adjusted_strength"]) * int(row["run_count"])
-                for row in rows
-            )
-            / runs
-        )
-        background = _strength_background(value)
+        if runs <= 0:
+            continue
+        value = sum(float(row["mean_adjusted_strength"]) * int(row["run_count"]) for row in rows) / runs
+        title = _row_title(doc, strategist, condition)
         tip = "\n".join([
-            _row_title(doc, strategist, condition),
-            "Seed average",
-            tip_row("Strength", f"{value:.3f}"),
+            title, "Seed average", tip_row("Strength", f"{value:.3f}"),
             tip_row("Runs", str(runs), f"over {plural(len(rows), 'seat')}"),
         ])
-        return (
-            f'<td class="heat-cell heat-cell-avg col-avg" '
-            f'style="background-color:{background};'
-            f'color:{_cell_text_color(background)}" '
-            f'data-tip="{_esc(tip)}">{value:.2f}</td>'
-        )
-
-    if _has_vanilla_rows(doc):
-        parts.append('<tbody class="vanilla-body">')
-        parts.append(
-            f'<tr class="vanilla-row"><th scope="row" class="row-label">'
-            f'{_label_html("VPAI", _vpai_tooltip(doc, vanilla, vanilla))}</th>'
-        )
-        if kind == "strength":
-            parts.append(avg_cell(vanilla, vanilla))
-        parts.extend(cells_for(vanilla, vanilla))
-        parts.append("</tr></tbody>")
-
-    parts.append("<tbody>")
-    for strategist, condition in combos:
-        row_label = f"{_strategist_label(doc, strategist)} | {condition}"
-        tooltip = _vpai_tooltip(doc, strategist, condition)
-        parts.append(
-            f'<tr><th scope="row" class="row-label">{_label_html(row_label, tooltip)}</th>'
-        )
-        if kind == "strength":
-            parts.append(avg_cell(strategist, condition))
-        parts.extend(cells_for(strategist, condition))
-        parts.append("</tr>")
-    parts.append("</tbody></table></div>")
-    return "".join(parts)
+        records.append(_cell(title, "avg", value, color_position=value, tip=tip))
+    columns, labels = _seat_columns(doc, seed, players)
+    spec = {
+        **_CELL_SPEC,
+        **_rows_layout(doc, _overview_rows(doc)),
+        "title": "Adjusted strength",
+        "help": "Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row.",
+        "complete_grid": True,
+        "column_order": ["avg", *columns],
+        "column_labels": {"avg": "Avg", **labels},
+        "column_tips": {"avg": "Pooled mean adjusted strength across this seed's populated seats"},
+        "divider_columns": ["avg"],
+        "decimals": 2,
+        "legend": _STRENGTH_LEGEND,
+    }
+    return _frame(records), spec
 
 
-def _focus_legend() -> str:
-    items = "".join(
-        f'<li><span class="swatch" style="background-color:{color}"></span>'
-        f"{_esc(label)}</li>"
-        for label, color in FOCUS_COLORS.items()
-    )
-    return f'<ul class="focus-legend">{items}</ul>'
+def _focus_text(label: str, pct: float) -> str:
+    return f"{label} {_fmt_pct_short(pct)}" if np.isfinite(pct) else ""
+
+
+def _focus_table(doc: ControlledSeedDocument, seed: int, players: list[int]) -> tuple[pd.DataFrame, dict]:
+    """The dominant victory focus by row and seat, in its strategy color."""
+    records = []
+    for row in _seed_records(doc, seed):
+        strategist, condition = str(row["strategist"]), str(row["condition"])
+        player_id = int(row["player_id"])
+        label, pct = str(row["dominant_focus"]), float(row["dominant_focus_pct"])
+        records.append(_cell(
+            _row_title(doc, strategist, condition), str(player_id), pct,
+            text=_focus_text(label, pct), background=_focus_background(label, pct),
+            tip=_cell_tooltip(doc, row, player_id),
+            link=_detail_link(seed, player_id, strategist, condition, FOCUS_VIEW),
+        ))
+    columns, labels = _seat_columns(doc, seed, players)
+    spec = {
+        **_CELL_SPEC,
+        **_rows_layout(doc, _overview_rows(doc)),
+        "title": "Dominant victory focus",
+        "help": "The victory focus with the largest mean share across runs. Sorting uses that share.",
+        "complete_grid": True,
+        "column_order": columns,
+        "column_labels": labels,
+        "legend": _focus_legend_entries(),
+    }
+    return _frame(records), spec
+
+
+def _focus_legend_entries() -> list[list[str]]:
+    return [[color, label] for label, color in FOCUS_COLORS.items()]
+
+
+def _render_table(frame: pd.DataFrame, spec: dict, help_id: str) -> str:
+    help_html = render_help_html(str(spec.get("help") or ""), help_id)
+    return render_heatmap_html(frame, spec, help_html)
+
+
+def _tab_slice(frame: pd.DataFrame, **keys) -> pd.DataFrame:
+    """The rows of an extra tab's table for one seed (and seat)."""
+    if frame.empty:
+        return frame
+    mask = pd.Series(True, index=frame.index)
+    for column, value in keys.items():
+        if column not in frame.columns:
+            return frame.iloc[0:0]
+        mask &= pd.to_numeric(frame[column], errors="coerce") == value
+    return frame[mask]
+
+
+def _extra_views(doc: ControlledSeedDocument, anchor: str, seat: bool, **keys) -> list[tuple]:
+    """One view per extra tab (``doc.tabs``), sliced to this seed or seat."""
+    views = []
+    where = "seat" if seat else "seed"
+    for tab in doc.tabs:
+        frame = _tab_slice(tab.seat_table if seat else tab.seed_table, **keys)
+        spec = tab.seat_spec if seat else tab.seed_spec
+        if frame.empty or not spec:
+            body = f'<p class="empty">No {_esc(tab.label.lower())} data for this {where}.</p>'
+        else:
+            body = _render_table(frame, spec, f"{anchor}-{tab.name}-help")
+        views.append((tab.name, tab.label, tab.tip, body))
+    return views
 
 
 # ── overview page ─────────────────────────────────────────────────────────────
@@ -453,16 +516,14 @@ def _chapter_details(doc: ControlledSeedDocument) -> str:
 def _render_overview(
     doc: ControlledSeedDocument, navigation: Optional[list[str]]
 ) -> str:
-    summary = _summary_lookup(doc)
-    _, combos, seeds, players = _grid(doc)
-    headings = _civ_headings(doc)
+    _, _, seeds, players = _grid(doc)
     parts = _page_start(doc, f"{CONTROLLED_SEED_TITLE} | {doc.title}", navigation)
     parts.append(f'<p class="eyebrow">{_esc(doc.title)}</p>')
     details = _chapter_details(doc) + "\n\n" + (
         'Each cell averages every unique run for its seed, final '
         "player position, strategist, and condition; seating rotations and repeated "
-        "runs contribute equally. The strength heatmap's leading Avg column pools "
-        "each row's runs."
+        "runs contribute equally. The strength table's leading Avg column pools "
+        "each row's runs. Click a numeric column heading to sort."
     )
     help_html = render_help_html(details, "chapter-help", "About this comparison")
     parts.append(f"<h1>{_esc(CONTROLLED_SEED_TITLE)}{help_html}</h1>")
@@ -471,24 +532,22 @@ def _render_overview(
     parts.append('<p>Click a cell to explore that starting position.</p>')
 
     for seed in seeds:
-        parts.append(f'<section aria-labelledby="seed-{seed}">')
-        parts.append(f'<h2 id="seed-{seed}">Seed {seed}</h2>')
+        anchor = f"seed-{seed}"
+        parts.append(f'<section aria-labelledby="{anchor}">')
+        parts.append(f'<h2 id="{anchor}">Seed {seed}</h2>')
         if doc.game_log is not None:
             parts.append(
                 f'<p><a href="{_esc(games_url("../", seed=seed))}">'
                 f'Game Log for seed {seed} →</a></p>'
             )
-        parts.append('<figure class="heat-figure">')
-        tip = render_help_html("Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row.", f"strength-{seed}-help")
-        parts.append(f"<figcaption>Mean adjusted strength{tip}</figcaption>")
-        parts.append(_heatmap(doc, summary, seed, players, combos, "strength", headings))
-        parts.append("</figure>")
-        parts.append('<figure class="heat-figure">')
-        tip = render_help_html("The victory focus with the largest mean share across runs.", f"focus-{seed}-help")
-        parts.append(f"<figcaption>Dominant victory focus{tip}</figcaption>")
-        parts.append(_heatmap(doc, summary, seed, players, combos, "focus", headings))
-        parts.append("</figure>")
-        parts.append(_focus_legend())
+        views = [
+            (STRENGTH_VIEW, "Strength", "Mean adjusted strength",
+             _render_table(*_strength_table(doc, seed, players), f"strength-{seed}-help")),
+            (FOCUS_VIEW, "Focus", "Dominant victory focus",
+             _render_table(*_focus_table(doc, seed, players), f"focus-{seed}-help")),
+            *_extra_views(doc, anchor, seat=False, seed=seed),
+        ]
+        parts.append(render_view_group(anchor, views))
         parts.append("</section>")
 
     if doc.downloads:
@@ -585,105 +644,102 @@ def _comparison_rows(doc: ControlledSeedDocument, seed: int, player_id: int) -> 
     )
 
 
-def _strength_cell(row: dict, is_vanilla: bool) -> str:
-    """The adjusted-strength cell, colored like the overview strength heatmap."""
-    value = float(row["mean_adjusted_strength"])
-    if not np.isfinite(value):
-        return "<td></td>"
-    background = _strength_background(value)
-    classes = ' class="vanilla-value"' if is_vanilla else ""
-    return (
-        f'<td{classes} style="background-color:{background};'
-        f'color:{_cell_text_color(background)}">{value:.2f}</td>'
-    )
+def _seat_tip(doc: ControlledSeedDocument, row: dict, player_id: int, label: str, value: str) -> str:
+    lines = [
+        _row_title(doc, str(row["strategist"]), str(row["condition"])),
+        f"P{player_id} · {row['civilization']}",
+        tip_row(label, value),
+    ]
+    if label != "Runs":
+        lines.append(tip_row("Runs", str(int(row["run_count"]))))
+    return "\n".join(lines)
 
 
-def _focus_cell(row: dict) -> str:
-    """The dominant-focus cell, colored like the overview focus heatmap."""
-    label = str(row["dominant_focus"])
-    pct = float(row["dominant_focus_pct"])
-    if not np.isfinite(pct):
-        return "<td></td>"
-    background = _focus_background(label, pct)
-    return (
-        f'<td style="background-color:{background};'
-        f'color:{_cell_text_color(background)}">'
-        f"{_esc(label)} {_fmt_pct_short(pct)}</td>"
-    )
+def _runs_link(doc: ControlledSeedDocument, row: dict, seed: int, player_id: int) -> str:
+    if doc.game_log is None:
+        return ""
+    strategist, condition = str(row["strategist"]), str(row["condition"])
+    is_vanilla = (strategist, condition) == (doc.vanilla_label, doc.vanilla_label)
+    filters = {"seed": seed, "player": player_id,
+               "strategist": doc.vanilla_label if is_vanilla else strategist}
+    if not is_vanilla:
+        filters["condition"] = condition
+    return games_url("../", **filters)
 
 
-def _share_cell(row: dict, column: str, label: str) -> str:
-    """One focus-share cell, colored with its strategy color at share intensity."""
-    pct = float(row[column])
-    if not np.isfinite(pct):
-        return "<td></td>"
-    background = _focus_background(label, pct)
-    return (
-        f'<td style="background-color:{background};'
-        f'color:{_cell_text_color(background)}">{_fmt_pct(pct)}</td>'
-    )
+# Short header text; the full wording rides along as the header tooltip.
+_SEAT_STRENGTH_COLUMNS = {
+    "runs": ("Runs", "Unique runs averaged"),
+    "win_prob": ("Win prob", "Mean weighted victory probability"),
+    "strength": ("Adj strength", "Mean adjusted strength"),
+}
+_SEAT_FOCUS_COLUMNS = {
+    "focus": ("Focus", "Dominant victory focus"),
+    **{label.lower(): (f"{label[:3]} %", f"{label} focus %") for label in FOCUS_COLORS},
+}
 
 
-# Short header text; the full wording rides along as the title tooltip.
-_COMPARISON_HEADERS = [
-    ("Strategist", None),
-    ("Condition", None),
-    ("Runs", "Unique runs averaged"),
-    ("Win prob", "Mean weighted victory probability"),
-    ("Adj strength", "Mean adjusted strength"),
-    ("Focus", "Dominant victory focus"),
-    ("Dom %", "Domination focus %"),
-    ("Cul %", "Culture focus %"),
-    ("Dip %", "Diplomatic focus %"),
-    ("Sci %", "Science focus %"),
-]
+def _seat_spec(doc: ControlledSeedDocument, rows: list[dict], columns: dict, title: str, help_text: str) -> dict:
+    return {
+        **_CELL_SPEC,
+        **_rows_layout(doc, [(str(r["strategist"]), str(r["condition"])) for r in rows]),
+        "title": title,
+        "help": help_text,
+        "column_order": list(columns),
+        "column_labels": {key: short for key, (short, _full) in columns.items()},
+        "column_names": {key: full for key, (_short, full) in columns.items()},
+        "column_tips": {key: full for key, (_short, full) in columns.items()},
+    }
 
 
-def _comparison_table(doc: ControlledSeedDocument, seed: int, player_id: int) -> str:
-    vanilla = doc.vanilla_label
-    parts: list[str] = []
-    parts.append('<div class="table-scroll" role="region" tabindex="0">')
-    parts.append('<table class="comparison">')
-    parts.append(
-        f'<caption class="sr-only">Seed {seed}, player {player_id}: per-condition means '
-        "over every unique run occupying this final position</caption>"
-    )
-    parts.append("<thead><tr>")
-    for header, title in _COMPARISON_HEADERS:
-        title_attr = f' title="{_esc(title)}"' if title else ""
-        parts.append(f'<th scope="col"{title_attr}>{_esc(header)}</th>')
-    parts.append("</tr></thead><tbody>")
-    for row in _comparison_rows(doc, seed, player_id):
-        strategist, condition = str(row["strategist"]), str(row["condition"])
-        is_vanilla = (strategist, condition) == (vanilla, vanilla)
-        tooltip = _vpai_tooltip(doc, strategist, condition)
-        row_open = '<tr class="vanilla-row">' if is_vanilla else "<tr>"
-        parts.append(row_open)
-        parts.append(f"<td>{_label_html(_strategist_label(doc, strategist), tooltip)}</td>")
-        parts.append(f"<td>{'VPAI' if is_vanilla else _esc(row['condition'])}</td>")
+def _seat_strength_table(doc: ControlledSeedDocument, seed: int, player_id: int) -> tuple[pd.DataFrame, dict]:
+    """Runs, win probability, and adjusted strength per row on one seat."""
+    rows = _comparison_rows(doc, seed, player_id)
+    records = []
+    for row in rows:
+        label = _row_title(doc, str(row["strategist"]), str(row["condition"]))
         runs = int(row["run_count"])
-        if doc.game_log is not None:
-            filters = {"seed": seed, "player": player_id}
-            filters["strategist"] = doc.vanilla_label if is_vanilla else strategist
-            if not is_vanilla:
-                filters["condition"] = condition
-            runs_html = f'<a href="{_esc(games_url("../", **filters))}">{runs}</a>'
-        else:
-            runs_html = str(runs)
-        parts.append(f"<td>{runs_html}</td>")
-        parts.append(f"<td>{_esc(_fmt_probability(row['mean_weighted_victory_probability']))}</td>")
-        parts.append(_strength_cell(row, is_vanilla))
-        parts.append(_focus_cell(row))
-        for column, label in (
-            ("domination_focus_pct", "Domination"),
-            ("culture_focus_pct", "Culture"),
-            ("diplomatic_focus_pct", "Diplomatic"),
-            ("science_focus_pct", "Science"),
-        ):
-            parts.append(_share_cell(row, column, label))
-        parts.append("</tr>")
-    parts.append("</tbody></table></div>")
-    return "".join(parts)
+        probability = float(row["mean_weighted_victory_probability"])
+        strength = float(row["mean_adjusted_strength"])
+        strength_text = f"{strength:.2f}" if np.isfinite(strength) else ""
+        records.append(_cell(label, "runs", runs, text=str(runs),
+                             link=_runs_link(doc, row, seed, player_id),
+                             tip=_seat_tip(doc, row, player_id, "Runs", str(runs))))
+        records.append(_cell(label, "win_prob", probability, text=_fmt_probability(probability),
+                             tip=_seat_tip(doc, row, player_id, "Win prob", _fmt_probability(probability))))
+        records.append(_cell(label, "strength", strength, color_position=strength, text=strength_text,
+                             tip=_seat_tip(doc, row, player_id, "Strength",
+                                           f"{strength:.3f}" if np.isfinite(strength) else "n/a")))
+    spec = _seat_spec(
+        doc, rows, _SEAT_STRENGTH_COLUMNS, "Adjusted strength",
+        "Adjusted strength runs red 0, yellow 0.5, blue 1.",
+    )
+    spec["legend"] = _STRENGTH_LEGEND
+    return _frame(records), spec
+
+
+def _seat_focus_table(doc: ControlledSeedDocument, seed: int, player_id: int) -> tuple[pd.DataFrame, dict]:
+    """The dominant focus and each focus share per row on one seat."""
+    rows = _comparison_rows(doc, seed, player_id)
+    records = []
+    for row in rows:
+        label = _row_title(doc, str(row["strategist"]), str(row["condition"]))
+        focus, pct = str(row["dominant_focus"]), float(row["dominant_focus_pct"])
+        records.append(_cell(label, "focus", pct, text=_focus_text(focus, pct),
+                             background=_focus_background(focus, pct),
+                             tip=_seat_tip(doc, row, player_id, "Focus", _focus_text(focus, pct))))
+        for name in FOCUS_COLORS:
+            share = float(row[f"{name.lower()}_focus_pct"])
+            records.append(_cell(label, name.lower(), share, text=_fmt_pct(share),
+                                 background=_focus_background(name, share) if np.isfinite(share) else "",
+                                 tip=_seat_tip(doc, row, player_id, f"{name} %", _fmt_pct(share))))
+    spec = _seat_spec(
+        doc, rows, _SEAT_FOCUS_COLUMNS, "Victory focus",
+        "Mean share of each victory focus across runs, and the largest one. Each share is "
+        "colored with its strategy color at share intensity.",
+    )
+    spec["legend"] = _focus_legend_entries()
+    return _frame(records), spec
 
 
 def _chart_figure(series: list[dict]):
@@ -815,9 +871,20 @@ def _render_detail(
     parts.append("</section>")
 
     parts.append('<section aria-labelledby="comparison-heading">')
-    tip = render_help_html("Per-condition means over every unique run occupying this final position. Seating rotations and repeated runs contribute equally.", "comparison-help")
-    parts.append(f'<h2 id="comparison-heading">Comparison table{tip}</h2>')
-    parts.append(_comparison_table(doc, seed, player_id))
+    tip = render_help_html(
+        "Per-condition means over every unique run occupying this final position. Seating "
+        "rotations and repeated runs contribute equally. Click a numeric column heading to sort.",
+        "comparison-help",
+    )
+    parts.append(f'<h2 id="comparison-heading">Comparison{tip}</h2>')
+    views = [
+        (STRENGTH_VIEW, "Strength", "Runs, win probability, and adjusted strength",
+         _render_table(*_seat_strength_table(doc, seed, player_id), "seat-strength-help")),
+        (FOCUS_VIEW, "Focus", "Victory focus shares",
+         _render_table(*_seat_focus_table(doc, seed, player_id), "seat-focus-help")),
+        *_extra_views(doc, "seat", seat=True, seed=seed, player_id=player_id),
+    ]
+    parts.append(render_view_group("seat", views))
     parts.append("</section>")
 
     if doc.game_log is not None:

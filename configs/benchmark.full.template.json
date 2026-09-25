@@ -472,6 +472,9 @@
         ],
         "tables": [
           "strength"
+        ],
+        "analyses": [
+          "beh_flavors"
         ]
       },
       "params": {}

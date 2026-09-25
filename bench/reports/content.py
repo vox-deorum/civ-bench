@@ -42,7 +42,7 @@ def report_summary(summary: str, metadata: dict) -> str:
 
 
 # Metadata keys that steer rendering rather than describe provenance.
-LAYOUT_METADATA_KEYS = {"views", "heatmaps"}
+LAYOUT_METADATA_KEYS = {"views", "heatmaps", "matched_maps", "tabs"}
 
 
 def metadata_text(metadata: dict) -> str:
@@ -68,6 +68,40 @@ def render_help_html(text: str, tip_id: str, label: str = "Details") -> str:
         f'<span class="help-text" role="tooltip" id="{html.escape(tip_id)}">'
         f'{html.escape(text)}</span></span>'
     )
+
+
+def render_view_group(anchor: str, views: list[tuple[str, str, str, str]]) -> str:
+    """Alternative views of one block behind a tab switch.
+
+    ``views`` holds ``(name, label, tip, body_html)`` in display order; the first
+    is the default. The shared report script shows one view at a time, and a
+    choice switches every group on the page that offers a view of the same
+    name. ``?view=<name>`` in the page URL picks the initial view. Without
+    JavaScript every view stays visible under its label. A ``tip`` (the long
+    wording behind a short label) shows as the button's tooltip.
+    """
+    parts = ['<div class="view-group">']
+    if len(views) > 1:
+        parts.append('<div class="view-switch" role="group" aria-label="Choose a view">')
+        for index, (name, label, tip, _body) in enumerate(views):
+            tip_attr = f' data-tip="{html.escape(tip)}"' if tip else ""
+            parts.append(
+                f'<button type="button" class="view-button" data-view="{html.escape(name)}" '
+                f'aria-controls="{html.escape(anchor)}-view-{html.escape(name)}" '
+                f'aria-pressed="{"true" if index == 0 else "false"}"{tip_attr}>'
+                f"{html.escape(label)}</button>"
+            )
+        parts.append("</div>")
+    for name, label, _tip, body in views:
+        parts.append(
+            f'<div class="view-panel" id="{html.escape(anchor)}-view-{html.escape(name)}" '
+            f'data-view="{html.escape(name)}">'
+        )
+        parts.append(f'<p class="view-heading"><strong>{html.escape(label)}</strong></p>')
+        parts.append(body)
+        parts.append("</div>")
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def render_footer_html(footer: str) -> str:
