@@ -44,7 +44,11 @@ _CHART_HELP = (
     "Each curve is the mean of every run's interpolated victory probability on "
     "the fixed 0 to 1 progress grid, pooled over all games. The VPAI reference "
     "curve is drawn thicker when present. The vertical axis fits the visible "
-    "curves. Hover the chart to compare every checked curve at one progress point."
+    "curves. Only VPAI and the best and worst strategists by mean curve value "
+    "start checked; All and Best and worst switch the selection. Hover a "
+    "checkbox to preview or highlight that strategist's curves, or a legend "
+    "entry to highlight its curve. Hover the chart to compare every visible "
+    "curve at one progress point."
 )
 
 

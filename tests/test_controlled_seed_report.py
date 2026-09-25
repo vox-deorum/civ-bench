@@ -759,10 +759,14 @@ def test_strategist_checkboxes_replace_the_dropdown(rendered):
     assert 'class="curve-chart" data-query-select="true"' in detail
     assert 'id="matched-map-filters"' in detail
     assert 'src="../assets/curve-chart.js"' in detail
-    # Everyone is checked by default.
-    assert detail.count('type="checkbox"') == 2
+    # VPAI leads and controls the self-play reference; with only two other
+    # strategists everyone is checked and no preset buttons appear.
+    assert detail.count('type="checkbox"') == 3
+    assert detail.index('value="Vanilla" checked') < detail.index('value="GPT-OSS-120B-Simple"')
+    assert 'data-tip="VPAI self-play: all players use VPAI."><input' in detail
     assert 'value="GPT-OSS-120B-Simple" checked' in detail
     assert 'value="Kimi-K2.5" checked' in detail
+    assert "chart-preset" not in detail
     script = _read(out, "assets/curve-chart.js")
     # Plotly provides the shared hover comparison while the chart script updates
     # trace visibility, colors, and the adaptive axis.
@@ -951,7 +955,10 @@ def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
     # an ordinary condition row.
     assert detail.count('<tr class="vanilla-row">') == 2
     assert ">VPAI | Every-turn</span></th>" in detail
-    assert 'value="Vanilla" checked> VPAI</label>' in detail
+    # One VPAI checkbox covers both VPAI curves, and its tooltip explains both.
+    assert detail.count('value="Vanilla"') == 1
+    assert 'value="Vanilla" checked data-default="true"> VPAI</label>' in detail
+    assert "The other VPAI lines are VPAI in games with LLM players." in detail
     # Trace metadata keeps the baseline distinct from the mixed VPAI condition
     # without embedding a second chart-data payload.
     assert '"name":"VPAI"' in detail

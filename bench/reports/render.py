@@ -410,6 +410,9 @@ tbody.vanilla-body tr.vanilla-row .heat-cell { background-image: linear-gradient
 .chart-controls { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; margin: .75rem 0; }
 .chart-controls .controls-label { color: #445164; font-weight: 650; }
 .chart-controls .strategist-check { display: inline-flex; align-items: center; gap: .3rem; }
+.chart-controls .chart-presets { display: inline-flex; gap: .4rem; }
+.chart-controls .chart-preset { padding: .1rem .55rem; border: 1px solid #a8b3c2; border-radius: .3rem; color: #18202a; background: #fff; font: inherit; font-size: .85rem; cursor: pointer; }
+.chart-controls .chart-preset:hover { background: #eef2f6; }
 .content.game-log { max-width: none; }
 #game-log-table { width: 100%; }
 #game-log-table th, #game-log-table td { vertical-align: top; }

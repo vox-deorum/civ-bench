@@ -618,6 +618,28 @@ def test_curve_chart_renders_inline_on_the_family_page(report_env):
     assert (out / "performance.html").read_text(encoding="utf-8") == first
 
 
+def test_curve_chart_checks_vpai_and_the_best_and_worst_by_default():
+    from bench.reports.curves import render_curve_chart_html
+    from bench.reports.model import CurveChart
+
+    means = {"A": 0.3, "B": 0.6, "C": 0.1, "D": 0.4}
+    rows = [("Vanilla", "Vanilla", 0.2)] + [(name, "", value) for name, value in means.items()]
+    frame = pd.DataFrame([
+        {"strategist": s, "condition": c, "turn_progress": x,
+         "mean_predicted_win_probability": y, "n_runs": 1}
+        for s, c, y in rows for x in (0.0, 1.0)
+    ])
+    chart = CurveChart(frame=frame, strategist_order=list(means))
+    html = render_curve_chart_html(chart, "demo", "plotly.min.js")
+    checked = [value for value in ("Vanilla", *means)
+               if f'value="{value}" checked data-default="true"' in html]
+    assert checked == ["Vanilla", "B", "C"]
+    assert 'value="A">' in html and 'value="D">' in html
+    assert 'data-preset="all"' in html and 'data-preset="default"' in html
+    assert html.index('value="Vanilla"') < html.index('value="A"')
+    assert 'data-tip="VPAI self-play: all players use VPAI."' in html
+
+
 def test_curve_chart_with_missing_table_is_skipped_with_a_warning(report_env):
     _emit(report_env, "perf_usage_efficiency", "performance.usage_efficiency",
           summary="No curves.", tables={"other": pd.DataFrame({"a": [1]})},

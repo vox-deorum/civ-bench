@@ -717,8 +717,8 @@ validation rejects it. Key behavior:
   mean_predicted_win_probability, n_runs) and `by_identity` (`<by>`,
   strategist, condition, mean_predicted, n_rows, n_games).
 - **Rendering.** The report renders the same interactive chart as the Matched
-  Maps seat pages (strategist checkboxes, thick VPAI line) inline on the
-  Performance page. There is no figure file.
+  Maps seat pages (strategist checkboxes, thick VPAI line, hover previews;
+  §7.1) inline on the Performance page. There is no figure file.
 
 **`performance.controlled_seed_report` in detail.** The module aggregates the
 controlled design by `(seed, player_id)` cell so the report can expose
@@ -1060,11 +1060,20 @@ The chapter lives in its own directory beside the family pages:
   return link to the seed overview. Multiple civilizations on one pair produce
   a visible comparability warning. The victory-probability chart draws each
   run's interpolated curve averaged on the fixed 101-point grid (§6.2): one
-  checkbox per strategist, all checked by default, toggles that strategist's
-  conditions; the matched Vanilla curve stays visible as a thicker reference
-  line; the vertical axis fits the visible curves; and hovering the chart
-  snaps to the nearest grid progress and lists every checked condition's
-  probability at that point. The chart uses the shared Plotly renderer and a
+  checkbox per strategist toggles that strategist's conditions. The VPAI
+  checkbox comes first and toggles every VPAI curve, including the matched
+  Vanilla curve, which is drawn as a thicker reference line. Only VPAI and the
+  best and worst other strategists (by the mean of all their curve points,
+  every condition pooled) start checked, or every strategist when there are at
+  most two others; an **All** button checks everyone and **Best and worst**
+  restores the default. A `?strategist=` link checks that strategist and VPAI.
+  Hovering a checkbox temporarily shows that strategist's curves, or
+  highlights them if already shown, dimming the rest; hovering a legend entry
+  highlights its curve. The legend sits beside the plot and scrolls when long,
+  so the plot keeps its height. The vertical axis fits the visible curves; and
+  hovering the chart snaps to the nearest grid progress and lists every
+  visible condition's probability at that point. The seat's game list shows
+  only the checked strategists' games. The chart uses the shared Plotly renderer and a
   local JavaScript bundle, with no network access required. Strategists that share a catalog
   color (typically one model family) are spread through the shared
   `civBench.distinguishColors` util in `assets/report-common.js` so their
