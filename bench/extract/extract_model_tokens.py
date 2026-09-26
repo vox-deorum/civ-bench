@@ -56,7 +56,7 @@ UNATTRIBUTED_MODEL_BASE = "unattributed"
 OTEL_ERROR_STATUS_CODE = 2
 # A call counts as having fully reported reasoning when its reasoning tokens
 # exceed this multiple of its output tokens.
-RECORDED_REASONING_MIN_RATIO = 0.5
+RECORDED_REASONING_MIN_RATIO = 1.0
 
 PLAYER_TRACE_PATTERN = re.compile(
     r"^(?P<game_id>[0-9a-f-]+)-player-(?P<player_id>\d+)\.db$",

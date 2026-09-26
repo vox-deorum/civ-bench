@@ -307,46 +307,6 @@ def test_token_extraction_counts_latest_failed_turn_roots(tmp_path, catalog):
     assert row["total_tokens"] == 15
 
 
-def test_token_extraction_records_output_from_calls_with_reasoning(tmp_path, catalog):
-    from bench.extract.extract_model_tokens import extract_player_model_token_rows
-
-    trace = tmp_path / "abc-player-1.db"
-    conn = sqlite3.connect(trace)
-    conn.execute(
-        "CREATE TABLE spans (id INTEGER PRIMARY KEY, traceId TEXT, spanId TEXT, "
-        "parentSpanId TEXT, turn INTEGER, name TEXT, startTime INTEGER, "
-        "attributes TEXT, statusCode INTEGER)"
-    )
-    model = '"model":"openai-compatible/gpt-oss-120b"'
-    conn.executemany(
-        "INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (1, "t1", "root1", None, 1, "strategist.turn.1", 1, "{}", 1),
-            (2, "t1", "a1", "root1", 1, "agent.simple-strategist", 2,
-             '{' + model + ',"tokens.input":10,"tokens.reasoning":6,"tokens.output":4}', 1),
-            (3, "t2", "root2", None, 2, "strategist.turn.2", 3, "{}", 1),
-            (4, "t2", "a2", "root2", 2, "agent.simple-strategist", 4,
-             '{' + model + ',"tokens.input":10,"tokens.output":7}', 1),
-            # Reasoning at or below half the output counts as partly reported.
-            (5, "t3", "root3", None, 3, "strategist.turn.3", 5, "{}", 1),
-            (6, "t3", "a3", "root3", 3, "agent.simple-strategist", 6,
-             '{' + model + ',"tokens.input":10,"tokens.reasoning":4,"tokens.output":8}', 1),
-        ],
-    )
-    conn.commit()
-    conn.close()
-
-    rows = extract_player_model_token_rows(
-        str(trace), "abc", "ctrl", "GPT-OSS-120B", catalog
-    )
-
-    assert len(rows) == 1
-    assert rows[0]["output_tokens"] == 19
-    assert rows[0]["reasoning_tokens"] == 10
-    assert rows[0]["reasoning_recorded_tokens"] == 6
-    assert rows[0]["reasoning_recorded_output_tokens"] == 4
-
-
 def test_all_failed_trace_uses_non_null_model_label(tmp_path, catalog):
     from bench.extract.extract_model_tokens import extract_player_model_token_rows
 

@@ -875,7 +875,7 @@ require complete telemetry and known prices. Costs exclude cache discounts.
 Some providers report reasoning tokens on only part of a model's calls. Setting
 `"estimate_reasoning": true` on a `strategist_models` entry in
 `configs/models.json` fills in the gap for that model. A call counts as fully
-reported when its reasoning tokens are more than 0.5 times its output tokens. The
+reported when its reasoning tokens exceed its output tokens. The
 tokens table records `reasoning_recorded_tokens` and
 `reasoning_recorded_output_tokens`, the reasoning and output tokens from those
 calls. The ratio `sum(reasoning_recorded_tokens) / sum(reasoning_recorded_output_tokens)`
