@@ -507,13 +507,20 @@ def build_strength_panel(
     catalog: Catalog,
     estimator_id: str = "",
     problem_game_ids: set[str] | None = None,
+    fit_exclude_experiments: set[str] | None = None,
 ) -> StrengthArtifacts:
     """Derive the strength panel + audit trails from an estimator's predictions.
 
     ``problem_game_ids`` (from the malformed-DB ``import_issues.csv``) are dropped
     from all three inputs right after reading, so the civ-OLS effects and the
     Vanilla cell baselines are fit on clean rows only.
+
+    ``fit_exclude_experiments`` (the conditions below the global
+    ``min_condition_completeness``) keep their panel rows, but the civ-OLS fit
+    and the coverage warnings leave them out, so an unfinished condition never
+    changes the strength of any other row.
     """
+    excluded = set(fit_exclude_experiments or ())
     p = _resolve_params(params)
     warnings_out: list[str] = []
 
@@ -539,8 +546,9 @@ def build_strength_panel(
     # Uncontrolled path: OLS civ effects, always fit on ALL rows when enabled.
     civ_effects: dict[str, float] = {}
     civ_effects_df = pd.DataFrame(columns=CIV_EFFECTS_COLUMNS)
+    fit_rows = ~df["experiment"].astype(str).isin(excluded)
     if p["civ_adjust"] == "ols_logit":
-        civ_effects, civ_effects_df = fit_civ_effects(df, catalog)
+        civ_effects, civ_effects_df = fit_civ_effects(df[fit_rows], catalog)
 
     # Controlled path: matched start-cell Vanilla VPAI baseline.
     cell_baseline_df = pd.DataFrame(columns=CELL_BASELINE_COLUMNS)
@@ -560,7 +568,7 @@ def build_strength_panel(
         # gracefully: incomplete self-coverage is expected (rotation sparsity), so
         # we still adjust every cell that HAS a baseline and fall the rest back to
         # the uncontrolled adjustment (WARN, never abort).
-        missing_mask = df["controlled"] & cell_baseline_series.isna()
+        missing_mask = df["controlled"] & cell_baseline_series.isna() & fit_rows
         if missing_mask.any():
             offenders = (
                 df.loc[missing_mask, ["experiment", "seed", "player_id"]]
@@ -588,7 +596,11 @@ def build_strength_panel(
             )
 
         cell_coverage_df = _build_cell_coverage(df, baseline_df, be, selected, sel_map, catalog)
-        warnings_out.extend(_coverage_warnings(cell_coverage_df, cell_baseline_df, selected, be))
+        warnings_out.extend(_coverage_warnings(
+            cell_coverage_df[~cell_coverage_df["experiment"].astype(str).isin(excluded)],
+            cell_baseline_df[~cell_baseline_df["experiment"].astype(str).isin(excluded)],
+            selected, be,
+        ))
 
     # ── compute adjusted_strength per row ────────────────────────────────────
     # cell_mask: controlled rows that actually have a start-cell baseline. Controlled

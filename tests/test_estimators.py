@@ -411,6 +411,75 @@ def test_train_subset_narrows_training(turns_csv, tmp_path, write_spec):
     assert set(out["experiment"]) == {"exp-llm", "exp-vanilla"}
 
 
+def _partial_llm_games(spec, tmp_path):
+    """A games table where exp-llm fills 1 of the 2 controlled slots (incomplete)."""
+    games = tmp_path / "game_data.csv"
+    pd.DataFrame([
+        {"game_id": "game-0", "experiment": "exp-llm", "seed": 1, "seating_rotation": 0},
+        {"game_id": "game-1", "experiment": "exp-vanilla", "seed": 1, "seating_rotation": 0},
+        {"game_id": "game-2", "experiment": "exp-vanilla", "seed": 1, "seating_rotation": 1},
+    ]).to_csv(games, index=False)
+    spec["data"]["tables"]["games"] = str(games)
+    spec["data"]["filter"] = {"min_condition_completeness": 1.0}
+    return spec
+
+
+def test_completeness_filter_keeps_predictions_of_incomplete_conditions(
+    turns_csv, score_model_dir, tmp_path, write_spec,
+):
+    save_pred = tmp_path / "predictions.csv"
+    spec = _partial_llm_games(_spec(turns_csv, score_model_dir, save_pred), tmp_path)
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    assert set(pd.read_csv(save_pred)["experiment"]) == {"exp-llm", "exp-vanilla"}
+
+
+def test_completeness_filter_leaves_incomplete_conditions_out_of_training(
+    turns_csv, tmp_path, write_spec, monkeypatch,
+):
+    from bench.estimators import training
+
+    seen = {}
+    original = training.run_full_train
+
+    def spy(model_class, model_kwargs, df_train, df_pred, **kwargs):
+        seen["train"] = set(df_train["experiment"])
+        seen["pred"] = set(df_pred["experiment"])
+        return original(model_class, model_kwargs, df_train, df_pred, **kwargs)
+
+    monkeypatch.setattr(training, "run_full_train", spy)
+    save_pred = tmp_path / "predictions.csv"
+    spec = _partial_llm_games(_train_spec(turns_csv, save_pred), tmp_path)
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    assert seen == {"train": {"exp-vanilla"}, "pred": {"exp-llm", "exp-vanilla"}}
+    assert set(pd.read_csv(save_pred)["experiment"]) == {"exp-llm", "exp-vanilla"}
+
+
+def test_completeness_filter_narrows_cross_val_training(
+    turns_csv, tmp_path, write_spec, monkeypatch,
+):
+    from bench.estimators import training
+
+    seen = {}
+
+    def spy(model_class, model_kwargs, df, **kwargs):
+        seen["rows"] = set(df["experiment"])
+        seen["train"] = kwargs["train_experiments"]
+        predictions = df[["experiment", "game_id", "player_id"]].assign(
+            predicted_win_probability=0.5
+        )
+        return training.TrainResult(predictions=predictions)
+
+    monkeypatch.setattr(training, "run_cross_val", spy)
+    spec = _partial_llm_games(
+        _train_spec(turns_csv, tmp_path / "oof.csv", predict="cross_val"), tmp_path
+    )
+    cfg = load_config(write_spec(spec))
+    run_estimator(cfg, cfg.estimators[0].raw)
+    assert seen == {"rows": {"exp-llm", "exp-vanilla"}, "train": ["exp-vanilla"]}
+
+
 def test_train_subset_empty_raises(turns_csv, tmp_path, write_spec):
     spec = _train_spec(
         turns_csv, tmp_path / "p.csv",

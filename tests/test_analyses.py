@@ -366,6 +366,14 @@ def test_calibration_cell_baseline_controlled(env):
     assert not r.empty and r.figure_paths  # one heatmap per seed
 
 
+def test_calibration_cell_baseline_drops_incomplete_conditions(env):
+    # observe-vanilla-standard fills 2 of the 6 controlled slots, llm-standard 4.
+    env.cfg.data["filter"] = {"min_condition_completeness": 0.5}
+    r = env("calibration.cell_baseline", {}, {"tables": ["strength"]})
+    table = pd.read_csv(r.table_paths["cell_baseline"])
+    assert set(table["experiment"]) == {"llm-standard"}
+
+
 def test_cell_baseline_excludes_explicit_conditions_implicit_row():
     from bench.analyses.calibration.cell_baseline import (
         CalibrationCellBaseline, _EXPLICIT_ROW,

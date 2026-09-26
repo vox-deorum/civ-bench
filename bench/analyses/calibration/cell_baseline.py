@@ -58,13 +58,18 @@ class CalibrationCellBaseline(Analysis):
             return AnalysisResult(
                 summary="Starting-position baselines unavailable: the adjustment stage produced no table."
             )
+        # The strength stage keeps unfinished conditions; the report does not.
+        incomplete = ctx.incomplete_conditions()
         cb = pd.read_csv(baseline_path)
+        cb = cb[~cb["experiment"].astype(str).isin(incomplete)]
         if cb.empty:
             return AnalysisResult(
                 summary="Starting-position baselines unavailable: the run has no controlled experiment rows."
             )
 
         coverage = self._load_coverage(adjust_dir)
+        if coverage is not None:
+            coverage = coverage[~coverage["experiment"].astype(str).isin(incomplete)]
         # Shared, robust symmetric colour limit across every seed facet.
         vlim = robust_symmetric_limit(cb["cell_baseline"].to_numpy(), pct=98.0)
 

@@ -12,7 +12,8 @@ from typing import Callable, Dict
 from .strength import build_strength_panel
 
 # module id → builder. The builder signature is
-# (predictions_path, panel_path, games_path, params, catalog, estimator_id).
+# (predictions_path, panel_path, games_path, params, catalog, estimator_id,
+#  problem_game_ids=..., fit_exclude_experiments=...).
 ADJUST_REGISTRY: Dict[str, Callable] = {
     "strength": build_strength_panel,
 }

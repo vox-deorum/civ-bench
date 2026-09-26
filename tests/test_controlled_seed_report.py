@@ -274,6 +274,20 @@ def test_players_rank_by_weighted_strength_within_each_game(env):
     assert float(row["mean_strength_rank"]) == pytest.approx(2.0)
 
 
+def test_incomplete_conditions_are_ranked_but_left_out_of_the_heatmaps(env):
+    # The Kimi condition fills 1 of the 4 controlled slots; the baseline fills 2.
+    env.cfg.data["filter"] = {"min_condition_completeness": 0.5}
+    tables = _tables(env())
+    ranks = tables["game_player_rank"]
+    assert {("ki-s1-r1", 0), ("ki-s1-r1", 1)} <= set(
+        zip(ranks["game_id"], ranks["player_id"].astype(int))
+    )
+    for name in ("seed_player_summary", "seed_player_probability", "seed_player_adjusted"):
+        assert not tables[name]["strategist"].str.startswith("Kimi").any(), name
+    assert TREAT_EXP in set(tables["seed_player_summary"]["experiment"])
+    assert BASELINE_EXP in set(tables["seed_player_summary"]["experiment"])
+
+
 def test_rotations_and_repeats_average_equally_without_ci(env):
     tables = _tables(env())
     row = _summary_row(tables, 1, 0, "GPT-OSS-120B-Simple", "Every-turn")

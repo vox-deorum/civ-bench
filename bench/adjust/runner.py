@@ -102,11 +102,19 @@ def run_adjust(
     problem_ids = read_problem_game_ids(resolve_issues_path(cfg.data))
     from bench.config.filters import resolve_filter_spec
     from bench.data.failures import failed_game_ids_from_tokens
+    from bench.data.loading import incomplete_experiments_from_games
 
-    problem_ids |= failed_game_ids_from_tokens(
-        (cfg.data.get("tables") or {}).get("tokens"),
-        resolve_filter_spec(cfg.data.get("filter"), cfg.filters, "data.filter"),
+    global_spec = resolve_filter_spec(cfg.data.get("filter"), cfg.filters, "data.filter")
+    malformed_ids = set(problem_ids)
+    failure_ids = failed_game_ids_from_tokens(
+        (cfg.data.get("tables") or {}).get("tokens"), global_spec,
     )
+    problem_ids |= failure_ids
+    # Unfinished conditions stay in the table (so their games can be ranked) but
+    # do not shape the fits; analyses drop them downstream.
+    incomplete = incomplete_experiments_from_games(
+        games_path, global_spec, malformed_ids, failure_ids,
+    ) or set()
 
     artifacts = builder(
         predictions_path,
@@ -116,6 +124,7 @@ def run_adjust(
         catalog,
         estimator_id,
         problem_game_ids=problem_ids,
+        fit_exclude_experiments=incomplete,
     )
 
     save_path = cfg.output.resolve(stage_raw.get("save") or _default_save_path(cfg, stage_id))

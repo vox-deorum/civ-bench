@@ -245,6 +245,51 @@ def test_civ_effects_reconcile_and_sum_zero(tmp_path, catalog):
     assert np.allclose(recon, art.panel["adjusted_strength"].to_numpy())
 
 
+def test_fit_exclude_experiments_keeps_rows_but_not_in_civ_fit(tmp_path, catalog):
+    # An unfinished condition keeps its panel rows, but the civ OLS fit is the
+    # one made without it, so it cannot move any other row's strength.
+    finished = _uncontrolled_games() + [{
+        "experiment": "exp-llm", "game_id": "g2", "seed": -1, "seating_rotation": -1,
+        "seats": [
+            (0, "TestLLM-Simple", "TestLLM", "Greece", 0.6, True),
+            (1, "Vanilla", "VPAI", "Rome", 0.3, False),
+            (2, "Vanilla", "VPAI", "Egypt", 0.45, False),
+        ],
+    }]
+    unfinished = [{
+        "experiment": "exp-partial", "game_id": "g3", "seed": -1, "seating_rotation": -1,
+        "seats": [
+            (0, "TestLLM-Simple", "TestLLM", "Egypt", 0.9, True),
+            (1, "Vanilla", "VPAI", "Greece", 0.05, False),
+            (2, "Vanilla", "VPAI", "Rome", 0.02, False),
+        ],
+    }]
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    ref = build_strength_panel(*_write(ref_dir, finished), _params(block="none"), catalog)
+    art = build_strength_panel(
+        *_write(tmp_path, finished + unfinished), _params(block="none"), catalog,
+        fit_exclude_experiments={"exp-partial"},
+    )
+    assert "g3" in set(art.panel["game_id"])
+    pd.testing.assert_frame_equal(art.civ_effects, ref.civ_effects)
+    kept = art.panel[art.panel["game_id"] != "g3"].reset_index(drop=True)
+    assert np.allclose(kept["adjusted_strength"], ref.panel["adjusted_strength"])
+
+
+def test_fit_exclude_experiments_skips_coverage_warnings(tmp_path, catalog):
+    games = (
+        _seated_games("ctrl", seed=1, rotations=[0, 1, 2, 3])
+        + _seated_games("ctrl", seed=2, rotations=[0])
+    )
+    pp, pa, gp = _write(tmp_path, games)
+    params = _params(block="auto", civ_adjust="none")
+    assert build_strength_panel(pp, pa, gp, params, catalog).warnings
+    art = build_strength_panel(pp, pa, gp, params, catalog, fit_exclude_experiments={"ctrl"})
+    assert art.warnings == []
+    assert set(art.panel["experiment"]) == {"ctrl"}
+
+
 # ── controlled matched start-cell baseline ───────────────────────────────────
 # Build a seated rotation design with a fixed strong leader seat (4) so the game
 # max is constant 0.9, vanilla seats sit at p=0.45 (relative 0.5 ⇒ logit 0), and
@@ -533,6 +578,31 @@ def test_run_adjust_filters_failures_from_existing_predictions(tmp_path, write_s
     cfg = load_config(write_spec(spec))
     result = run_adjust(cfg, cfg.adjust[0].raw)
     assert set(pd.read_csv(result.table_path)["game_id"]) == {"g1"}
+
+
+def test_run_adjust_keeps_incomplete_conditions_out_of_fits(tmp_path, write_spec, monkeypatch):
+    from bench.adjust import registry
+
+    games = (
+        _seated_games("ctrl", seed=1, rotations=[0, 1, 2, 3])
+        + _seated_games("ctrl-part", seed=1, rotations=[0])
+    )
+    pp, pa, gp = _write(tmp_path, games)
+    save = tmp_path / "out" / "panel.csv"
+    spec = _run_spec(tmp_path / "turns.csv", pp, pa, gp, save, {"block": "auto"})
+    spec["data"]["filter"] = {"min_condition_completeness": 1.0}
+    seen = {}
+    builder = registry.ADJUST_REGISTRY["strength"]
+
+    def spy(*args, fit_exclude_experiments=None, **kwargs):
+        seen["excluded"] = fit_exclude_experiments
+        return builder(*args, fit_exclude_experiments=fit_exclude_experiments, **kwargs)
+
+    monkeypatch.setitem(registry.ADJUST_REGISTRY, "strength", spy)
+    cfg = load_config(write_spec(spec))
+    result = run_adjust(cfg, cfg.adjust[0].raw)
+    assert seen["excluded"] == {"ctrl-part"}
+    assert set(pd.read_csv(result.table_path)["experiment"]) == {"ctrl", "ctrl-part"}
 
 
 # ── config validation: free-form baseline_experiment id ──────────────────────

@@ -166,7 +166,7 @@ class AnalysisContext:
 
     def apply_filter(self, df: pd.DataFrame, *, include_quality: bool = True) -> pd.DataFrame:
         """Apply the global ``data.filter`` narrowed by this stage's ``filter``."""
-        from ..data.loading import apply_filter_spec, incomplete_experiments_from_games
+        from ..data.loading import apply_filter_spec
 
         global_spec = self.resolved_filter()
         failure_ids = self.decision_failure_ids() if include_quality else set()
@@ -175,10 +175,7 @@ class AnalysisContext:
             global_spec["max_decision_failure_pct"] = None
         condition_incomplete = None
         if global_spec.get("min_condition_completeness") is not None:
-            conditions = self._games_for_filter()
-            condition_incomplete = incomplete_experiments_from_games(
-                str(conditions), global_spec, self._problem_game_ids(), failure_ids,
-            )
+            condition_incomplete = self.incomplete_conditions()
         return apply_filter_spec(
             df,
             catalog=self.catalog,
@@ -186,6 +183,27 @@ class AnalysisContext:
             condition_incomplete=condition_incomplete,
             decision_failure_ids=failure_ids,
         )
+
+    def incomplete_conditions(self) -> set[str]:
+        """Experiments below this stage's ``min_condition_completeness`` (cached).
+
+        Empty when the filter is off. Estimators and the strength stage keep these
+        conditions, so an analysis that reads their tables without
+        :meth:`apply_filter` drops them with this set.
+        """
+        cached = getattr(self, "_incomplete_conditions", None)
+        if cached is None:
+            from ..data.loading import incomplete_experiments_from_games
+
+            spec = self.resolved_filter()
+            cached = set()
+            if spec.get("min_condition_completeness") is not None:
+                cached = incomplete_experiments_from_games(
+                    str(self._games_for_filter()), spec,
+                    self._problem_game_ids(), self.decision_failure_ids(),
+                )
+            self._incomplete_conditions = cached
+        return cached
 
     def _games_for_filter(self) -> str:
         """The canonical games-table path, resolved once for the global

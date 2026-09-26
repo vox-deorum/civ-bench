@@ -162,7 +162,7 @@ def _run_pretrained(
     model_class = type(model)
 
     use_variants = needs_variant_columns(model_class)
-    df = _load_and_filter(cfg, stage_id, catalog, use_variants)
+    df, _ = _load_and_filter(cfg, stage_id, catalog, use_variants)
 
     df_pred = _narrow_to_subset(df, stage_raw.get("predict_subset", "all"), catalog)
     if df_pred.empty:
@@ -247,12 +247,24 @@ def _run_train(cfg: RunConfig, stage_raw: dict, catalog: Catalog) -> EstimatorRe
     )
     use_variants = needs_variant_columns(model_class) or tune_mode_uses_variants
 
-    df = _load_and_filter(cfg, stage_id, catalog, use_variants)
+    df, incomplete = _load_and_filter(cfg, stage_id, catalog, use_variants)
+    # Unfinished conditions are predicted but never trained or tuned on.
+    df_fit = _without_conditions(df, incomplete)
+    if df_fit.empty:
+        raise EstimatorError(
+            f"estimator '{stage_id}': every condition is below "
+            f"data.filter.min_condition_completeness, so there is nothing to train on."
+        )
 
-    model_kwargs = _resolve_hyperparams(cfg, stage_raw, model_name, df, use_variants)
+    model_kwargs = _resolve_hyperparams(cfg, stage_raw, model_name, df_fit, use_variants)
 
     if predict == "cross_val":
-        train_experiments = _subset_experiment_list(df, train_subset, catalog)
+        train_experiments = _subset_experiment_list(df_fit, train_subset, catalog)
+        if incomplete:
+            if train_experiments is None:
+                train_experiments = sorted(set(df_fit[_exp_col(df_fit)].astype(str)))
+            else:
+                train_experiments = [e for e in train_experiments if e not in incomplete]
         result = run_cross_val(
             model_class, model_kwargs, df,
             n_splits=train_block.get("n_splits", 5),
@@ -271,7 +283,7 @@ def _run_train(cfg: RunConfig, stage_raw: dict, catalog: Catalog) -> EstimatorRe
         )
 
     # predict: in_sample. Fit one model on train_subset, predict predict_subset.
-    df_train = _narrow_to_subset(df, train_subset, catalog)
+    df_train = _narrow_to_subset(df_fit, train_subset, catalog)
     if df_train.empty:
         raise EstimatorError(
             f"estimator '{stage_id}': train_subset selected zero rows to train on."
@@ -307,8 +319,14 @@ def _resample(value) -> Optional[str]:
 
 def _load_and_filter(
     cfg: RunConfig, stage_id: str, catalog: Catalog, use_variants: bool
-) -> pd.DataFrame:
-    """Build the engineered turns frame and apply the global ``data.filter``."""
+) -> tuple[pd.DataFrame, set[str]]:
+    """Build the engineered turns frame and apply the global ``data.filter``.
+
+    ``min_condition_completeness`` does not remove rows here: every condition is
+    predicted, so the strength table can score games of unfinished conditions.
+    The unfinished condition names are returned instead, and training leaves
+    them out. Analyses drop them downstream.
+    """
     turns_csv = _table_path(cfg, "turns")
     if not Path(turns_csv).exists():
         raise EstimatorError(
@@ -323,7 +341,7 @@ def _load_and_filter(
     failure_ids = failed_game_ids_from_tokens(
         (cfg.data.get("tables") or {}).get("tokens"), global_spec,
     )
-    condition_incomplete = None
+    incomplete: set[str] = set()
     if global_spec.get("min_condition_completeness") is not None:
         games_csv = _table_path(cfg, "games")
         if not Path(games_csv).exists():
@@ -332,20 +350,28 @@ def _load_and_filter(
                 f"data.filter.min_condition_completeness needs the controlled grid. "
                 f"Run extract first."
             )
-        condition_incomplete = incomplete_experiments_from_games(
+        incomplete = incomplete_experiments_from_games(
             games_csv, global_spec, decision_failure_ids=failure_ids,
         )
+    predict_spec = dict(global_spec)
+    predict_spec.pop("min_condition_completeness", None)
     df = apply_filter_spec(
         df, catalog=catalog,
-        filter_spec=filter_spec, presets=cfg.filters,
-        condition_incomplete=condition_incomplete,
+        filter_spec=predict_spec, presets=cfg.filters,
         decision_failure_ids=failure_ids,
     )
     if df.empty:
         raise EstimatorError(
             f"estimator '{stage_id}': data.filter selected zero rows from the turns table."
         )
-    return df
+    return df, incomplete
+
+
+def _without_conditions(df: pd.DataFrame, conditions: set[str]) -> pd.DataFrame:
+    """Drop the rows of ``conditions`` (the unfinished ones) from a training frame."""
+    if not conditions:
+        return df
+    return df[~df[_exp_col(df)].astype(str).isin(conditions)]
 
 
 def _write_predictions(

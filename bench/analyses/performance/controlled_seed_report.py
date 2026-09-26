@@ -16,7 +16,8 @@ estimator, then emits these deterministic, report-ready tables:
 * ``seed_player_index``: one row per available ``(seed, player_id)`` page.
 * ``game_player_rank``: each controlled player's in-game rank by weighted
   victory probability (1 is the strongest; ties share the better rank), for
-  the seat pages' game lists.
+  the seat pages' game lists and the Game Log. It covers conditions below the
+  global ``min_condition_completeness`` too; the other tables leave them out.
 
 The renderer completes the global row/column grid and leaves unobserved
 combinations blank; this module emits only observed combinations. Ordering and
@@ -182,6 +183,19 @@ class PerformanceControlledSeedReport(Analysis):
         vanilla_label = ctx.catalog.vanilla_label
 
         rows = self._load_rows(ctx, table_id, baseline_experiment)
+        # Every controlled game gets ranks, including games of unfinished
+        # conditions (the Game Log lists them). The rest of the report drops those.
+        ranks = rows[RANK_COLUMNS].sort_values(
+            ["game_id", "player_id"], kind="mergesort"
+        ).reset_index(drop=True)
+        rows = rows[
+            ~rows["experiment"].astype(str).isin(ctx.incomplete_conditions())
+        ].copy()
+        if rows.empty:
+            raise AnalysisError(
+                f"performance.controlled_seed_report '{stage}': every controlled "
+                "condition is below data.filter.min_condition_completeness."
+            )
         rows["strategist"], rows["condition_key"] = self._identities(
             ctx, spec, rows, vanilla_label, baseline_experiment
         )
@@ -209,9 +223,6 @@ class PerformanceControlledSeedReport(Analysis):
             kind="mergesort",
         ).reset_index(drop=True)
         index = self._index_table(rows, probability, vanilla_label)
-        ranks = rows[RANK_COLUMNS].sort_values(
-            ["game_id", "player_id"], kind="mergesort"
-        ).reset_index(drop=True)
 
         strategist_order = order_strategists(
             ctx.catalog, [s for s in summary["strategist"].unique() if s != vanilla_label]
