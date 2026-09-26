@@ -52,6 +52,15 @@ class Catalog:
             key=lambda item: len(item[1].get("suffix", "")),
             reverse=True,
         )
+        for model in self._strategist_models:
+            flag = model.get("estimate_reasoning", False)
+            if not isinstance(flag, bool):
+                from bench.config.errors import ConfigError
+
+                raise ConfigError(
+                    f"models.json strategist_models '{model.get('id')}'.estimate_reasoning "
+                    f"must be true or false, got {flag!r}."
+                )
 
     # ── construction ────────────────────────────────────────────────────────
     @classmethod
@@ -351,6 +360,12 @@ class Catalog:
             if p:
                 pricing[model["id"]] = p
         return pricing
+
+    def reasoning_estimate_models(self) -> set[str]:
+        """Model ids whose missing reasoning tokens are estimated from sibling calls."""
+        return {
+            m["id"] for m in self.strategist_models() if m.get("estimate_reasoning", False)
+        }
 
     def strategist_model_colors(self) -> dict:
         return {m["id"]: m["color"] for m in self.strategist_models()}

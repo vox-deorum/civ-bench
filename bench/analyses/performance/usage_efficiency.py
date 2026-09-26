@@ -10,7 +10,8 @@ import pandas as pd
 from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
 from bench.analyses.errors import AnalysisError
 from bench.analyses.performance.usage import (
-    COST_NOTE, compute_game_costs, plot_usage_figures, summarize_game_costs,
+    COST_NOTE, compute_game_costs, plot_usage_figures, reasoning_estimate_note,
+    summarize_game_costs,
 )
 
 
@@ -83,7 +84,10 @@ class PerformanceUsageEfficiency(Analysis):
             )
 
         tokens = ctx.apply_filter(ctx.load_table("tokens"))
-        usage = summarize_game_costs(compute_game_costs(tokens, ctx.catalog), ["player_type"])
+        records = compute_game_costs(tokens, ctx.catalog)
+        estimated_models = sorted(records.loc[records["reasoning_estimated"], "model"].unique())
+        reasoning_note = reasoning_estimate_note(estimated_models)
+        usage = summarize_game_costs(records, ["player_type"])
         baselines = {ctx.catalog.vanilla_label, ctx.catalog.null_label}
         baseline_mask = usage["player_type"].astype(str).isin(baselines)
         nonbaseline = usage[~baseline_mask].copy()
@@ -113,7 +117,7 @@ class PerformanceUsageEfficiency(Analysis):
         figures = plot_usage_figures(nonbaseline, ctx, ratings, currency=currency)
         fig = self._plot(
             table, ctx, spec, currency, log_x, annotate, fits,
-            baseline_elo, baseline_name, null_baseline_elo,
+            baseline_elo, baseline_name, null_baseline_elo, reasoning_note,
         )
         if fig is not None:
             figures["usage_vs_rating"] = fig
@@ -146,6 +150,8 @@ class PerformanceUsageEfficiency(Analysis):
             "usage_skill_fits": fits, "baseline_elo": baseline_elo, "baseline_name": baseline_name,
             "null_baseline_elo": null_baseline_elo,
         }
+        if estimated_models:
+            metadata["reasoning_estimated_models"] = estimated_models
         return AnalysisResult(
             tables={"usage": usage, "usage_vs_rating": table}, figures=figures,
             summary=summary, metadata=metadata,
@@ -154,7 +160,7 @@ class PerformanceUsageEfficiency(Analysis):
     @staticmethod
     def _plot(
         table, ctx, spec, currency, log_x, annotate, fits,
-        baseline_elo, baseline_name, null_baseline_elo=None,
+        baseline_elo, baseline_name, null_baseline_elo=None, reasoning_note="",
     ):
         import plotly.graph_objects as go
 
@@ -182,7 +188,8 @@ class PerformanceUsageEfficiency(Analysis):
             annotations = [{
                 "x": 0, "y": -0.19, "xref": "paper", "yref": "paper", "xanchor": "left",
                 "text": "Hover for details. Select a resource above. Click legend entries to filter.<br>"
-                        "Costs exclude cache discounts. Output includes reasoning tokens.",
+                        "Costs exclude cache discounts. Output includes reasoning tokens."
+                        + (f"<br>{escape(reasoning_note)}" if reasoning_note else ""),
                 "showarrow": False, "align": "left", "font": {"size": 11},
             }, {
                 "x": 1, "y": baseline_elo, "xref": "paper", "yref": "y", "xanchor": "right",
@@ -288,7 +295,8 @@ class PerformanceUsageEfficiency(Analysis):
                           "xanchor": "left", "yanchor": "top", "active": 0}],
             meta={"table_tooltip": {
                 "title_index": 0, "subtitle_index": 1,
-                "note": "Averages per player per game. Counts are player-games for the selected resource. Output includes reasoning.",
+                "note": "Averages per player per game. Counts are player-games for the selected resource. Output includes reasoning."
+                        + (f" {reasoning_note}" if reasoning_note else ""),
                 "rows": [
                     {"label": "Elo", "index": 2, "emphasis": True},
                     {"label": "Elo above fit", "index": 4, "emphasis": True},

@@ -38,6 +38,8 @@ MODEL_TOKEN_FIELDNAMES = [
     "input_tokens",
     "reasoning_tokens",
     "output_tokens",
+    "reasoning_recorded_tokens",
+    "reasoning_recorded_output_tokens",
     "total_tokens",
     "tool_count",
     "focus_briefer_count",
@@ -52,6 +54,9 @@ VANILLA_MODEL_BASE = "vanilla"
 UNATTRIBUTED_MODEL_NAME = "Unattributed"
 UNATTRIBUTED_MODEL_BASE = "unattributed"
 OTEL_ERROR_STATUS_CODE = 2
+# A call counts as having fully reported reasoning when its reasoning tokens
+# exceed this multiple of its output tokens.
+RECORDED_REASONING_MIN_RATIO = 0.5
 
 PLAYER_TRACE_PATTERN = re.compile(
     r"^(?P<game_id>[0-9a-f-]+)-player-(?P<player_id>\d+)\.db$",
@@ -194,6 +199,8 @@ def _get_or_create_model_row(
             "input_tokens": 0,
             "reasoning_tokens": 0,
             "output_tokens": 0,
+            "reasoning_recorded_tokens": 0,
+            "reasoning_recorded_output_tokens": 0,
             "tool_count": 0,
             "focus_briefer_count": 0,
             "valid_turn_count": valid_turn_count,
@@ -241,6 +248,8 @@ def _build_zero_token_row(
         "input_tokens": 0,
         "reasoning_tokens": 0,
         "output_tokens": 0,
+        "reasoning_recorded_tokens": 0,
+        "reasoning_recorded_output_tokens": 0,
         "total_tokens": 0,
         "tool_count": 0,
         "focus_briefer_count": 0,
@@ -323,6 +332,11 @@ def extract_player_model_token_rows(
         row["input_tokens"] += span["input_tokens"]
         row["reasoning_tokens"] += span["reasoning_tokens"]
         row["output_tokens"] += span["output_tokens"]
+        # Tokens from calls whose reasoning looks fully reported; the usage
+        # layer uses them to estimate reasoning that some providers drop.
+        if span["reasoning_tokens"] > RECORDED_REASONING_MIN_RATIO * span["output_tokens"]:
+            row["reasoning_recorded_tokens"] += span["reasoning_tokens"]
+            row["reasoning_recorded_output_tokens"] += span["output_tokens"]
         row["_agent_names"].add(_extract_agent_name(span["name"], span["agent_name"]))
 
     for span in spans:
@@ -370,6 +384,8 @@ def extract_player_model_token_rows(
             "input_tokens": row["input_tokens"],
             "reasoning_tokens": row["reasoning_tokens"],
             "output_tokens": row["output_tokens"],
+            "reasoning_recorded_tokens": row["reasoning_recorded_tokens"],
+            "reasoning_recorded_output_tokens": row["reasoning_recorded_output_tokens"],
             "total_tokens": row["input_tokens"] + row["reasoning_tokens"] + row["output_tokens"],
             "tool_count": row["tool_count"],
             "focus_briefer_count": row["focus_briefer_count"],

@@ -871,6 +871,21 @@ player in a game are summed
 before averaging across complete player-game records. Output tokens include
 reasoning. Token averages remain available when pricing is unknown; cost averages
 require complete telemetry and known prices. Costs exclude cache discounts.
+
+Some providers report reasoning tokens on only part of a model's calls. Setting
+`"estimate_reasoning": true` on a `strategist_models` entry in
+`configs/models.json` fills in the gap for that model. A call counts as fully
+reported when its reasoning tokens are more than 0.5 times its output tokens. The
+tokens table records `reasoning_recorded_tokens` and
+`reasoning_recorded_output_tokens`, the reasoning and output tokens from those
+calls. The ratio `sum(reasoning_recorded_tokens) / sum(reasoning_recorded_output_tokens)`
+is pooled over all of the model's rows. Each row's reasoning becomes
+`reasoning_recorded_tokens + ratio * (output_tokens - reasoning_recorded_output_tokens)`,
+so partly reported reasoning on the other calls is replaced, not added to.
+Token and cost figures both use the estimate, the canonical table keeps the raw
+values, and the interactive chart notes which models were estimated. A model with no recorded
+reasoning keeps its raw values. The flag must be a boolean. Tables extracted
+before this column existed are rebuilt automatically by `civ-bench extract`.
 The `usage` table includes unrated identities and baselines. Charts omit the
 Vanilla and Null baselines, and `usage_vs_rating` contains only rated identities.
 All three static charts follow the same Elo ordering, with unrated identities

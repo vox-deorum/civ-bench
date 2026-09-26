@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from bench.analyses.errors import AnalysisError
+
 
 COST_NOTE = (
     "Costs do not account for cached tokens or cache discounts. "
@@ -22,12 +24,62 @@ def _complete_sum(s: pd.Series) -> float:
     return float(s.sum()) if s.notna().all() else float("nan")
 
 
+def reasoning_estimate_note(models: list[str]) -> str:
+    """Describe which models have estimated reasoning tokens, or return ''."""
+    if not models:
+        return ""
+    names = ", ".join(models)
+    return (
+        f"Reasoning tokens for {names} are estimated from the model's calls "
+        "that recorded reasoning, scaled by output tokens."
+    )
+
+
+def _estimate_missing_reasoning(df: pd.DataFrame, catalog) -> pd.Series:
+    """Fill in reasoning for flagged models; return a per-row estimated flag.
+
+    Some providers report reasoning on only part of a model's calls. For a model
+    with ``estimate_reasoning`` set in the catalog, the reasoning-per-output ratio
+    is pooled over every call whose reasoning looks fully reported (see
+    ``RECORDED_REASONING_MIN_RATIO`` in the token extractor). The other calls'
+    reasoning is replaced by that ratio times their output.
+    """
+    estimated = pd.Series(False, index=df.index)
+    flagged = catalog.reasoning_estimate_models()
+    present = sorted(set(df["model"]) & flagged)
+    if not present:
+        return estimated
+    columns = ["reasoning_recorded_tokens", "reasoning_recorded_output_tokens"]
+    missing = [column for column in columns if column not in df.columns]
+    if missing:
+        raise AnalysisError(
+            f"Reasoning estimates for {', '.join(present)} need the {missing} "
+            "columns in the tokens table. Re-run `civ-bench extract` to rebuild it."
+        )
+    reasoning = pd.to_numeric(df["reasoning_tokens"], errors="coerce").astype(float)
+    output = pd.to_numeric(df["output_tokens"], errors="coerce")
+    recorded = pd.to_numeric(df[columns[0]], errors="coerce").fillna(0)
+    recorded_output = pd.to_numeric(df[columns[1]], errors="coerce").fillna(0)
+    missing_output = (output - recorded_output).clip(lower=0).fillna(0)
+    df["reasoning_tokens"] = reasoning
+    for model in present:
+        rows = df["model"] == model
+        denominator = recorded_output[rows].sum()
+        if denominator <= 0:
+            continue
+        ratio = recorded[rows].sum() / denominator
+        df.loc[rows, "reasoning_tokens"] = recorded[rows] + ratio * missing_output[rows]
+        estimated |= rows & (missing_output > 0)
+    return estimated
+
+
 def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
     """Price token rows and aggregate them to model/player/game records."""
     pricing = catalog.pricing_per_million()
     df = tokens_df.copy()
     names = df["model_name"].where(df["model_name"].notna(), "Unattributed")
     df["model"] = names.astype(str).apply(catalog.canonicalize_model_name)
+    df["reasoning_estimated"] = _estimate_missing_reasoning(df, catalog)
 
     def numeric_column(name: str) -> pd.Series:
         if name not in df.columns:
@@ -60,6 +112,7 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
         total_cost=("row_cost", _complete_sum),
         input_per_million=("input_per_million", "first"),
         output_per_million=("output_per_million", "first"),
+        reasoning_estimated=("reasoning_estimated", "any"),
     )
     per_game["token_available"] = per_game[
         ["input_tokens", "combined_output_tokens"]
