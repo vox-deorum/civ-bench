@@ -583,7 +583,11 @@
       "cal_reliability",
       "perf_strength",
       "perf_experiment_completeness",
-      "perf_usage_efficiency"
+      "perf_usage_efficiency",
+      "beh_flavors",
+      "beh_diplomacy",
+      "beh_commitment",
+      "beh_policies"
     ],
     "section_overrides": {},
     "title": null,
