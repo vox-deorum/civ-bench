@@ -209,10 +209,15 @@ class BehaviorPolicies(BehaviorAnalysis):
         }
         if matched_maps is not None:
             metadata["matched_maps"] = matched_maps
-        names = {adopted(b): f"{_info(b)[0]} adoption (%)" for b in branches}
+        ideology_metrics = {
+            _info(b)[1]: adopted(b) for b in branches if _info(b)[2] == "Ideology"
+        }
         return AnalysisResult(
             tables=out.tables,
-            summary=self.heatmap_headline(ctx, out, views, "adoption", names, decimals=0),
+            summary=self.top_condition_summary(
+                out.summaries.get(("adoption", C.ABSOLUTE)), ideology_metrics,
+                {ctx.catalog.null_label, ctx.catalog.vanilla_label},
+            ) or "No ideology adoptions were recorded.",
             metadata=metadata,
         )
 

@@ -390,6 +390,31 @@ class BehaviorAnalysis(Analysis):
             )
         return "No player had values for the selected behavior metrics."
 
+    def top_condition_summary(self, table: pd.DataFrame | None, metrics: dict[str, str],
+                              skip_labels: set[str]) -> str:
+        """List the condition with the highest absolute mean for each metric."""
+        if table is None or table.empty:
+            return ""
+        candidates = table
+        if "row_kind" in candidates.columns:
+            candidates = candidates[candidates["row_kind"] != "baseline"]
+        candidates = candidates[~candidates[self.by].astype(str).isin(skip_labels)]
+        strong = candidates[candidates["n_players"] >= 3]
+        if not strong.empty:
+            candidates = strong
+        parts = []
+        for label, metric in metrics.items():
+            rows = candidates[candidates["metric"] == metric].dropna(subset=["mean"])
+            if rows.empty:
+                continue
+            top = rows[rows["mean"] == rows["mean"].max()]
+            names = list(dict.fromkeys(
+                str(condition).strip() or str(row_label)
+                for condition, row_label in zip(top.get("condition", ""), top["row_label"])
+            ))
+            parts.append(f"{label}: **{' / '.join(names)}**")
+        return " · ".join(parts)
+
 
 def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: list[str],
                        label: str, by: str, groups: dict | None, fixed: dict | None,

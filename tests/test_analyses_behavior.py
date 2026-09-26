@@ -667,6 +667,8 @@ def test_commitment_defaults_to_the_completed_baseline(behavior_env):
 
 def test_commitment_grand_strategy_view_reads_like_the_focus_tab(behavior_env):
     result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
+    assert "Dom: **" in result.summary and "Cult: **" in result.summary
+    assert "Sci: **" in result.summary
     table = _table(result, "grand_strategy")
     main = table[table["metric"] == "gs_main"].set_index("player_type")
     # Conquest and Culture tie at 50%; schema order picks Conquest.
@@ -717,6 +719,8 @@ def test_earliest_branch_uses_turns_and_none():
 
 def test_policies_views(behavior_env):
     result, _ = behavior_env("behavior.policies", {"baseline": BASELINE, "bootstrap_n": 20})
+    assert "Free: **" in result.summary and "Ord: **" in result.summary
+    assert "Trad:" not in result.summary
     rel = _table(result, "adoption_relative")
     # Seat 0 in the baseline always adopts order and never freedom.
     assert _cell(rel, LLM, "adopted_freedom") == pytest.approx(100.0)

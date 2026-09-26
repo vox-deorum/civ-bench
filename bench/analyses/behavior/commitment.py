@@ -239,12 +239,17 @@ class BehaviorCommitment(BehaviorAnalysis):
             metadata["matched_maps"] = tabs
         if turn_range is not None:
             metadata["turn_range"] = list(turn_range)
-        summary = (self.heatmap_headline(ctx, out, views, "commitment", names,
-                                         column_decimals={m: v[3] for m, v in info.items()})
-                   if steering and not views.absolute.empty else "")
+        victory_metrics = {
+            S.GRAND_STRATEGY_INFO[s][1]: strategy_column(s)
+            for s in strategies if s in S.GRAND_STRATEGY_INFO
+        }
+        summary = self.top_condition_summary(
+            out.tables.get("grand_strategy"), victory_metrics,
+            {ctx.catalog.null_label, ctx.catalog.vanilla_label},
+        )
         return AnalysisResult(
             tables=out.tables,
-            summary=summary or "No strategist had commitment values.",
+            summary=summary or "No strategist had grand-strategy values.",
             metadata=metadata,
         )
 
