@@ -270,4 +270,6 @@ class BehaviorDiplomacy(BehaviorAnalysis):
             pd.concat([table, masked], ignore_index=True),
             {"Friendliest": "stance_net_avg", "Least friendly": "stance_net_avg", "Most masked": "masked"},
             {ctx.catalog.null_label, ctx.catalog.vanilla_label}, lowest=("Least friendly",),
+            formats={"Friendliest": "{:+.1f} net", "Least friendly": "{:+.1f} net",
+                     "Most masked": "{:.1f}%"},
         )

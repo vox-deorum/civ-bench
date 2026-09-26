@@ -322,7 +322,7 @@ def test_condition_pairing_labels_rows_like_matched_maps(behavior_env, tmp_path)
     # Headlines name the strategist with its condition, not the condition alone.
     diplomacy, _ = behavior_env("behavior.diplomacy", {"bootstrap_n": 20, "condition_pairing": pairing},
                                 sid="d")
-    assert diplomacy.summary.startswith(f"Friendliest: **{LLM} | Base**")
+    assert diplomacy.summary.startswith(f"**Friendliest**: {LLM} | Base (")
 
 
 def test_rate_normalizes_counts_by_turns_alive(behavior_env, tmp_path):
@@ -346,7 +346,7 @@ def test_baseline_defaults_to_the_strength_stage(behavior_env):
                              adjust_baseline=BASELINE)
     assert result.metadata["baseline_experiments"] == [BASELINE]
     assert result.metadata["views"]["relative"]["tip"] == "Relative to matched in-game AI"
-    assert result.summary.startswith("Friendliest: **")
+    assert result.summary.startswith("**Friendliest**: ")
 
 
 @pytest.mark.parametrize("module, params, kwargs, note, declared", [
@@ -573,7 +573,8 @@ def test_diplomacy_stance_table_sits_outside_the_views(behavior_env):
     assert not any("relationship_targets" in set(_table(result, n)["metric"])
                    for n in result.table_paths if n.startswith(("stance", "diplomacy_")))
     assert result.summary == (
-        f"Friendliest: **{LLM}** · Least friendly: **{LLM}** · Most masked: **{LLM}**"
+        f"**Friendliest**: {LLM} (+5.0 net) · **Least friendly**: {LLM} (+5.0 net) · "
+        f"**Most masked**: {LLM} (30.0%)"
     )
 
 
@@ -673,8 +674,8 @@ def test_commitment_defaults_to_the_completed_baseline(behavior_env):
 
 def test_commitment_grand_strategy_view_reads_like_the_focus_tab(behavior_env):
     result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
-    assert "Domination: **" in result.summary and "Culture: **" in result.summary
-    assert "Science: **" in result.summary
+    assert "**Domination**: " in result.summary and "**Culture**: " in result.summary
+    assert "**Science**: " in result.summary and "%)" in result.summary
     table = _table(result, "grand_strategy")
     main = table[table["metric"] == "gs_main"].set_index("player_type")
     # Conquest and Culture tie at 50%; schema order picks Conquest.
@@ -725,8 +726,8 @@ def test_earliest_branch_uses_turns_and_none():
 
 def test_policies_views(behavior_env):
     result, _ = behavior_env("behavior.policies", {"baseline": BASELINE, "bootstrap_n": 20})
-    assert "Freedom: **" in result.summary and "Order: **" in result.summary
-    assert "Tradition:" not in result.summary
+    assert "**Freedom**: " in result.summary and "**Order**: " in result.summary
+    assert "Tradition" not in result.summary
     rel = _table(result, "adoption_relative")
     # Seat 0 in the baseline always adopts order and never freedom.
     assert _cell(rel, LLM, "adopted_freedom") == pytest.approx(100.0)

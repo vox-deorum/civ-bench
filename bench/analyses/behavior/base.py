@@ -391,10 +391,12 @@ class BehaviorAnalysis(Analysis):
         return "No player had values for the selected behavior metrics."
 
     def top_row_summary(self, table: pd.DataFrame | None, metrics: dict[str, str],
-                        skip_labels: set[str], lowest: tuple[str, ...] = ()) -> str:
+                        skip_labels: set[str], lowest: tuple[str, ...] = (),
+                        formats: dict[str, str] | None = None) -> str:
         """List the row (strategist and condition) with the highest mean for each metric.
 
-        Labels in ``lowest`` pick the lowest mean instead.
+        Labels in ``lowest`` pick the lowest mean instead. ``formats`` maps a
+        label to the value's format; the default reads the mean as a percent.
         """
         if table is None or table.empty:
             return ""
@@ -412,7 +414,8 @@ class BehaviorAnalysis(Analysis):
                 continue
             best = rows["mean"].min() if label in lowest else rows["mean"].max()
             names = list(dict.fromkeys(rows.loc[rows["mean"] == best, "row_label"].astype(str)))
-            parts.append(f"{label}: **{' / '.join(names)}**")
+            value = (formats or {}).get(label, "{:.0f}%").format(best)
+            parts.append(f"**{label}**: {' / '.join(names)} ({value})")
         return " · ".join(parts)
 
 
