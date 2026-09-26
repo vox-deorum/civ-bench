@@ -377,18 +377,16 @@ class BehaviorAnalysis(Analysis):
                 continue
             score = (table["color_position"] - 0.5).abs()
             best = table.loc[score.idxmax()]
-            row, name = best["row_label"], names[best["metric"]]
+            row, name = best["row_label"], lower(names[best["metric"]])
             places = int((column_decimals or {}).get(best["metric"], decimals))
             if view == C.RELATIVE:
                 return (
-                    f"Against the {views.baseline.label} on the same map and seat, the largest "
-                    f"departure is **{row}** on {name} (**{best['mean']:+.{places}f}**), across "
-                    f"**{len(views.relative)}** controlled players."
+                    f"Against the {views.baseline.label}, the largest "
+                    f"departure is **{row}** on **{name} (**{best['mean']:+.{places}f}**)."
                 )
             return (
-                f"The most distinctive value is **{row}** on {name} "
-                f"(**{best['mean']:.{places}f}**), across **{len(views.absolute)}** players in "
-                f"**{views.absolute['game_id'].nunique()}** games."
+                f"The most distinctive value is **{row}** on **{name}** "
+                f"(**{best['mean']:.{places}f}**)."
             )
         return "No player had values for the selected behavior metrics."
 
