@@ -477,10 +477,53 @@ def test_adjusted_curves_match_the_strength_adjustment(params):
             assert (strategist, "") not in curves
             continue
         points = curves[(strategist, "")]
-        assert len(points) == GRID_POINTS
+        # The running rating starts after the default turn_progress_min of 0.2.
+        assert [x for x, _v, _n in points] == [float(x) for x in grid if x > 0.2]
         assert {n for _x, _v, n in points} == {1}
         want = round(float(expected[("t1", player_id)]), 6)
         assert {v for _x, v, _n in points} == {want}
+
+
+@pytest.mark.parametrize("weight", ["turn_progress", "uniform"])
+def test_adjusted_curves_are_the_running_rating(weight):
+    from types import SimpleNamespace
+
+    from bench.adjust.strength import cell_adjust_rows
+    from bench.analyses.performance.curves import adjusted_curves
+
+    # A's probability climbs from 0.1 to 0.5; every other seat is flat. Each
+    # point must equal the strength adjustment of A's weighted average so far.
+    params = {"baseline_experiment": "base", "weight": weight}
+    seats = [
+        ("b1", "base", 0, "Vanilla", 0.2, 0.2), ("b1", "base", 1, "Vanilla", 0.3, 0.3),
+        ("t1", "exp", 0, "A", 0.1, 0.5), ("t1", "exp", 1, "Vanilla", 0.25, 0.25),
+    ]
+    pool = pd.DataFrame([
+        {"game_id": g, "experiment": e, "player_id": pid, "player_type": pt,
+         "seed": 1, "seating_rotation": 0, "turn_progress": x,
+         "predicted_win_probability": p}
+        for g, e, pid, pt, start, end in seats for x, p in ((0.0, start), (1.0, end))
+    ])
+    pool["strategist"] = pool["player_type"]
+    pool["condition"] = ""
+    catalog = SimpleNamespace(vanilla_label="Vanilla")
+    grid = np.round(np.arange(GRID_POINTS) / (GRID_POINTS - 1), 10)
+    shown = pool[pool["game_id"] == "t1"]
+    curves = adjusted_curves(shown, pool, grid, ["strategist", "condition"], catalog, params)
+    points = {round(x, 2): v for x, v, _n in curves[("A", "")]}
+
+    rows = pool.drop_duplicates(["game_id", "player_id"]).assign(
+        controlled=True, is_winner=0
+    )
+    for t in (0.21, 0.5, 1.0):
+        window = grid[(grid > 0.2) & (grid <= t + 1e-9)]
+        weights = np.ones(window.size) if weight == "uniform" else window
+        running = float(np.sum(weights * (0.1 + 0.4 * window)) / np.sum(weights))
+        at_t = rows.assign(weighted_strength=[0.2, 0.3, running, 0.25])
+        expected = cell_adjust_rows(at_t, catalog, params, enforce_winner=False)
+        want = expected.set_index(["game_id", "player_id"])["adjusted_strength"][("t1", 0)]
+        assert points[t] == pytest.approx(float(want), abs=1e-6)
+    assert min(points) == 0.21
 
 
 def test_single_point_run_contributes_nothing():

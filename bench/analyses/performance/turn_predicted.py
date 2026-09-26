@@ -69,10 +69,11 @@ _CHART_HELP = (
 )
 
 RELATIVE_HELP = (
-    "Adjusted strength over the game, the scale the ratings use. At each "
-    "progress point, every run's victory probability goes through the "
-    "strength stage's adjustment against the mean VPAI self-play value on the "
-    "same map and seat, so 0.5 means level with VPAI from the same start. A "
+    "Adjusted strength over the game, the scale the ratings use. Each point is "
+    "the rating a run would get if the game ended there: its victory "
+    "probability averaged up to that point the way the rating averages it, "
+    "compared with the mean VPAI self-play value on the same map and "
+    "seat, so 0.5 means level with VPAI from the same start. A "
     "strategist can sit above 0.5 here with a low absolute probability when it "
     "drew hard seats. Only controlled games count, and winner enforcement is "
     "off so the final outcome does not lift a whole curve. Checkbox choices "

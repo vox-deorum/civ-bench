@@ -766,14 +766,18 @@ validation rejects it. Key behavior:
   seats of the same identity contributes two runs. Each run is interpolated
   onto a fixed 101-point turn-progress grid (0 to 1), and each grid point
   averages the runs that cover it (`n_runs`).
-- **Adjusted-strength curves.** On a controlled design, each controlled run's
-  interpolated probability at every grid point goes through the strength
-  stage's own controlled adjustment (`cell_adjust_rows` in
+- **Adjusted-strength curves.** On a controlled design, each point is a
+  running rating: at grid point `t`, each controlled run's interpolated
+  probability is averaged over the grid points in `(turn_progress_min, t]`
+  with the strength stage's `weight`, and that average goes through the
+  strength stage's own controlled adjustment (`cell_adjust_rows` in
   `bench/adjust/strength.py`, the code `build_strength_panel` uses) with that
   stage's `params`: `relative_to`, the clipped logit, the matched start-cell
   VPAI baseline (explicit with `baseline_experiment`, otherwise implicit per
   experiment), the inverse logit of the difference, and `post_cell_normalize`.
-  The curve is adjusted strength over the game, where 0.5 is level with the
+  The curve is the adjusted strength the run would get if the game ended at
+  `t`, so its last point approximates the panel value (winner enforcement
+  aside) and it starts after `turn_progress_min`. 0.5 is level with the
   matched VPAI baseline. Winner enforcement is off, since the final outcome
   would otherwise lift the winner's whole curve. The baseline reads every
   seat of the unfiltered games, as the strength stage does; runs without a
@@ -826,7 +830,7 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
   panel or strength records per `(game_id, player_id)`. Runs are unique
   `game_id`s.
 - **Adjusted-strength curves.** `seed_player_adjusted` holds the same keys
-  after the strength stage's controlled adjustment at every grid point,
+  as running adjusted strength at every grid point after `turn_progress_min`,
   computed exactly as for `performance.turn_predicted` (above) over every seat
   of the controlled games (`mean_adjusted_strength`, 0.5 is level with the
   matched VPAI baseline). Seat pages show it as the Relative tab.

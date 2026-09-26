@@ -71,10 +71,11 @@ CONTROLLED_SEED_RANK_TABLE = "game_player_rank"
 
 # The seat pages' Relative view, in the same words as the trends section.
 SEAT_RELATIVE_HELP = (
-    "Adjusted strength over the game, the scale the ratings use. At each "
-    "progress point, every run's victory probability goes through the "
-    "strength stage's adjustment against the mean VPAI self-play value on "
-    "this map and seat, so 0.5 means level with VPAI from the same start. "
+    "Adjusted strength over the game, the scale the ratings use. Each point is "
+    "the rating a run would get if the game ended there: its victory "
+    "probability averaged up to that point the way the rating averages it, "
+    "compared with the mean VPAI self-play value on this map and "
+    "seat, so 0.5 means level with VPAI from the same start. "
     "Winner enforcement is off so the final outcome does not lift a whole "
     "curve. Checkbox choices apply to both views."
 )

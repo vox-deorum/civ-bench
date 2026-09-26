@@ -204,22 +204,26 @@ def adjusted_curves(
     catalog,
     strength_params: dict | None,
 ) -> dict[tuple, list[tuple[float, float, int]]] | None:
-    """Mean adjusted-strength curve per ``keys`` cell (the Relative view).
+    """Mean running adjusted-strength curve per ``keys`` cell (the Relative view).
 
-    At every grid point, each controlled run's interpolated probability takes
-    the place of ``weighted_strength`` and goes through the strength stage's
-    own controlled adjustment (:func:`bench.adjust.strength.cell_adjust_rows`)
-    with that stage's ``params``: leader normalization when ``relative_to`` is
-    set, the clipped logit, the matched start-cell VPAI baseline, the inverse
-    logit of the difference, and ``post_cell_normalize``. 0.5 means level with
-    the matched baseline. Winner enforcement is off, since the final outcome
-    would otherwise lift the winner's whole curve. ``pool`` holds every seat
-    of the candidate games (so the baseline and game leaders are complete) with
-    :data:`ADJUST_COLUMNS`; ``runs`` names the displayed runs and their
-    ``keys``. Runs without a matched baseline are left out. Returns ``None``
-    when the strength params turn the cell adjustment off.
+    At every grid point ``t``, each controlled run's ``weighted_strength`` is
+    its interpolated probability averaged over the grid points in
+    ``(turn_progress_min, t]``, weighted like the strength stage (``weight``).
+    That value goes through the strength stage's own controlled adjustment
+    (:func:`bench.adjust.strength.cell_adjust_rows`) with that stage's
+    ``params``: leader normalization when ``relative_to`` is set, the clipped
+    logit, the matched start-cell VPAI baseline, the inverse logit of the
+    difference, and ``post_cell_normalize``. The curve is therefore the
+    rating's adjusted strength if the game ended at ``t``; its last point
+    approximates the panel value, and it starts after ``turn_progress_min``.
+    0.5 means level with the matched baseline. Winner enforcement is off,
+    since the final outcome would otherwise lift the winner's whole curve.
+    ``pool`` holds every seat of the candidate games (so the baseline and game
+    leaders are complete) with :data:`ADJUST_COLUMNS`; ``runs`` names the
+    displayed runs and their ``keys``. Runs without a matched baseline are left
+    out. Returns ``None`` when the strength params turn the cell adjustment off.
     """
-    from ...adjust.strength import cell_adjust_rows
+    from ...adjust.strength import DEFAULT_PARAMS, cell_adjust_rows
 
     seed = pool["seed"].fillna(-1)
     rotation = pool["seating_rotation"].fillna(-1)
@@ -242,6 +246,16 @@ def adjusted_curves(
     frame["controlled"] = True
     frame["is_winner"] = 0
     covers, values = np.array(covers), np.array(values)
+
+    # Running weighted average inside the rating's window, as _weighted_strength does.
+    p = {**DEFAULT_PARAMS, **(strength_params or {})}
+    weights = np.ones(grid.size) if p["weight"] == "uniform" else grid.astype(float)
+    inside = covers & (grid > p["turn_progress_min"])
+    weight_sums = np.cumsum(np.where(inside, weights, 0.0), axis=1)
+    running_sums = np.cumsum(np.where(inside, values * weights, 0.0), axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        values = running_sums / weight_sums
+    covers = covers & (weight_sums > 0)
 
     shown = runs.drop_duplicates(["game_id", "player_id"])
     cell_of = {
