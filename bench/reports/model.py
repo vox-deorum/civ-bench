@@ -278,4 +278,7 @@ class GameLogDocument:
     metadata: dict = field(default_factory=dict)
     downloads: list[Download] = field(default_factory=list)
     replay: ReplayOptions | None = None
+    # (game_id, player_id) -> in-game rank by weighted victory probability,
+    # from the Matched Maps analysis; empty without it.
+    ranks: dict[tuple[str, int], int] = field(default_factory=dict)
     footer: str = REPORT_DEFAULT_FOOTER

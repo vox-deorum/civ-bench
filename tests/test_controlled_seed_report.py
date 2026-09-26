@@ -25,7 +25,7 @@ from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.reports import run_report
 from bench.reports.controlled_seed import render_controlled_seed_site
-from bench.reports.game_log import render_seat_games
+from bench.reports.game_log import render_game_log_page, render_seat_games
 from bench.reports.model import ControlledSeedDocument, GameLogDocument, MatchedMapTab
 from bench.reports.runner import report_dir
 
@@ -1102,7 +1102,7 @@ def test_game_log_links_and_seat_rows_follow_detail_filters():
     assert '<tr hidden class="game-row"' not in detail
 
 
-def test_seat_games_list_each_llm_seat_with_outcome_or_rank():
+def test_game_lists_show_each_llm_seat_with_outcome_or_rank():
     def player(game_id, player_id, civ, vanilla=False, winner=False):
         return {"game_id": game_id, "player_id": player_id, "civilization": civ,
                 "strategist": "Vanilla" if vanilla else "Model", "condition": "" if vanilla else "Base",
@@ -1111,10 +1111,12 @@ def test_seat_games_list_each_llm_seat_with_outcome_or_rank():
     game_log = GameLogDocument(
         title="t", section_id="game_log",
         games=pd.DataFrame([
-            {"game_id": "a", "seed": 1, "seating_rotation": 0, "date_utc": "2026-09-18",
+            {"game_id": "a", "label": "Model | Base", "controlled": True, "seed": 1,
+             "seating_rotation": 0, "date_utc": "2026-09-18",
              "victory_type": "Science", "winner_player_id": 1, "winner_civilization": "Arabia",
              "winner_is_vanilla": False},
-            {"game_id": "b", "seed": 1, "seating_rotation": 1, "date_utc": "2026-09-19",
+            {"game_id": "b", "label": "Model | Base", "controlled": True, "seed": 1,
+             "seating_rotation": 1, "date_utc": "2026-09-19",
              "victory_type": "Cultural", "winner_player_id": 0, "winner_civilization": "Siam",
              "winner_is_vanilla": True},
         ]),
@@ -1124,8 +1126,9 @@ def test_seat_games_list_each_llm_seat_with_outcome_or_rank():
             player("b", 0, "Siam", vanilla=True, winner=True), player("b", 1, "Arabia"),
         ]),
         metadata={"vanilla_label": "Vanilla"},
+        ranks={("a", 1): 1, ("a", 5): 4, ("a", 0): 2},
     )
-    html = render_seat_games(game_log, 1, 0, ranks={("a", 1): 1, ("a", 5): 4, ("a", 0): 2})
+    html = render_seat_games(game_log, 1, 0)
     assert "<th>Seat 1</th><th>Seat 2</th><th>Victory</th>" in html
     assert "This seat" not in html
     assert "<td>P1 Arabia (Won)</td>\n<td>P5 Rome (#4)</td>" in html
@@ -1134,6 +1137,12 @@ def test_seat_games_list_each_llm_seat_with_outcome_or_rank():
     assert "<td>P1 Arabia</td>\n<td>-</td>" in html
     assert 'Cultural<span class="game-winner">Winner: Player 0 (Siam, VPAI)</span>' in html
     assert "Science</td>" in html and "Science<span" not in html
+    # The Game Log page uses the same seat cells.
+    page = render_game_log_page(game_log, [])
+    assert '<th scope="col">Seat 1</th>\n<th scope="col">Seat 2</th>' in page
+    assert ">Seats<" not in page
+    assert "<td>P1 Arabia (Won)</td>\n<td>P5 Rome (#4)</td>" in page
+    assert 'Cultural<span class="game-winner">Winner: Player 0 (Siam, VPAI)</span>' in page
 
 
 def test_renderer_escapes_labels_and_query_parameters():

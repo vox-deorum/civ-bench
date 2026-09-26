@@ -1181,11 +1181,8 @@ The chapter lives in its own directory beside the family pages:
   entry shows that entry's seat-keyed table (`flavors_by_seat` for
   `behavior.flavors`, `diplomacy_by_seat` for `behavior.diplomacy`). A tab with no rows for a seed or seat says so. Missing
   baselines and missing prediction rows are visible page notes, never fatal.
-  With the Game Log present, the page ends with the seat's game list. It
-  has one `Seat N` column per LLM seat in the game, ordered by player ID, such
-  as `P1 Arabia (Won)` or `P5 Rome (#4)`, where the number is the in-game rank
-  from `game_player_rank`. When a VPAI player won, the Victory cell names
-  the winner.
+  With the Game Log present, the page ends with the seat's game list, which
+  uses the Game Log's `Seat N` columns (§7.2).
 
 ### 7.2 Game Log and replay links
 
@@ -1195,6 +1192,12 @@ strategist, condition, seed, seat, victory, and controlled games. Matched Maps
 links to relevant Game Log rows, and the overview can show a latest-game card
 when `latest_game` is true. The Game Log is linked from those pages and is not
 added to the sidebar chapters.
+
+Like the Matched Maps seat pages, the Game Log table has one `Seat N` column
+per LLM seat, such as `P1 Arabia (Won)` or `P5 Rome (#4)`. The rank comes
+from the Matched Maps `game_player_rank` table, so it appears only for
+controlled games in a report that includes
+`performance.controlled_seed_report`.
 
 Each game with a matching save gets one replay link. The link resolves the
 relative save path under `saves/<experiment>/<game_id>.Civ5Save` against the

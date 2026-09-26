@@ -794,7 +794,7 @@ def _seat_focus_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
     return _frame(records), spec
 
 
-def _game_ranks(doc: ControlledSeedDocument) -> dict[tuple[str, int], int]:
+def game_ranks(doc: ControlledSeedDocument) -> dict[tuple[str, int], int]:
     """``(game_id, player_id) -> in-game rank`` for the seat pages' game lists."""
     table = doc.rank_table
     if table.empty:
@@ -887,8 +887,7 @@ def _render_detail(
     parts.append("</section>")
 
     if doc.game_log is not None:
-        parts.append(render_seat_games(doc.game_log, seed, player_id, prefix="../",
-                                       ranks=_game_ranks(doc)))
+        parts.append(render_seat_games(doc.game_log, seed, player_id, prefix="../"))
 
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")

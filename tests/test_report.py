@@ -206,7 +206,7 @@ def test_replay_report_copies_saves_and_renders_game_links(replay_env):
     assert parse_qs(links[0]["data-query"]) == {"player5": ["Strategist | Every-turn"], "winner": ["5"]}
     assert parse_qs(links[1]["data-query"]) == {"winner": ["0"]}
     assert "no replay" in games
-    assert "Player 5 (Persia, Won)" in games
+    assert "<td>P5 Persia (Won)</td>" in games
     assert "Winner: Player 0 (Rome, VPAI)" in games
     assert "Player 0 (Rome)" not in games
     assert 'data-seed="2"' in games and 'data-seed="-"' in games

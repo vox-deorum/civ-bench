@@ -106,7 +106,7 @@ def replay_link_html(doc: GameLogDocument, game: dict, players: list[dict],
             f'{direct}>{_esc(label)}</a>')
 
 
-def seats_text(game: dict, players: list[dict], *, include_winner: bool = True) -> str:
+def seats_text(game: dict, players: list[dict]) -> str:
     seats = []
     listed_winner = False
     for player in players:
@@ -119,7 +119,7 @@ def seats_text(game: dict, players: list[dict], *, include_winner: bool = True) 
             detail += ", Won"
         seats.append(f"Player {_number(player['player_id'])} ({detail})")
     result = " | ".join(seats)
-    if include_winner and not listed_winner and _text(game.get("winner_player_id")):
+    if not listed_winner and _text(game.get("winner_player_id")):
         winner = winner_text(game)
         result += (" · " if result else "") + winner
     return result or "-"
@@ -179,6 +179,7 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
     records = doc.games.to_dict("records")
     vanilla = str(doc.metadata.get("vanilla_label", "Vanilla"))
     rows = [(game, game_players(doc, game["game_id"])) for game in records]
+    n_seats = max((len(_llm_seats(players)) for _, players in rows), default=0)
     options = {key: set() for key in ("strategist", "condition", "seed", "player", "victory")}
     for game, players in rows:
         if _flag(game.get("controlled")):
@@ -216,7 +217,8 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
                  '<button type="reset">Reset</button></form>')
     parts.append('<div class="table-scroll"><table id="game-log-table" class="no-auto-sort"><thead><tr>')
     for key, label in (("timestamp", "Date"), ("label", "Strategist | Condition"), ("seed", "Seed"),
-                       ("rotation", "Rot"), ("turns", "Turns"), (None, "Seats"),
+                       ("rotation", "Rot"), ("turns", "Turns"),
+                       *((None, f"Seat {i}") for i in range(1, n_seats + 1)),
                        ("victory", "Victory"), (None, "Replay")):
         content = f'<button type="button" data-sort="{key}">{label}</button>' if key else label
         parts.append(f'<th scope="col">{content}</th>')
@@ -235,15 +237,9 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
                  "label": game["label"], "victory": game.get("victory_type", "")}
         parts.append('<tr ' + ' '.join(f'data-{k}="{_esc(v)}"' for k, v in attrs.items()) + '>')
         cells = [game.get("date_utc"), game["label"], attrs["seed"], attrs["rotation"],
-                 attrs["turns"], seats_text(game, players, include_winner=False)]
+                 attrs["turns"], *_seat_cells(doc, game, players, n_seats)]
         parts.extend(f'<td>{_esc(cell) or "-"}</td>' for cell in cells)
-        victory = _esc(game.get("victory_type")) or "-"
-        if _text(game.get("winner_player_id")) and not any(
-            _flag(player.get("is_winner")) and not _flag(player.get("is_vanilla"))
-            for player in players
-        ):
-            victory += f'<span class="game-winner">{_esc(winner_text(game))}</span>'
-        parts.append(f'<td>{victory}</td>')
+        parts.append(f'<td>{_victory_html(game, players)}</td>')
         parts.append(f'<td>{replay_link_html(doc, game, players)}</td></tr>')
     parts.append('</tbody></table></div>')
     links = [f'<a href="{_esc(d.rel_path)}">{_esc(d.label)}</a>' for d in doc.downloads if d.rel_path != "games.html"]
@@ -253,50 +249,64 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _seat_cell(game: dict, player: dict, ranks: dict[tuple[str, int], int]) -> str:
-    """``P1 Arabia (Won)``, ``P5 Rome (#4)``, or no suffix without a rank."""
-    player_id = int(player["player_id"])
-    text = f"P{player_id} {_text(player.get('civilization')) or 'Unknown'}"
-    rank = ranks.get((str(game["game_id"]), player_id))
-    if _flag(player.get("is_winner")):
-        return text + " (Won)"
-    return text + (f" (#{rank})" if rank is not None else "")
+def _llm_seats(players: list[dict]) -> list[dict]:
+    return [p for p in players if not _flag(p.get("is_vanilla"))]
 
 
-def render_seat_games(doc: GameLogDocument, seed: int, player_id: int, prefix: str = "../",
-                      ranks: dict[tuple[str, int], int] | None = None) -> str:
-    """The seat page's game list, one column per LLM seat of each game.
+def _seat_cells(doc: GameLogDocument, game: dict, players: list[dict], n_seats: int) -> list[str]:
+    """One cell per LLM seat, such as ``P1 Arabia (Won)`` or ``P5 Rome (#4)``.
 
-    ``ranks`` maps ``(game_id, player_id)`` to the player's in-game rank.
+    The rank comes from ``doc.ranks`` and is left out when unknown; ``-`` pads
+    games with fewer than ``n_seats`` LLM seats.
     """
+    cells = []
+    for player in _llm_seats(players):
+        player_id = int(player["player_id"])
+        text = f"P{player_id} {_text(player.get('civilization')) or 'Unknown'}"
+        rank = doc.ranks.get((str(game["game_id"]), player_id))
+        if _flag(player.get("is_winner")):
+            text += " (Won)"
+        elif rank is not None:
+            text += f" (#{rank})"
+        cells.append(text)
+    return cells + ["-"] * (n_seats - len(cells))
+
+
+def _victory_html(game: dict, players: list[dict]) -> str:
+    """The victory type, plus the winner when no LLM seat won."""
+    victory = _esc(game.get("victory_type")) or "-"
+    if _text(game.get("winner_player_id")) and not any(
+        _flag(p.get("is_winner")) for p in _llm_seats(players)
+    ):
+        victory += f'<span class="game-winner">{_esc(winner_text(game))}</span>'
+    return victory
+
+
+def render_seat_games(doc: GameLogDocument, seed: int, player_id: int, prefix: str = "../") -> str:
+    """The seat page's game list, one column per LLM seat of each game."""
     if doc.games.empty:
         return ""
-    ranks = ranks or {}
     rows = []
     for game in doc.games.loc[doc.games["seed"] == seed].to_dict("records"):
         players = game_players(doc, game["game_id"])
         seat = next((p for p in players if int(p["player_id"]) == player_id), None)
         if seat is not None:
-            seats = [p for p in players if not _flag(p.get("is_vanilla"))]
-            rows.append((game, players, seat, seats))
-    n_seats = max((len(seats) for *_, seats in rows), default=0)
+            rows.append((game, players, seat))
+    n_seats = max((len(_llm_seats(players)) for _, players, _ in rows), default=0)
     parts = ['<section aria-labelledby="games-heading"><h2 id="games-heading">Games</h2>',
              '<div class="table-scroll"><table class="seat-games"><thead><tr>',
              '<th>Date</th><th>Strategist | Condition</th><th>Rot</th>'
              + ''.join(f'<th>Seat {i}</th>' for i in range(1, n_seats + 1))
              + '<th>Victory</th><th>Replay</th>',
              '</tr></thead><tbody>']
-    for game, players, seat, seats in rows:
+    for game, players, seat in rows:
         parts.append(f'<tr class="game-row" data-strategist="{_esc(seat["strategist"])}" '
                      f'data-vanilla="{str(_flag(seat.get("is_vanilla"))).lower()}">')
         label = "VPAI" if _flag(seat.get("is_vanilla")) else player_label(seat)
         cells = [game.get("date_utc"), label, _number(game.get("seating_rotation")),
-                 *(_seat_cell(game, p, ranks) for p in seats), *["-"] * (n_seats - len(seats))]
+                 *_seat_cells(doc, game, players, n_seats)]
         parts.extend(f'<td>{_esc(value) or "-"}</td>' for value in cells)
-        victory = _esc(game.get("victory_type")) or "-"
-        if _text(game.get("winner_player_id")) and not any(_flag(p.get("is_winner")) for p in seats):
-            victory += f'<span class="game-winner">{_esc(winner_text(game))}</span>'
-        parts.append(f'<td>{victory}</td>')
+        parts.append(f'<td>{_victory_html(game, players)}</td>')
         parts.append(f'<td>{replay_link_html(doc, game, players, prefix)}</td></tr>')
     parts.append('</tbody></table></div>')
     parts.append(f'<p><a href="{_esc(games_url(prefix, seed=seed, player=player_id))}">Show all {len(rows)} →</a></p></section>')

@@ -29,6 +29,7 @@ from .controlled_seed import (
     CONTROLLED_SEED_PURPOSE,
     CONTROLLED_SEED_TITLE,
     controlled_seed_document,
+    game_ranks,
 )
 from .model import Download, FamilyGroup, ReportDocument, Section
 
@@ -162,6 +163,7 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         family_sections = [s for s in family_sections if s.id != game_log.section_id]
         if controlled is not None:
             controlled.game_log = game_log
+            game_log.ranks = game_ranks(controlled)
         if "html" in (meta.get("formats") or []):
             download = Download(label="Game Log (HTML)", rel_path="games.html")
             ctx.section(game_log.section_id).downloads.append(download)
