@@ -390,9 +390,12 @@ class BehaviorAnalysis(Analysis):
             )
         return "No player had values for the selected behavior metrics."
 
-    def top_condition_summary(self, table: pd.DataFrame | None, metrics: dict[str, str],
-                              skip_labels: set[str]) -> str:
-        """List the condition with the highest absolute mean for each metric."""
+    def top_row_summary(self, table: pd.DataFrame | None, metrics: dict[str, str],
+                        skip_labels: set[str], lowest: tuple[str, ...] = ()) -> str:
+        """List the row (strategist and condition) with the highest mean for each metric.
+
+        Labels in ``lowest`` pick the lowest mean instead.
+        """
         if table is None or table.empty:
             return ""
         candidates = table
@@ -407,11 +410,8 @@ class BehaviorAnalysis(Analysis):
             rows = candidates[candidates["metric"] == metric].dropna(subset=["mean"])
             if rows.empty:
                 continue
-            top = rows[rows["mean"] == rows["mean"].max()]
-            names = list(dict.fromkeys(
-                str(condition).strip() or str(row_label)
-                for condition, row_label in zip(top.get("condition", ""), top["row_label"])
-            ))
+            best = rows["mean"].min() if label in lowest else rows["mean"].max()
+            names = list(dict.fromkeys(rows.loc[rows["mean"] == best, "row_label"].astype(str)))
             parts.append(f"{label}: **{' / '.join(names)}**")
         return " · ".join(parts)
 

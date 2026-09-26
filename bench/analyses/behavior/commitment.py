@@ -243,7 +243,7 @@ class BehaviorCommitment(BehaviorAnalysis):
             S.GRAND_STRATEGY_INFO[s][1]: strategy_column(s)
             for s in strategies if s in S.GRAND_STRATEGY_INFO
         }
-        summary = self.top_condition_summary(
+        summary = self.top_row_summary(
             out.tables.get("grand_strategy"), victory_metrics,
             {ctx.catalog.null_label, ctx.catalog.vanilla_label},
         )

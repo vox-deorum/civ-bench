@@ -28,6 +28,8 @@ has no relative form.
 
 from __future__ import annotations
 
+import pandas as pd
+
 from ...config import schema as S
 from ...config.behavior import snake_case
 from ..base import AnalysisContext, AnalysisResult
@@ -101,7 +103,7 @@ class BehaviorDiplomacy(BehaviorAnalysis):
         out = MetricViews()
         cells = C.controlled_cells(ctx)
         views = self._persona_views(ctx, rows, pool, cells, baseline, traits, out)
-        mix_note = self._stance_views(ctx, rows, stance, rate_scaled, out)
+        self._stance_views(ctx, rows, stance, rate_scaled, out)
         metadata = {
             **views.metadata(),
             "traits": traits,
@@ -117,11 +119,12 @@ class BehaviorDiplomacy(BehaviorAnalysis):
         if missing:
             metadata["traits_not_extracted"] = missing
         names = {trait_column(t): t for t in traits}
-        summary = (self.heatmap_headline(ctx, out, views, "diplomacy", names, decimals=1)
-                   if traits else "")
+        summary = self._stance_headline(ctx, out) or (
+            self.heatmap_headline(ctx, out, views, "diplomacy", names, decimals=1) if traits else ""
+        )
         return AnalysisResult(
             tables=out.tables,
-            summary=" ".join(filter(None, (summary, mix_note))) or "No player had diplomacy values.",
+            summary=summary or "No player had diplomacy values.",
             metadata=metadata,
         )
 
@@ -200,10 +203,10 @@ class BehaviorDiplomacy(BehaviorAnalysis):
         )
 
     # ── stance ────────────────────────────────────────────────────────────────
-    def _stance_views(self, ctx, rows, stance, rate_scaled, out) -> str:
-        """Write the untabbed stance table; returns the masked-hostility sentence."""
+    def _stance_views(self, ctx, rows, stance, rate_scaled, out) -> None:
+        """Write the untabbed stance table."""
         if not stance:
-            return ""
+            return
         skip = {ctx.catalog.null_label, ctx.catalog.vanilla_label}
         rows = rows[~rows["player_type"].astype(str).isin(skip)].copy()
         for share in STANCE_SHARES:
@@ -252,19 +255,19 @@ class BehaviorDiplomacy(BehaviorAnalysis):
             # No tab: the table shows under the persona views on every one of them.
             view_names={C.ABSOLUTE: None},
         )
-        return self._mix_note(out)
 
-    def _mix_note(self, out: MetricViews) -> str:
+    def _stance_headline(self, ctx, out: MetricViews) -> str:
+        """The friendliest and least friendly strategists by net stance, and the most masked."""
         table = out.summaries.get(("stance_signals", C.ABSOLUTE))
-        if table is None:
+        if table is None or table.empty:
             return ""
-        hostility = table[table["metric"] == "stance_masked_hostility_share"]
-        strong = hostility[hostility["n_players"] >= 3]
-        hostility = strong if not strong.empty else hostility
-        if hostility.empty:
-            return ""
-        top = hostility.loc[hostility["mean"].idxmax()]
-        return (
-            f"**{top['row_label']}** holds the most masked hostility (public warm, private "
-            f"hostile) on **{top['mean']:.1f}%** of pair-turns."
+        # Masked is the combined share of masked hostility and masked goodwill.
+        shares = table[table["metric"].isin(STANCE_SHARES)]
+        masked = shares.groupby("row_label", sort=False).agg(
+            **{self.by: (self.by, "first"), "mean": ("mean", "sum"), "n_players": ("n_players", "min")}
+        ).reset_index().assign(metric="masked")
+        return self.top_row_summary(
+            pd.concat([table, masked], ignore_index=True),
+            {"Friendliest": "stance_net_avg", "Least friendly": "stance_net_avg", "Most masked": "masked"},
+            {ctx.catalog.null_label, ctx.catalog.vanilla_label}, lowest=("Least friendly",),
         )

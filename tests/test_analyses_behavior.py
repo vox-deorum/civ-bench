@@ -319,6 +319,10 @@ def test_condition_pairing_labels_rows_like_matched_maps(behavior_env, tmp_path)
     assert list(absolute.columns[:5]) == ["row_kind", "player_type", "strategist",
                                           "condition", "row_label"]
     assert result.metadata["heatmaps"]["flavors_absolute"]["row_order"][0] == pinned
+    # Headlines name the strategist with its condition, not the condition alone.
+    diplomacy, _ = behavior_env("behavior.diplomacy", {"bootstrap_n": 20, "condition_pairing": pairing},
+                                sid="d")
+    assert diplomacy.summary.startswith(f"Friendliest: **{LLM} | Base**")
 
 
 def test_rate_normalizes_counts_by_turns_alive(behavior_env, tmp_path):
@@ -342,7 +346,7 @@ def test_baseline_defaults_to_the_strength_stage(behavior_env):
                              adjust_baseline=BASELINE)
     assert result.metadata["baseline_experiments"] == [BASELINE]
     assert result.metadata["views"]["relative"]["tip"] == "Relative to matched in-game AI"
-    assert result.summary.startswith("Against the matched in-game AI")
+    assert result.summary.startswith("Friendliest: **")
 
 
 @pytest.mark.parametrize("module, params, kwargs, note, declared", [
@@ -357,7 +361,7 @@ def test_without_a_baseline_only_the_absolute_view_is_declared(behavior_env, mod
     assert list(result.metadata["views"]) == declared
     assert result.metadata["relative_view"] == note
     assert not any(name.endswith("_relative") for name in result.table_paths)
-    assert result.summary.startswith("The most distinctive value")
+    assert "Against the" not in result.summary
 
 
 def test_baseline_survives_player_filters(behavior_env):
@@ -568,7 +572,9 @@ def test_diplomacy_stance_table_sits_outside_the_views(behavior_env):
     assert _cell(table, LLM, "relationship_changes") == pytest.approx(4.0)
     assert not any("relationship_targets" in set(_table(result, n)["metric"])
                    for n in result.table_paths if n.startswith(("stance", "diplomacy_")))
-    assert "masked hostility" in result.summary and "25.0%" in result.summary
+    assert result.summary == (
+        f"Friendliest: **{LLM}** · Least friendly: **{LLM}** · Most masked: **{LLM}**"
+    )
 
 
 def test_diplomacy_writes_matched_map_tables(behavior_env):
@@ -719,8 +725,8 @@ def test_earliest_branch_uses_turns_and_none():
 
 def test_policies_views(behavior_env):
     result, _ = behavior_env("behavior.policies", {"baseline": BASELINE, "bootstrap_n": 20})
-    assert "Free: **" in result.summary and "Ord: **" in result.summary
-    assert "Trad:" not in result.summary
+    assert "Freedom: **" in result.summary and "Order: **" in result.summary
+    assert "Tradition:" not in result.summary
     rel = _table(result, "adoption_relative")
     # Seat 0 in the baseline always adopts order and never freedom.
     assert _cell(rel, LLM, "adopted_freedom") == pytest.approx(100.0)
