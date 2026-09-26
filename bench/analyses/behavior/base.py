@@ -377,12 +377,12 @@ class BehaviorAnalysis(Analysis):
                 continue
             score = (table["color_position"] - 0.5).abs()
             best = table.loc[score.idxmax()]
-            row, name = best["row_label"], lower(names[best["metric"]])
+            row, name = best["row_label"], str(names[best["metric"]]).lower()
             places = int((column_decimals or {}).get(best["metric"], decimals))
             if view == C.RELATIVE:
                 return (
                     f"Against the {views.baseline.label}, the largest "
-                    f"departure is **{row}** on **{name} (**{best['mean']:+.{places}f}**)."
+                    f"departure is **{row}** on **{name}** (**{best['mean']:+.{places}f}**)."
                 )
             return (
                 f"The most distinctive value is **{row}** on **{name}** "

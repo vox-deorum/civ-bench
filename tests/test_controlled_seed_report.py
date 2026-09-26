@@ -25,6 +25,7 @@ from bench.catalog import Catalog
 from bench.config import ConfigError, load_config
 from bench.reports import run_report
 from bench.reports.controlled_seed import render_controlled_seed_site
+from bench.reports.game_log import render_seat_games
 from bench.reports.model import ControlledSeedDocument, GameLogDocument, MatchedMapTab
 from bench.reports.runner import report_dir
 
@@ -235,7 +236,7 @@ def test_fully_controlled_dataset_accepted(env):
     tables = _tables(env())
     assert set(tables) == {
         "seed_player_summary", "seed_player_probability", "seed_player_adjusted",
-        "seed_player_index",
+        "seed_player_index", "game_player_rank",
     }
     assert len(tables["seed_player_summary"]) == 8  # 6 seed-1 + 2 seed-2 combos
 
@@ -259,6 +260,18 @@ def test_uncontrolled_rows_excluded_from_mixed_data(env):
     counts = {(int(r.seed), int(r.player_id)): int(r.run_count)
               for r in index.itertuples(index=False)}
     assert counts == {(1, 0): 6, (1, 1): 6, (2, 0): 2, (2, 1): 2}
+
+
+def test_players_rank_by_weighted_strength_within_each_game(env):
+    tables = _tables(env())
+    ranks = {(r.game_id, int(r.player_id)): float(r.strength_rank)
+             for r in tables["game_player_rank"].itertuples(index=False)}
+    # The Kimi game: 0.65 beats 0.42. Tied VPAI self-play seats share #1.
+    assert ranks[("ki-s1-r1", 0)] == 1.0 and ranks[("ki-s1-r1", 1)] == 2.0
+    assert ranks[("base-s1-r0", 0)] == ranks[("base-s1-r0", 1)] == 1.0
+    assert set(tables["game_player_rank"]["n_players"]) == {2}
+    row = _summary_row(tables, 1, 1, "GPT-OSS-120B-Simple", "Per-5")
+    assert float(row["mean_strength_rank"]) == pytest.approx(2.0)
 
 
 def test_rotations_and_repeats_average_equally_without_ci(env):
@@ -687,9 +700,9 @@ def test_two_heatmaps_per_seed_and_blank_cells(rendered):
     assert index.count('id="seed-1"') == 1 and index.count('id="seed-2"') == 1
     # The completed global grid leaves unobserved combinations blank (12 empty
     # cells per heatmap: 4 in seed 1, 8 in seed 2) and the strength heatmap's
-    # Avg column adds 3 more in seed 2 (the two Kimi rows and the vanilla row
-    # have no seed-2 cells to pool).
-    assert index.count("heat-cell-empty") == 27
+    # Avg and Avg rank columns add 3 more each in seed 2 (the two Kimi rows and
+    # the vanilla row have no seed-2 cells to pool).
+    assert index.count("heat-cell-empty") == 30
     # One isolated vanilla tbody per heatmap.
     assert index.count('<tbody class="vanilla-body">') == 4
 
@@ -737,6 +750,7 @@ def test_cell_tooltips_share_one_meaning(rendered):
         'data-tip="GPT-OSS-120B-Simple | Every-turn\n'
         "P0 · Rome\n"
         "Strength\t0.600\n"
+        "Avg rank\t#1.0\n"
         "Focus\tScience\t50%\n"
         'Runs\t3"'
     )
@@ -744,7 +758,7 @@ def test_cell_tooltips_share_one_meaning(rendered):
     # The one-run kimi game shows its own civilization on the seat line.
     assert (
         'data-tip="Kimi-K2.5 | Every-turn\nP0 · Egypt\n'
-        'Strength\t0.700\nFocus\tCulture\t70%\nRuns\t1"'
+        'Strength\t0.700\nAvg rank\t#1.0\nFocus\tCulture\t70%\nRuns\t1"'
     ) in index
 
 
@@ -761,22 +775,34 @@ def test_strength_scale_is_rdylbu(rendered):
 def test_strength_heatmap_leads_with_avg_column(rendered):
     env, result, out = rendered
     index = _read(out, "controlled-seed/index.html")
-    # One Avg column per strength heatmap (one per seed), none on the focus
-    # heatmaps.
-    assert index.count('<th scope="col" class="col-divider" data-col="1">') == 2
+    # One Avg and one Avg rank column per strength heatmap (one per seed), none
+    # on the focus heatmaps. The divider follows Avg rank.
+    assert index.count('populated seats">Avg</span></th>') == 2
+    assert index.count('<th scope="col" class="col-divider" data-col="2">') == 2
     # The vanilla row pools both seats' runs; a one-seat row pools its own.
-    assert ('data-tip="VPAI\nSeed average\nStrength\t0.400\nRuns\t4\tover 2 seats"'
-            in index)
-    assert 'Strength\t0.700\nRuns\t1\tover 1 seat"' in index
+    tip = 'VPAI\nSeed average\nStrength\t0.400\nAvg rank\t#1.0\nRuns\t4\tover 2 seats'
+    assert f'data-tip="{tip}"' in index
+    assert 'Strength\t0.700\nAvg rank\t#1.0\nRuns\t1\tover 1 seat"' in index
     # The avg cell is a colored summary, not a link into a detail page.
     assert (
-        '<td class="heat-cell heat-cell-value col-divider" '
+        '<td class="heat-cell heat-cell-value" '
         'style="background-color:#fee090;color:#18202a" data-value="0.4" '
-        'data-tip="VPAI\nSeed average\nStrength\t0.400\n'
-        'Runs\t4\tover 2 seats">0.40</td>' in index
+        f'data-tip="{tip}">0.40</td>' in index
     )
-    # Seed 2's uncovered rows leave the avg cell blank (Kimi x 2, vanilla).
+    # Rank runs on the reversed scale: #1 of 2 is blue, #2 of 2 is red.
+    assert f'style="background-color:#313695;color:#ffffff" data-value="1" data-tip="{tip}">#1.0</td>' in index
+    assert 'style="background-color:#a50026;color:#ffffff" data-value="2" ' in index
+    # Seed 2's uncovered rows leave the rank cell blank (Kimi x 2, vanilla).
     assert index.count('class="heat-cell heat-cell-empty col-divider"') == 3
+
+
+def test_seat_strength_table_adds_avg_rank(rendered):
+    env, result, out = rendered
+    detail = _read(out, "controlled-seed/seed-1-player-1.html")
+    assert ">Avg rank</span></th>" in detail
+    assert "blue for #1 and red for last" in detail
+    # Per-5 always finished second of two: the red end of the reversed scale.
+    assert re.search(r'style="background-color:#a50026;[^"]*" data-value="2" [^>]*>#2\.0</td>', detail)
 
 
 def test_shared_color_util_and_adaptive_axis(rendered):
@@ -1074,6 +1100,40 @@ def test_game_log_links_and_seat_rows_follow_detail_filters():
     assert 'data-vanilla="false"' in detail
     assert '<tr class="game-row"' in detail
     assert '<tr hidden class="game-row"' not in detail
+
+
+def test_seat_games_list_each_llm_seat_with_outcome_or_rank():
+    def player(game_id, player_id, civ, vanilla=False, winner=False):
+        return {"game_id": game_id, "player_id": player_id, "civilization": civ,
+                "strategist": "Vanilla" if vanilla else "Model", "condition": "" if vanilla else "Base",
+                "is_vanilla": vanilla, "is_winner": winner}
+
+    game_log = GameLogDocument(
+        title="t", section_id="game_log",
+        games=pd.DataFrame([
+            {"game_id": "a", "seed": 1, "seating_rotation": 0, "date_utc": "2026-09-18",
+             "victory_type": "Science", "winner_player_id": 1, "winner_civilization": "Arabia",
+             "winner_is_vanilla": False},
+            {"game_id": "b", "seed": 1, "seating_rotation": 1, "date_utc": "2026-09-19",
+             "victory_type": "Cultural", "winner_player_id": 0, "winner_civilization": "Siam",
+             "winner_is_vanilla": True},
+        ]),
+        game_players=pd.DataFrame([
+            player("a", 0, "Siam", vanilla=True), player("a", 1, "Arabia", winner=True),
+            player("a", 5, "Rome"),
+            player("b", 0, "Siam", vanilla=True, winner=True), player("b", 1, "Arabia"),
+        ]),
+        metadata={"vanilla_label": "Vanilla"},
+    )
+    html = render_seat_games(game_log, 1, 0, ranks={("a", 1): 1, ("a", 5): 4, ("a", 0): 2})
+    assert "<th>Seat 1</th><th>Seat 2</th><th>Victory</th>" in html
+    assert "This seat" not in html
+    assert "<td>P1 Arabia (Won)</td>\n<td>P5 Rome (#4)</td>" in html
+    # Game b has one LLM seat and no rank: the second column is blank, and the
+    # VPAI winner moves under the victory type.
+    assert "<td>P1 Arabia</td>\n<td>-</td>" in html
+    assert 'Cultural<span class="game-winner">Winner: Player 0 (Siam, VPAI)</span>' in html
+    assert "Science</td>" in html and "Science<span" not in html
 
 
 def test_renderer_escapes_labels_and_query_parameters():

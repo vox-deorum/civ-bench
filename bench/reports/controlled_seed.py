@@ -67,6 +67,7 @@ CONTROLLED_SEED_TABLES = (
     "seed_player_index",
 )
 CONTROLLED_SEED_ADJUSTED_TABLE = "seed_player_adjusted"
+CONTROLLED_SEED_RANK_TABLE = "game_player_rank"
 
 # The seat pages' Relative view, in the same words as the trends section.
 SEAT_RELATIVE_HELP = (
@@ -123,6 +124,11 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         if ctx.has_table(section.id, CONTROLLED_SEED_ADJUSTED_TABLE)
         else pd.DataFrame()
     )
+    ranks = (
+        ctx.load_table(section.id, CONTROLLED_SEED_RANK_TABLE)
+        if ctx.has_table(section.id, CONTROLLED_SEED_RANK_TABLE)
+        else pd.DataFrame()
+    )
     return ControlledSeedDocument(
         title=ctx.meta["title"],
         run_name=ctx.meta["run_name"],
@@ -138,6 +144,7 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         probability_table=tables["seed_player_probability"],
         adjusted_table=adjusted,
         index_table=tables["seed_player_index"],
+        rank_table=ranks,
         downloads=list(section.downloads),
         tabs=_matched_map_tabs(ctx, section.metadata.get("tabs") or []),
     )
@@ -317,7 +324,26 @@ def _cell_tooltip(doc: ControlledSeedDocument, row: dict, player_id: int) -> str
         if np.isfinite(pct) else tip_row("Focus", "n/a"),
         tip_row("Runs", str(runs)),
     ]
+    rank = _mean_rank(row)
+    if np.isfinite(rank):
+        lines.insert(3, tip_row("Avg rank", _fmt_rank(rank)))
     return "\n".join(lines)
+
+
+def _mean_rank(row: dict) -> float:
+    """The row's mean in-game rank; NaN for results saved before ranks existed."""
+    return float(row.get("mean_strength_rank", float("nan")))
+
+
+def _fmt_rank(value: float) -> str:
+    return f"#{value:.1f}" if np.isfinite(value) else "n/a"
+
+
+def _rank_position(value: float, n_players: int) -> float:
+    """A rank on the reversed strength scale: #1 is blue (1), last is red (0)."""
+    if not np.isfinite(value) or n_players <= 1:
+        return float("nan")
+    return 1.0 - (value - 1.0) / (n_players - 1)
 
 
 def _row_title(doc: ControlledSeedDocument, strategist: str, condition: str) -> str:
@@ -397,27 +423,43 @@ def _strength_table(doc: ControlledSeedDocument, seed: int, players: list[int]) 
         if runs <= 0:
             continue
         value = sum(float(row["mean_adjusted_strength"]) * int(row["run_count"]) for row in rows) / runs
+        rank = sum(_mean_rank(row) * int(row["run_count"]) for row in rows) / runs
         title = _row_title(doc, strategist, condition)
         tip = "\n".join([
             title, "Seed average", tip_row("Strength", f"{value:.3f}"),
+            *([tip_row("Avg rank", _fmt_rank(rank))] if np.isfinite(rank) else []),
             tip_row("Runs", str(runs), f"over {plural(len(rows), 'seat')}"),
         ])
         records.append(_cell(title, "avg", value, color_position=value, tip=tip))
+        if np.isfinite(rank):
+            records.append(_cell(title, "rank", rank, text=_fmt_rank(rank), tip=tip,
+                                 color_position=_rank_position(rank, len(players))))
     columns, labels = _seat_columns(doc, seed, players)
+    pooled = ["avg", "rank"] if _has_ranks(doc) else ["avg"]
     spec = {
         **_CELL_SPEC,
         **_rows_layout(doc, _overview_rows(doc)),
         "title": "Adjusted strength",
-        "help": "Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row.",
+        "help": "Mean adjusted strength: red 0, yellow 0.5, blue 1. The Avg column pools every run in the row."
+                + (" Avg rank is the pooled mean in-game rank by weighted victory probability, "
+                   "blue for #1 and red for last." if _has_ranks(doc) else ""),
         "complete_grid": True,
-        "column_order": ["avg", *columns],
-        "column_labels": {"avg": "Avg", **labels},
-        "column_tips": {"avg": "Pooled mean adjusted strength across this seed's populated seats"},
-        "divider_columns": ["avg"],
+        "column_order": [*pooled, *columns],
+        "column_labels": {"avg": "Avg", "rank": "Avg rank", **labels},
+        "column_tips": {
+            "avg": "Pooled mean adjusted strength across this seed's populated seats",
+            "rank": "Pooled mean in-game rank by weighted victory probability (#1 is strongest)",
+        },
+        "divider_columns": [pooled[-1]],
         "decimals": 2,
         "legend": _STRENGTH_LEGEND,
     }
     return _frame(records), spec
+
+
+def _has_ranks(doc: ControlledSeedDocument) -> bool:
+    """Whether the summary carries ranks (results saved before them do not)."""
+    return "mean_strength_rank" in doc.summary_table.columns
 
 
 def _focus_text(label: str, pct: float) -> str:
@@ -672,6 +714,7 @@ _SEAT_STRENGTH_COLUMNS = {
     "runs": ("Runs", "Unique runs averaged"),
     "win_prob": ("Win prob", "Mean weighted victory probability"),
     "strength": ("Adj strength", "Mean adjusted strength"),
+    "rank": ("Avg rank", "Mean in-game rank by weighted victory probability (#1 is strongest)"),
 }
 _SEAT_FOCUS_COLUMNS = {
     "focus": ("Focus", "Dominant victory focus"),
@@ -695,10 +738,12 @@ def _seat_spec(doc: ControlledSeedDocument, rows: list[dict], columns: dict, tit
 def _seat_strength_table(doc: ControlledSeedDocument, seed: int, player_id: int) -> tuple[pd.DataFrame, dict]:
     """Runs, win probability, and adjusted strength per row on one seat."""
     rows = _comparison_rows(doc, seed, player_id)
+    n_players = int((doc.index_table["seed"].astype(int) == seed).sum())
     records = []
     for row in rows:
         label = _row_title(doc, str(row["strategist"]), str(row["condition"]))
         runs = int(row["run_count"])
+        rank = _mean_rank(row)
         probability = float(row["mean_weighted_victory_probability"])
         strength = float(row["mean_adjusted_strength"])
         strength_text = f"{strength:.2f}" if np.isfinite(strength) else ""
@@ -710,10 +755,17 @@ def _seat_strength_table(doc: ControlledSeedDocument, seed: int, player_id: int)
         records.append(_cell(label, "strength", strength, color_position=strength, text=strength_text,
                              tip=_seat_tip(doc, row, player_id, "Strength",
                                            f"{strength:.3f}" if np.isfinite(strength) else "n/a")))
-    spec = _seat_spec(
-        doc, rows, _SEAT_STRENGTH_COLUMNS, "Adjusted strength",
-        "Adjusted strength runs red 0, yellow 0.5, blue 1.",
-    )
+        if np.isfinite(rank):
+            records.append(_cell(label, "rank", rank, text=_fmt_rank(rank),
+                                 color_position=_rank_position(rank, n_players),
+                                 tip=_seat_tip(doc, row, player_id, "Avg rank", _fmt_rank(rank))))
+    columns, help_text = dict(_SEAT_STRENGTH_COLUMNS), "Adjusted strength runs red 0, yellow 0.5, blue 1."
+    if _has_ranks(doc):
+        help_text += (" Avg rank is the mean in-game rank by weighted victory probability, "
+                      "blue for #1 and red for last.")
+    else:
+        del columns["rank"]
+    spec = _seat_spec(doc, rows, columns, "Adjusted strength", help_text)
     spec["legend"] = _STRENGTH_LEGEND
     return _frame(records), spec
 
@@ -740,6 +792,19 @@ def _seat_focus_table(doc: ControlledSeedDocument, seed: int, player_id: int) ->
     )
     spec["legend"] = _focus_legend_entries()
     return _frame(records), spec
+
+
+def _game_ranks(doc: ControlledSeedDocument) -> dict[tuple[str, int], int]:
+    """``(game_id, player_id) -> in-game rank`` for the seat pages' game lists."""
+    table = doc.rank_table
+    if table.empty:
+        return {}
+    ranks = pd.to_numeric(table["strength_rank"], errors="coerce")
+    return {
+        (str(game_id), int(player_id)): int(rank)
+        for game_id, player_id, rank in zip(table["game_id"], table["player_id"], ranks)
+        if np.isfinite(rank)
+    }
 
 
 def _render_detail(
@@ -822,7 +887,8 @@ def _render_detail(
     parts.append("</section>")
 
     if doc.game_log is not None:
-        parts.append(render_seat_games(doc.game_log, seed, player_id, prefix="../"))
+        parts.append(render_seat_games(doc.game_log, seed, player_id, prefix="../",
+                                       ranks=_game_ranks(doc)))
 
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")

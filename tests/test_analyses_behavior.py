@@ -222,8 +222,8 @@ def test_relative_subtracts_the_matched_seed_seat_baseline(behavior_env):
     assert meta["views"]["relative"]["tables"] == ["flavors_relative"]
     assert meta["views"]["relative"]["label"] == "Relative"
     assert meta["views"]["relative"]["tip"] == f"Relative to matched '{BASELINE}'"
-    assert result.summary.startswith(f"Against the matched '{BASELINE}' on the same map and seat")
-    assert f"**{LLM}** on Offense (**+3**)" in result.summary
+    assert result.summary.startswith(f"Against the matched '{BASELINE}', the largest departure is")
+    assert f"**{LLM}** on **offense** (**+3**)" in result.summary
 
 
 def test_flavor_heatmaps_carry_layout_and_colors(behavior_env, tmp_path):
@@ -667,8 +667,8 @@ def test_commitment_defaults_to_the_completed_baseline(behavior_env):
 
 def test_commitment_grand_strategy_view_reads_like_the_focus_tab(behavior_env):
     result, _ = behavior_env("behavior.commitment", {"baseline": BASELINE, "bootstrap_n": 20})
-    assert "Dom: **" in result.summary and "Cult: **" in result.summary
-    assert "Sci: **" in result.summary
+    assert "Domination: **" in result.summary and "Culture: **" in result.summary
+    assert "Science: **" in result.summary
     table = _table(result, "grand_strategy")
     main = table[table["metric"] == "gs_main"].set_index("player_type")
     # Conquest and Culture tie at 50%; schema order picks Conquest.

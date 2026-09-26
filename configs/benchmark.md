@@ -709,8 +709,9 @@ Two single-purpose views of how well estimator probabilities are calibrated: one
 
 // performance.controlled_seed_report: report-ready tables for the controlled-seed chapter
 //   the report renders automatically (§7.1). Emits seed_player_summary,
-//   seed_player_probability, seed_player_adjusted, and seed_player_index; the renderer
-//   completes the grid.
+//   seed_player_probability, seed_player_adjusted, seed_player_index, and
+//   game_player_rank (each player's in-game rank by weighted_strength, 1 is the
+//   strongest, ties share the better rank); the renderer completes the grid.
 //   uses.analyses optionally lists stages whose Matched Maps tabs render beside
 //   Strength and Focus (§7.1).
 { "module": "performance.controlled_seed_report",
@@ -1097,7 +1098,9 @@ The chapter lives in its own directory beside the family pages:
   are Strength (mean `adjusted_strength` on a fixed RdYlBu scale from 0 to 1,
   red at 0, yellow at 0.5, blue at 1, the rounded value in the cell, led by
   an `Avg` column that pools each condition row's runs as the run-weighted
-  mean over the seed's populated seats, not a link), Focus (the dominant
+  mean over the seed's populated seats, not a link, then an `Avg rank` column
+  with the pooled mean in-game rank by weighted victory probability on the
+  reversed scale, blue for #1 and red for last), Focus (the dominant
   victory focus, name and percentage, a stable categorical color per strategy
   with intensity by share), then one tab per `uses.analyses` entry (§6.2),
   Strategy for `behavior.flavors`, Diplomacy for `behavior.diplomacy`, Commitment
@@ -1115,9 +1118,10 @@ The chapter lives in its own directory beside the family pages:
   Strength and Focus cells carry the same tooltip: the row title
   (`Strategist | Condition`, or `VPAI` for the self-play row), the seat line
   `P<player_id> · <civilization>`, then grid lines for the mean adjusted
-  strength (three decimals), the dominant victory focus with its share, and
-  the run count. The `Avg` cell's tooltip shows the row title, the words
-  `Seed average`, then the pooled strength and run lines. Clicking a Strength
+  strength (three decimals), the mean rank, the dominant victory focus with
+  its share, and the run count. The `Avg` and `Avg rank` cells' tooltip shows
+  the row title, the words `Seed average`, then the pooled strength, rank, and
+  run lines. Clicking a Strength
   cell opens the matching `(seed, player_id)` detail page with that strategist
   and condition preselected (encoded in the query string); a Focus cell's
   link adds `view=focus` so the detail page opens on its Focus tab. The
@@ -1169,12 +1173,19 @@ The chapter lives in its own directory beside the family pages:
   tab keeps one row per strategist-condition combination plus the pinned
   VPAI row and shows `Runs` (linked to the Game Log when that analysis is
   present), `Win prob` (mean weighted victory probability), and
-  `Adj strength` (colored on the overview's 0 to 1 RdYlBu scale); the Focus
+  `Adj strength` (colored on the overview's 0 to 1 RdYlBu scale), and
+  `Avg rank` (the mean in-game rank by weighted victory probability, on the
+  reversed scale); the Focus
   tab shows `Focus`, `Dom %`, `Cul %`, `Dip %`, and `Sci %`, each share in
   its strategy color at share intensity; then one tab per `uses.analyses`
   entry shows that entry's seat-keyed table (`flavors_by_seat` for
   `behavior.flavors`, `diplomacy_by_seat` for `behavior.diplomacy`). A tab with no rows for a seed or seat says so. Missing
   baselines and missing prediction rows are visible page notes, never fatal.
+  With the Game Log present, the page ends with the seat's game list. It
+  has one `Seat N` column per LLM seat in the game, ordered by player ID, such
+  as `P1 Arabia (Won)` or `P5 Rome (#4)`, where the number is the in-game rank
+  from `game_player_rank`. When a VPAI player won, the Victory cell names
+  the winner.
 
 ### 7.2 Game Log and replay links
 

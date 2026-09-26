@@ -3,7 +3,7 @@
 The data side of the dedicated controlled-seed HTML report (see
 ``plans/controlled-seed-report.md``). The module consumes the canonical ``games``
 and ``panel`` tables, one configured strength adjust table, and exactly one
-estimator, then emits three deterministic, report-ready tables:
+estimator, then emits these deterministic, report-ready tables:
 
 * ``seed_player_summary``: one row per observed ``(seed, player_id, strategist,
   condition)`` plus one dedicated Vanilla row per ``(seed, player_id)`` covered by
@@ -14,6 +14,9 @@ estimator, then emits three deterministic, report-ready tables:
   matched-cell adjustment at every progress point (the seat pages' Relative
   view; 0.5 is level with matched VPAI self-play).
 * ``seed_player_index``: one row per available ``(seed, player_id)`` page.
+* ``game_player_rank``: each controlled player's in-game rank by weighted
+  victory probability (1 is the strongest; ties share the better rank), for
+  the seat pages' game lists.
 
 The renderer completes the global row/column grid and leaves unobserved
 combinations blank; this module emits only observed combinations. Ordering and
@@ -48,7 +51,7 @@ FOCUS_RATIO_COLUMNS = {
 SUMMARY_COLUMNS = [
     "seed", "player_id", "strategist", "condition", "player_type", "experiment",
     "civilization", "run_count", "mean_weighted_victory_probability",
-    "mean_adjusted_strength", "matched_vanilla_adjusted_strength",
+    "mean_strength_rank", "mean_adjusted_strength", "matched_vanilla_adjusted_strength",
     "adjusted_strength_difference", "has_matched_vanilla", "dominant_focus",
     "dominant_focus_pct", "domination_focus_pct", "culture_focus_pct",
     "diplomatic_focus_pct", "science_focus_pct",
@@ -61,6 +64,7 @@ ADJUSTED_COLUMNS = [
     "seed", "player_id", "strategist", "condition", "turn_progress",
     "mean_adjusted_strength", "n_runs",
 ]
+RANK_COLUMNS = ["game_id", "player_id", "weighted_strength", "strength_rank", "n_players"]
 INDEX_COLUMNS = [
     "seed", "player_id", "civilization", "n_civilizations", "run_count",
     "has_matched_vanilla", "has_probability",
@@ -120,6 +124,7 @@ def _aggregate_summary(rows: pd.DataFrame) -> pd.DataFrame:
             "mean_weighted_victory_probability": round(
                 float(grp["weighted_strength"].mean()), 6
             ),
+            "mean_strength_rank": round(float(grp["strength_rank"].mean()), 6),
             "mean_adjusted_strength": round(float(grp["adjusted_strength"].mean()), 6),
         }
         for label, column in FOCUS_RATIO_COLUMNS.items():
@@ -204,6 +209,9 @@ class PerformanceControlledSeedReport(Analysis):
             kind="mergesort",
         ).reset_index(drop=True)
         index = self._index_table(rows, probability, vanilla_label)
+        ranks = rows[RANK_COLUMNS].sort_values(
+            ["game_id", "player_id"], kind="mergesort"
+        ).reset_index(drop=True)
 
         strategist_order = order_strategists(
             ctx.catalog, [s for s in summary["strategist"].unique() if s != vanilla_label]
@@ -277,6 +285,7 @@ class PerformanceControlledSeedReport(Analysis):
                 "seed_player_probability": probability,
                 "seed_player_adjusted": adjusted_table,
                 "seed_player_index": index,
+                "game_player_rank": ranks,
             },
             summary=summary_text,
             metadata=metadata,
@@ -352,6 +361,10 @@ class PerformanceControlledSeedReport(Analysis):
             rows[column] = pd.to_numeric(rows[column], errors="coerce")
         for column in ("weighted_strength", "adjusted_strength"):
             rows[column] = pd.to_numeric(rows[column], errors="coerce")
+        # Rank every player of a game by weighted victory probability.
+        by_game = rows.groupby("game_id")
+        rows["strength_rank"] = by_game["weighted_strength"].rank(ascending=False, method="min")
+        rows["n_players"] = by_game["player_id"].transform("size").astype(int)
         return rows
 
     def _identities(

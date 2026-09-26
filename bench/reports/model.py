@@ -228,6 +228,9 @@ class ControlledSeedDocument:
     # analysis emitted none.
     adjusted_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Each player's in-game rank by weighted victory probability; empty when
+    # the analysis emitted none.
+    rank_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     downloads: list[Download] = field(default_factory=list)
     footer: str = REPORT_DEFAULT_FOOTER
     game_log: Optional["GameLogDocument"] = None
