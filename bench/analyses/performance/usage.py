@@ -16,20 +16,38 @@ from bench.analyses.errors import AnalysisError
 CACHE_COLUMNS = ("cached_input_tokens", "repeated_input_tokens")
 
 
-def cost_note(cached_input: bool) -> str:
-    """Describe how costs treat cached input."""
+def cost_note(cached_input: bool, reported_only: list[str] = ()) -> str:
+    """Describe how costs treat cached input.
+
+    ``reported_only`` lists models whose ``cache_pricing`` family sets
+    ``"estimate": false``.
+    """
     if not cached_input:
         return (
             "Costs do not account for cached tokens or cache discounts. "
             "Output token averages include reasoning tokens."
         )
+    reported = (
+        f"{', '.join(reported_only)} {'uses' if len(reported_only) == 1 else 'use'} "
+        "only provider-reported cache counts. "
+        if reported_only else ""
+    )
     return (
         "Cached input is estimated. Within each multi-step agent run, a step's "
         "prompt overlap with the previous step is priced at the cache-read rate, "
-        "or the provider-reported cache count is used when it is higher. Claude "
-        "models use only provider-reported cache counts. Output token averages "
-        "include reasoning tokens."
+        "or the provider-reported cache count is used when it is higher. "
+        f"{reported}Output token averages include reasoning tokens."
     )
+
+
+def cache_accounting(models, catalog, enabled: bool) -> tuple[bool, list[str]]:
+    """Return whether any of ``models`` is cache-priced, and the reported-only ones."""
+    if not enabled:
+        return False, []
+    policies = {model: catalog.cache_policy(model) for model in models}
+    active = any(policies.values())
+    reported_only = sorted(model for model, policy in policies.items() if policy and not policy[1])
+    return active, reported_only
 
 
 def _complete_sum(s: pd.Series) -> float:

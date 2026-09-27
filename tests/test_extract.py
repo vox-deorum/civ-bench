@@ -325,7 +325,8 @@ def test_token_extraction_counts_cached_and_repeated_input(tmp_path, catalog):
             # min(100, 150) + min(150, 180) = 250 repeated tokens, and the agent
             # span itself reports 120 provider cache reads.
             (2, "ok", "agent", "ok-root", 1, "agent.simple-strategist", 2,
-             '{"model":"openai-compatible/gpt-oss-120b","tokens.input.cached":120}', 1),
+             '{"model":"openai-compatible/gpt-oss-120b","tokens.input":430,'
+             '"tokens.input.cached":120}', 1),
             (3, "ok", "s1", "agent", 1, "agent.simple-strategist.step.1", 3,
              '{"tokens.input":100}', 1),
             (4, "ok", "s2", "agent", 1, "agent.simple-strategist.step.2", 4,
@@ -335,7 +336,7 @@ def test_token_extraction_counts_cached_and_repeated_input(tmp_path, catalog):
             # A single-step run of the same model contributes neither overlap
             # nor cache reports.
             (6, "ok", "agent2", "ok-root", 1, "agent.simple-strategist", 6,
-             '{"model":"openai-compatible/gpt-oss-120b"}', 1),
+             '{"model":"openai-compatible/gpt-oss-120b","tokens.input":100}', 1),
             (7, "ok", "s4", "agent2", 1, "agent.simple-strategist.step.1", 7,
              '{"tokens.input":100}', 1),
         ],
@@ -349,6 +350,8 @@ def test_token_extraction_counts_cached_and_repeated_input(tmp_path, catalog):
 
     assert len(rows) == 1
     row = rows[0]
+    # Input totals come from the agent spans only; step spans do not add to them.
+    assert row["input_tokens"] == 530
     assert row["repeated_input_tokens"] == 250
     assert row["cached_input_tokens"] == 120
 

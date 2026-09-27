@@ -203,6 +203,9 @@ def _cache_catalog(cache_pricing):
     "cache_pricing",
     [
         {"default_read_ratio": 0.1, "families": {}, "bogus": 1},
+        [0.1],
+        {"families": {}},
+        {"default_read_ratio": 0.1, "families": ["A"]},
         {"default_read_ratio": 1.5, "families": {}},
         {"default_read_ratio": 0.1,
          "families": {"f": {"models": ["A"], "read_ratio": -0.1}}},

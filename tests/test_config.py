@@ -139,6 +139,12 @@ def test_token_estimates_missing_switch_keeps_its_default(dev_spec, write_spec):
     assert cfg.token_estimates == {"reasoning": True, "cached_input": False}
 
 
+def test_token_estimates_accept_boolean_strings(dev_spec, write_spec):
+    dev_spec["token_estimates"] = {"reasoning": "false", "cached_input": "true"}
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.token_estimates == {"reasoning": False, "cached_input": True}
+
+
 @pytest.mark.parametrize(
     "block, match",
     [

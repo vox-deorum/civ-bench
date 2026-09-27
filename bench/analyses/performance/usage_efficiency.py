@@ -10,7 +10,7 @@ import pandas as pd
 from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
 from bench.analyses.errors import AnalysisError
 from bench.analyses.performance.usage import (
-    compute_game_costs, cost_note, plot_usage_figures, reasoning_estimate_note,
+    cache_accounting, compute_game_costs, cost_note, plot_usage_figures, reasoning_estimate_note,
     summarize_game_costs,
 )
 
@@ -89,6 +89,10 @@ class PerformanceUsageEfficiency(Analysis):
             tokens, ctx.catalog,
             estimate_reasoning=switches["reasoning"], cached_input=switches["cached_input"],
         )
+        # The note and metadata follow what was actually priced, not only the switch.
+        cached_input, reported_only = cache_accounting(
+            records["model"].unique(), ctx.catalog, switches["cached_input"]
+        )
         estimated_models = sorted(records.loc[records["reasoning_estimated"], "model"].unique())
         reasoning_note = reasoning_estimate_note(estimated_models)
         usage = summarize_game_costs(records, ["player_type"])
@@ -121,7 +125,8 @@ class PerformanceUsageEfficiency(Analysis):
         figures = plot_usage_figures(nonbaseline, ctx, ratings, currency=currency)
         fig = self._plot(
             table, ctx, spec, currency, log_x, annotate, fits,
-            baseline_elo, baseline_name, null_baseline_elo, reasoning_note, switches["cached_input"],
+            baseline_elo, baseline_name, null_baseline_elo, reasoning_note,
+            cached_input, reported_only,
         )
         if fig is not None:
             figures["usage_vs_rating"] = fig
@@ -148,7 +153,7 @@ class PerformanceUsageEfficiency(Analysis):
             "dropped_baselines": int(baseline_mask.sum()),
             "unpriced_identities": int(nonbaseline["avg_cost_per_player_game"].isna().sum()),
             "unrated_identities": int((~nonbaseline["player_type"].isin(ratings["player_type"])).sum()),
-            "cost_basis": "per player per complete game", "cached_input_estimated": switches["cached_input"],
+            "cost_basis": "per player per complete game", "cached_input_estimated": cached_input,
             "efficiency_metric": "elo - expected_elo",
             "usage_skill_equation": "expected_elo = intercept + slope * log10(average_usage)",
             "usage_skill_fits": fits, "baseline_elo": baseline_elo, "baseline_name": baseline_name,
@@ -165,6 +170,7 @@ class PerformanceUsageEfficiency(Analysis):
     def _plot(
         table, ctx, spec, currency, log_x, annotate, fits,
         baseline_elo, baseline_name, null_baseline_elo=None, reasoning_note="", cached_input=False,
+        reported_only=(),
     ):
         import plotly.graph_objects as go
 
@@ -303,14 +309,15 @@ class PerformanceUsageEfficiency(Analysis):
             meta={"table_tooltip": {
                 "title_index": 0, "subtitle_index": 1,
                 "note": "Averages per player per game. Counts are player-games for the selected resource. "
-                        + cost_note(cached_input)
+                        + cost_note(cached_input, reported_only)
                         + (f" {reasoning_note}" if reasoning_note else ""),
                 "rows": [
                     {"label": "Elo", "index": 2, "emphasis": True},
                     {"label": "Elo above fit", "index": 4, "emphasis": True},
                     {"label": "Avg. cost", "index": 6},
                     {"label": "Avg. input tokens", "index": 7},
-                    {"label": "Avg. cached input", "index": 12},
+                    # Only meaningful when some input was priced as cached.
+                    *([{"label": "Avg. cached input", "index": 12}] if cached_input else []),
                     {"label": "Avg. output tokens", "index": 8},
                     {"label": "Missing data", "index": 10},
                 ],

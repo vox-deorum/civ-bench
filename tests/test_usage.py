@@ -5,7 +5,9 @@ import pytest
 
 from bench.analyses.errors import AnalysisError
 from bench.analyses.performance.usage import (
+    cache_accounting,
     compute_game_costs,
+    cost_note,
     plot_usage_figures,
     summarize_game_costs,
 )
@@ -185,6 +187,17 @@ def test_summarize_game_costs_exposes_avg_cached_input():
     row = summary.set_index("player_type").loc["priced"]
     # g1 caches 400, g2 caches 200.
     assert row["avg_cached_input"] == 300
+
+
+def test_cache_accounting_follows_the_catalog_not_only_the_switch():
+    catalog = FakeCatalog(cache={"priced": (0.05, False)})
+    assert cache_accounting(["priced", "free"], catalog, True) == (True, ["priced"])
+    assert cache_accounting(["priced"], catalog, False) == (False, [])
+    # Without cache_pricing nothing is discounted, even with the switch on.
+    assert cache_accounting(["priced"], FakeCatalog(), True) == (False, [])
+    assert "priced uses only provider-reported" in cost_note(True, ["priced"])
+    assert "a, b use only provider-reported" in cost_note(True, ["a", "b"])
+    assert "provider-reported cache counts." not in cost_note(True)
 
 
 def test_catalog_rejects_non_boolean_reasoning_flag():

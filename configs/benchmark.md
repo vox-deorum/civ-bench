@@ -916,10 +916,12 @@ provider-reported `tokens.input.cached` summed over agent spans, 0 when not
 reported) and `repeated_input_tokens` (per agent run, its step spans
 `agent.<name>.step.<k>` sorted by k, summing `min(input[k-1], input[k])` for
 k >= 2; a single-step run adds 0). A tokens table extracted with the older
-header is rebuilt automatically by the next `civ-bench extract`. The `usage`
-table gains `avg_cached_input`, and the interactive chart tooltip states the
-cached-input rule and shows the value. Result metadata reports the switch as
-`cached_input_estimated`.
+header is rebuilt by the next `civ-bench extract` (not by a `prune_missing`
+run); until then the analysis stops with a hint. The `usage` table gains
+`avg_cached_input`. When any model is cache-priced, the interactive chart
+tooltip states the cached-input rule, names the reported-only models, and shows
+the average cached input. Result metadata `cached_input_estimated` is true only
+when the switch is on and the catalog cache-prices at least one model.
 
 Cache pricing is an optional top-level `cache_pricing` block in
 `configs/models.json`. Without it, nothing is treated as cached.
