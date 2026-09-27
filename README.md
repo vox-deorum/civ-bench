@@ -140,6 +140,7 @@ When you add a module or a validation rule, add or extend its test in the same c
 - **[docs/getting-started.md](docs/getting-started.md)** is the hands-on guide: install, make a config, run the pipeline, read the report, and a tutorial with common recipes.
 - **[docs/configuration.md](docs/configuration.md)** is the readable run-spec guide: every block, how filters and groupings compose, and the common edits.
 - **[docs/development.md](docs/development.md)** is the developer guide: the plugin contract and how to add an analysis, an estimator, or an adjust module.
+- **[docs/cell-score.md](docs/cell-score.md)** explains how controlled seats are scored against the matched VPAI baseline, and how the default `cell_gain_bend` was chosen.
 - **[AGENTS.md](AGENTS.md)** defines the conventions that apply to every change.
 - **[configs/benchmark.md](configs/benchmark.md)** is the complete run-spec schema, field by field, with examples for every module.
 - **[plans/](plans/)** contains the roadmap and implementation notes.

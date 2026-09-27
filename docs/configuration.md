@@ -219,6 +219,7 @@ An estimator emits `predictions.csv` with a `predicted_win_probability` column. 
     "enforce_winner": true,               // force the actual winner to the top
     "civ_adjust": "ols_logit",            // uncontrolled games: subtract civilization effects
     "block": "auto",                      // controlled games: matched start-cell correction
+    "cell_gain_bend": 0.5,                // controlled games: shape of the score above VPAI (1 = plain logit)
   }
 }
 ```
@@ -238,7 +239,7 @@ To exclude incomplete controlled conditions:
 - Use `1.0` to exclude any condition missing a `seed × seating_rotation` slot.
 - The filter removes those conditions from every table before strength fitting and ratings.
 
-See [configs/benchmark.md](../configs/benchmark.md), sections 3.1 and 5, for completeness filtering, baseline choices, and diagnostics.
+See [configs/benchmark.md](../configs/benchmark.md), sections 3.1 and 5, for completeness filtering, baseline choices, and diagnostics. [The controlled cell score](cell-score.md) explains how controlled seats are scored against VPAI and why `cell_gain_bend` defaults to 0.5.
 
 ---
 
