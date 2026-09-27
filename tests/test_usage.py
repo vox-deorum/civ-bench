@@ -15,8 +15,15 @@ class FakeCatalog:
     vanilla_label = "Vanilla"
     null_label = "Null"
 
-    def __init__(self, estimate=()):
+    def __init__(self, estimate=(), cache=None):
         self._estimate = set(estimate)
+        # {model: (read_ratio, estimate)}; None turns cache accounting off.
+        self._cache = cache
+
+    def cache_policy(self, model):
+        if self._cache is None:
+            return None
+        return self._cache.get(model, (0.1, True))
 
     def pricing_per_million(self):
         return {"priced": {"input_per_million": 1.0, "output_per_million": 2.0}}
@@ -108,6 +115,76 @@ def test_reasoning_estimate_requires_recorded_output_column():
         compute_game_costs(raw, FakeCatalog(estimate={"priced"}))
     # Without a flagged model the old table shape still works.
     compute_game_costs(raw, FakeCatalog())
+
+
+def _cache_rows(g2_cached=0, g2_repeated=1500):
+    return pd.DataFrame([
+        {"game_id": "g1", "player_type": "priced", "model_name": "priced",
+         "input_tokens": 1000, "cached_input_tokens": 100, "repeated_input_tokens": 400,
+         "output_tokens": 10, "reasoning_tokens": 0},
+        {"game_id": "g2", "player_type": "priced", "model_name": "priced",
+         "input_tokens": 1000, "cached_input_tokens": g2_cached,
+         "repeated_input_tokens": g2_repeated,
+         "output_tokens": 0, "reasoning_tokens": 0},
+    ])
+
+
+def test_cached_input_prices_the_larger_count_at_the_read_rate():
+    rows = compute_game_costs(_cache_rows(), FakeCatalog(cache={})).set_index("game_id")
+    # g1: max(reported 100, overlap 400) cached; the other 600 stay at full price.
+    assert rows.loc["g1", "cached_input_tokens"] == 400
+    assert rows.loc["g1", "total_cost"] == pytest.approx(
+        (600 + 400 * 0.1) / 1e6 * 1.0 + 10 / 1e6 * 2.0
+    )
+    # Overlap beyond the row's input is capped at input, so g2 is all cache-read.
+    assert rows.loc["g2", "cached_input_tokens"] == 1000
+    assert rows.loc["g2", "total_cost"] == pytest.approx(1000 * 0.1 / 1e6 * 1.0)
+
+
+def test_reported_only_family_ignores_the_step_overlap():
+    catalog = FakeCatalog(cache={"priced": (0.05, False)})
+    rows = compute_game_costs(_cache_rows(), catalog).set_index("game_id")
+    # Only the provider-reported 100 counts, priced at the family ratio 0.05.
+    assert rows.loc["g1", "cached_input_tokens"] == 100
+    assert rows.loc["g1", "total_cost"] == pytest.approx(
+        (900 + 100 * 0.05) / 1e6 * 1.0 + 10 / 1e6 * 2.0
+    )
+
+
+def test_switches_off_reproduce_full_price_raw_costs():
+    raw = _estimate_rows()
+    raw["cached_input_tokens"] = 100
+    raw["repeated_input_tokens"] = 400
+    game = compute_game_costs(
+        raw, FakeCatalog(estimate={"priced"}, cache={}),
+        estimate_reasoning=False, cached_input=False,
+    )
+    rows = game.set_index(["model", "game_id"])
+    # Raw reasoning is kept even for the flagged model.
+    assert rows.loc[("priced", "g1"), "combined_output_tokens"] == 80
+    assert rows.loc[("priced", "g2"), "combined_output_tokens"] == 45
+    assert not game["reasoning_estimated"].any()
+    # The cache telemetry is ignored, so every input token is at full price.
+    assert rows.loc[("priced", "g2"), "cached_input_tokens"] == 0
+    assert rows.loc[("priced", "g2"), "total_cost"] == pytest.approx(
+        100 / 1e6 * 1.0 + 45 / 1e6 * 2.0
+    )
+
+
+def test_cached_input_requires_the_cache_columns():
+    raw = _estimate_rows()  # no cached_input_tokens / repeated_input_tokens
+    with pytest.raises(AnalysisError, match="Cached-input estimates need"):
+        compute_game_costs(raw, FakeCatalog(cache={}))
+    # A catalog without cache_pricing still works on the old table shape.
+    compute_game_costs(raw, FakeCatalog())
+
+
+def test_summarize_game_costs_exposes_avg_cached_input():
+    records = compute_game_costs(_cache_rows(g2_repeated=200), FakeCatalog(cache={}))
+    summary = summarize_game_costs(records, ["player_type"])
+    row = summary.set_index("player_type").loc["priced"]
+    # g1 caches 400, g2 caches 200.
+    assert row["avg_cached_input"] == 300
 
 
 def test_catalog_rejects_non_boolean_reasoning_flag():

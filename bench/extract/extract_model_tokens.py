@@ -36,6 +36,8 @@ MODEL_TOKEN_FIELDNAMES = [
     "model_variants",
     "agent_names",
     "input_tokens",
+    "cached_input_tokens",
+    "repeated_input_tokens",
     "reasoning_tokens",
     "output_tokens",
     "reasoning_recorded_tokens",
@@ -57,6 +59,8 @@ OTEL_ERROR_STATUS_CODE = 2
 # A call counts as having fully reported reasoning when its reasoning tokens
 # exceed this multiple of its output tokens.
 RECORDED_REASONING_MIN_RATIO = 1.0
+
+STEP_SPAN_PATTERN = re.compile(r"\.step\.(\d+)$")
 
 PLAYER_TRACE_PATTERN = re.compile(
     r"^(?P<game_id>[0-9a-f-]+)-player-(?P<player_id>\d+)\.db$",
@@ -141,6 +145,7 @@ def _fetch_relevant_spans(cursor, trace_ids: List[str]) -> List[dict]:
             json_extract(attributes, '$."agent.name"') AS agent_name,
             json_extract(attributes, '$.model') AS model,
             CAST(COALESCE(json_extract(attributes, '$."tokens.input"'), 0) AS INTEGER) AS input_tokens,
+            CAST(COALESCE(json_extract(attributes, '$."tokens.input.cached"'), 0) AS INTEGER) AS cached_input_tokens,
             CAST(COALESCE(json_extract(attributes, '$."tokens.reasoning"'), 0) AS INTEGER) AS reasoning_tokens,
             CAST(COALESCE(json_extract(attributes, '$."tokens.output"'), 0) AS INTEGER) AS output_tokens
         FROM spans
@@ -167,8 +172,9 @@ def _fetch_relevant_spans(cursor, trace_ids: List[str]) -> List[dict]:
             "agent_name": row[6],
             "model_raw": row[7],
             "input_tokens": int(row[8] or 0),
-            "reasoning_tokens": int(row[9] or 0),
-            "output_tokens": int(row[10] or 0),
+            "cached_input_tokens": int(row[9] or 0),
+            "reasoning_tokens": int(row[10] or 0),
+            "output_tokens": int(row[11] or 0),
         })
     return spans
 
@@ -197,6 +203,8 @@ def _get_or_create_model_row(
             "model_name": catalog.canonicalize_model_name(model_base),
             "model_base": model_base,
             "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "repeated_input_tokens": 0,
             "reasoning_tokens": 0,
             "output_tokens": 0,
             "reasoning_recorded_tokens": 0,
@@ -228,6 +236,29 @@ def _find_owner_span(tool_span: dict, span_lookup: Dict[Tuple[str, str], dict]) 
     return None
 
 
+def _repeated_input_by_agent_span(spans: List[dict]) -> Dict[Tuple[str, str], int]:
+    """Sum the prompt overlap between consecutive steps of each agent run.
+
+    Each step's prompt extends the previous step's prompt, so the overlap of
+    steps ``k-1`` and ``k`` is ``min(input[k-1], input[k])``. Keyed by the
+    parent agent span's ``(trace_id, span_id)``; single-step runs are absent.
+    """
+    steps: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
+    for span in spans:
+        match = STEP_SPAN_PATTERN.search(span["name"]) if span["name"].startswith("agent.") else None
+        if not match or not span["parent_span_id"]:
+            continue
+        key = (span["trace_id"], span["parent_span_id"])
+        steps.setdefault(key, []).append((int(match.group(1)), span["input_tokens"]))
+    repeated = {}
+    for key, items in steps.items():
+        inputs = [tokens for _, tokens in sorted(items)]
+        overlap = sum(min(prev, cur) for prev, cur in zip(inputs, inputs[1:]))
+        if overlap:
+            repeated[key] = overlap
+    return repeated
+
+
 def _build_zero_token_row(
     experiment,
     game_id,
@@ -246,6 +277,8 @@ def _build_zero_token_row(
         "model_variants": VANILLA_MODEL_BASE,
         "agent_names": "",
         "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "repeated_input_tokens": 0,
         "reasoning_tokens": 0,
         "output_tokens": 0,
         "reasoning_recorded_tokens": 0,
@@ -321,6 +354,7 @@ def extract_player_model_token_rows(
 
     rows_by_model: Dict[str, dict] = {}
     span_lookup = {(span["trace_id"], span["span_id"]): span for span in spans}
+    repeated_input = _repeated_input_by_agent_span(spans)
 
     for span in spans:
         if not _is_top_level_agent_span(span["name"]) or not span["model_raw"]:
@@ -330,6 +364,8 @@ def extract_player_model_token_rows(
             player_type, span["model_raw"], valid_turn_count, failed_turns,
         )
         row["input_tokens"] += span["input_tokens"]
+        row["cached_input_tokens"] += span["cached_input_tokens"]
+        row["repeated_input_tokens"] += repeated_input.get((span["trace_id"], span["span_id"]), 0)
         row["reasoning_tokens"] += span["reasoning_tokens"]
         row["output_tokens"] += span["output_tokens"]
         # Tokens from calls whose reasoning looks fully reported; the usage
@@ -382,6 +418,8 @@ def extract_player_model_token_rows(
             "model_variants": "|".join(sorted(row["_model_variants"])),
             "agent_names": "|".join(sorted(row["_agent_names"])),
             "input_tokens": row["input_tokens"],
+            "cached_input_tokens": row["cached_input_tokens"],
+            "repeated_input_tokens": row["repeated_input_tokens"],
             "reasoning_tokens": row["reasoning_tokens"],
             "output_tokens": row["output_tokens"],
             "reasoning_recorded_tokens": row["reasoning_recorded_tokens"],

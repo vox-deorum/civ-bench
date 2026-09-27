@@ -339,6 +339,21 @@
       "pricing": { "input_per_million": 0.1, "output_per_million": 0.5 }
     }
   ],
+  "cache_pricing": {
+    "default_read_ratio": 0.1,
+    "families": {
+      "claude": {
+        "models": ["Opus-5", "Sonnet-5", "Sonnet-4.5", "Haiku-4.5"],
+        "read_ratio": 0.1,
+        "estimate": false
+      },
+      "claude-opus-5.5": {
+        "models": ["Opus-5.5"],
+        "read_ratio": 0.05,
+        "estimate": false
+      }
+    }
+  },
   "strategist_variants": {
     "Simple": {
       "suffix": "-Simple",

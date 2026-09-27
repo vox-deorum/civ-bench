@@ -307,6 +307,52 @@ def test_token_extraction_counts_latest_failed_turn_roots(tmp_path, catalog):
     assert row["total_tokens"] == 15
 
 
+def test_token_extraction_counts_cached_and_repeated_input(tmp_path, catalog):
+    from bench.extract.extract_model_tokens import extract_player_model_token_rows
+
+    trace = tmp_path / "abc-player-1.db"
+    conn = sqlite3.connect(trace)
+    conn.execute(
+        "CREATE TABLE spans (id INTEGER PRIMARY KEY, traceId TEXT, spanId TEXT, "
+        "parentSpanId TEXT, turn INTEGER, name TEXT, startTime INTEGER, "
+        "attributes TEXT, statusCode INTEGER)"
+    )
+    conn.executemany(
+        "INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (1, "ok", "ok-root", None, 1, "strategist.turn.1", 1, "{}", 1),
+            # A three-step agent run: consecutive prompts overlap by
+            # min(100, 150) + min(150, 180) = 250 repeated tokens, and the agent
+            # span itself reports 120 provider cache reads.
+            (2, "ok", "agent", "ok-root", 1, "agent.simple-strategist", 2,
+             '{"model":"openai-compatible/gpt-oss-120b","tokens.input.cached":120}', 1),
+            (3, "ok", "s1", "agent", 1, "agent.simple-strategist.step.1", 3,
+             '{"tokens.input":100}', 1),
+            (4, "ok", "s2", "agent", 1, "agent.simple-strategist.step.2", 4,
+             '{"tokens.input":150}', 1),
+            (5, "ok", "s3", "agent", 1, "agent.simple-strategist.step.3", 5,
+             '{"tokens.input":180}', 1),
+            # A single-step run of the same model contributes neither overlap
+            # nor cache reports.
+            (6, "ok", "agent2", "ok-root", 1, "agent.simple-strategist", 6,
+             '{"model":"openai-compatible/gpt-oss-120b"}', 1),
+            (7, "ok", "s4", "agent2", 1, "agent.simple-strategist.step.1", 7,
+             '{"tokens.input":100}', 1),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    rows = extract_player_model_token_rows(
+        str(trace), "abc", "ctrl", "GPT-OSS-120B", catalog
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["repeated_input_tokens"] == 250
+    assert row["cached_input_tokens"] == 120
+
+
 def test_all_failed_trace_uses_non_null_model_label(tmp_path, catalog):
     from bench.extract.extract_model_tokens import extract_player_model_token_rows
 

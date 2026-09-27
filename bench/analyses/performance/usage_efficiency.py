@@ -10,7 +10,7 @@ import pandas as pd
 from bench.analyses.base import Analysis, AnalysisContext, AnalysisResult
 from bench.analyses.errors import AnalysisError
 from bench.analyses.performance.usage import (
-    COST_NOTE, compute_game_costs, plot_usage_figures, reasoning_estimate_note,
+    compute_game_costs, cost_note, plot_usage_figures, reasoning_estimate_note,
     summarize_game_costs,
 )
 
@@ -84,7 +84,11 @@ class PerformanceUsageEfficiency(Analysis):
             )
 
         tokens = ctx.apply_filter(ctx.load_table("tokens"))
-        records = compute_game_costs(tokens, ctx.catalog)
+        switches = ctx.token_estimates()
+        records = compute_game_costs(
+            tokens, ctx.catalog,
+            estimate_reasoning=switches["reasoning"], cached_input=switches["cached_input"],
+        )
         estimated_models = sorted(records.loc[records["reasoning_estimated"], "model"].unique())
         reasoning_note = reasoning_estimate_note(estimated_models)
         usage = summarize_game_costs(records, ["player_type"])
@@ -117,7 +121,7 @@ class PerformanceUsageEfficiency(Analysis):
         figures = plot_usage_figures(nonbaseline, ctx, ratings, currency=currency)
         fig = self._plot(
             table, ctx, spec, currency, log_x, annotate, fits,
-            baseline_elo, baseline_name, null_baseline_elo, reasoning_note,
+            baseline_elo, baseline_name, null_baseline_elo, reasoning_note, switches["cached_input"],
         )
         if fig is not None:
             figures["usage_vs_rating"] = fig
@@ -144,7 +148,7 @@ class PerformanceUsageEfficiency(Analysis):
             "dropped_baselines": int(baseline_mask.sum()),
             "unpriced_identities": int(nonbaseline["avg_cost_per_player_game"].isna().sum()),
             "unrated_identities": int((~nonbaseline["player_type"].isin(ratings["player_type"])).sum()),
-            "cost_basis": "per player per complete game", "cached_tokens_accounted_for": False,
+            "cost_basis": "per player per complete game", "cached_input_estimated": switches["cached_input"],
             "efficiency_metric": "elo - expected_elo",
             "usage_skill_equation": "expected_elo = intercept + slope * log10(average_usage)",
             "usage_skill_fits": fits, "baseline_elo": baseline_elo, "baseline_name": baseline_name,
@@ -160,7 +164,7 @@ class PerformanceUsageEfficiency(Analysis):
     @staticmethod
     def _plot(
         table, ctx, spec, currency, log_x, annotate, fits,
-        baseline_elo, baseline_name, null_baseline_elo=None, reasoning_note="",
+        baseline_elo, baseline_name, null_baseline_elo=None, reasoning_note="", cached_input=False,
     ):
         import plotly.graph_objects as go
 
@@ -188,7 +192,9 @@ class PerformanceUsageEfficiency(Analysis):
             annotations = [{
                 "x": 0, "y": -0.19, "xref": "paper", "yref": "paper", "xanchor": "left",
                 "text": "Hover for details. Select a resource above. Click legend entries to filter.<br>"
-                        "Costs exclude cache discounts. Output includes reasoning tokens."
+                        + ("Costs price cached input at the cache-read rate." if cached_input
+                           else "Costs exclude cache discounts.")
+                        + " Output includes reasoning tokens."
                         + (f"<br>{escape(reasoning_note)}" if reasoning_note else ""),
                 "showarrow": False, "align": "left", "font": {"size": 11},
             }, {
@@ -244,6 +250,7 @@ class PerformanceUsageEfficiency(Analysis):
                         f"{number(row['avg_cost_per_player_game'], ',.4g')} {currency.upper()}",
                         number(row["avg_input"]), number(row["avg_output"]),
                         number(complete), number(incomplete), label,
+                        number(row.get("avg_cached_input")),
                     ])
                 fig.add_trace(go.Scatter(
                     x=group[column].tolist(), y=group["elo"].tolist(), name=escape(str(identity)),
@@ -295,13 +302,15 @@ class PerformanceUsageEfficiency(Analysis):
                           "xanchor": "left", "yanchor": "top", "active": 0}],
             meta={"table_tooltip": {
                 "title_index": 0, "subtitle_index": 1,
-                "note": "Averages per player per game. Counts are player-games for the selected resource. Output includes reasoning."
+                "note": "Averages per player per game. Counts are player-games for the selected resource. "
+                        + cost_note(cached_input)
                         + (f" {reasoning_note}" if reasoning_note else ""),
                 "rows": [
                     {"label": "Elo", "index": 2, "emphasis": True},
                     {"label": "Elo above fit", "index": 4, "emphasis": True},
                     {"label": "Avg. cost", "index": 6},
                     {"label": "Avg. input tokens", "index": 7},
+                    {"label": "Avg. cached input", "index": 12},
                     {"label": "Avg. output tokens", "index": 8},
                     {"label": "Missing data", "index": 10},
                 ],

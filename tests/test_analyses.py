@@ -58,6 +58,7 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
             tokens.append({"experiment": exp, "game_id": gid, "player_id": pid, "player_type": pt,
                            "model_name": model, "model_base": model,
                            "input_tokens": 1000 * (pid + 1), "reasoning_tokens": 100,
+                           "cached_input_tokens": 0, "repeated_input_tokens": 0,
                            "output_tokens": 200 * (pid + 1), "total_tokens": 0,
                            "focus_briefer_count": 0, "valid_turn_count": 5,
                            "failed_turn_count": 0, "failure_pct": 0.0,
@@ -938,7 +939,7 @@ def test_performance_usage_efficiency_outputs(env):
                for name in ("cost", "input_tokens", "output_tokens"))
     assert by_player["player_type"].is_unique
     assert r.metadata["cost_basis"] == "per player per complete game"
-    assert r.metadata["cached_tokens_accounted_for"] is False
+    assert r.metadata["cached_input_estimated"] is True
 
 
 def test_token_costs_average_players_and_keep_complete_records(env):
@@ -949,6 +950,7 @@ def test_token_costs_average_players_and_keep_complete_records(env):
     tokens = pd.DataFrame([
         {"game_id": "G", "player_id": pid, "player_type": identity,
          "model_name": "gpt-oss-120b", "input_tokens": inputs,
+         "cached_input_tokens": 0, "repeated_input_tokens": 0,
          "output_tokens": outputs, "reasoning_tokens": reasoning}
         for pid, identity, inputs, outputs, reasoning in [
             (0, "GPT-OSS-120B", 1000, 100, 10),
@@ -986,6 +988,7 @@ def test_token_costs_combine_models_for_one_player(env):
     tokens = pd.DataFrame([
         {"game_id": "G", "player_id": 0, "player_type": "Mixed",
          "model_name": model, "input_tokens": 1000,
+         "cached_input_tokens": 0, "repeated_input_tokens": 0,
          "output_tokens": 100, "reasoning_tokens": 20}
         for model in ["gpt-oss-120b", "kimi-k2.5"]
     ])
@@ -1005,6 +1008,8 @@ def test_compute_game_costs_accepts_missing_model_name(env):
         "player_type": "TestLLM",
         "model_name": np.nan,
         "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "repeated_input_tokens": 0,
         "reasoning_tokens": 0,
         "output_tokens": 0,
     }])
@@ -1147,7 +1152,7 @@ def test_usage_vs_rating_outputs_and_excludes_baseline(env):
             "efficiency_elo_cost", "complete_player_games"} <= set(table.columns)
     assert table["efficiency_elo_cost"].isna().all()
     assert "at least three rated identities" in r.summary
-    assert r.metadata["cached_tokens_accounted_for"] is False
+    assert r.metadata["cached_input_estimated"] is True
     path = Path(r.figure_paths["usage_vs_rating"])
     assert path.suffix == ".html"
     html = path.read_text(encoding="utf-8")

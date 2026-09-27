@@ -13,10 +13,23 @@ import pandas as pd
 from bench.analyses.errors import AnalysisError
 
 
-COST_NOTE = (
-    "Costs do not account for cached tokens or cache discounts. "
-    "Output token averages include reasoning tokens."
-)
+CACHE_COLUMNS = ("cached_input_tokens", "repeated_input_tokens")
+
+
+def cost_note(cached_input: bool) -> str:
+    """Describe how costs treat cached input."""
+    if not cached_input:
+        return (
+            "Costs do not account for cached tokens or cache discounts. "
+            "Output token averages include reasoning tokens."
+        )
+    return (
+        "Cached input is estimated. Within each multi-step agent run, a step's "
+        "prompt overlap with the previous step is priced at the cache-read rate, "
+        "or the provider-reported cache count is used when it is higher. Claude "
+        "models use only provider-reported cache counts. Output token averages "
+        "include reasoning tokens."
+    )
 
 
 def _complete_sum(s: pd.Series) -> float:
@@ -73,13 +86,55 @@ def _estimate_missing_reasoning(df: pd.DataFrame, catalog) -> pd.Series:
     return estimated
 
 
-def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
-    """Price token rows and aggregate them to model/player/game records."""
+def _cached_input(df: pd.DataFrame, catalog) -> tuple[pd.Series, pd.Series]:
+    """Return per-row cached input tokens and cache-read price ratios.
+
+    Cached input is the larger of the provider-reported cache reads and the
+    prompt overlap between consecutive steps, capped at the row's input. Models
+    whose ``cache_pricing`` family sets ``"estimate": false`` use only the
+    reported count. Without ``cache_pricing`` in the catalog, nothing is cached.
+    """
+    policies = {model: catalog.cache_policy(model) for model in df["model"].unique()}
+    if not any(policies.values()):
+        return pd.Series(0.0, index=df.index), pd.Series(0.0, index=df.index)
+    missing = [column for column in CACHE_COLUMNS if column not in df.columns]
+    if missing:
+        raise AnalysisError(
+            f"Cached-input estimates need the {missing} columns in the tokens table. "
+            "Re-run `civ-bench extract` to rebuild it, or set "
+            '"token_estimates": {"cached_input": false} in the run spec.'
+        )
+    ratio = df["model"].map(lambda model: policies[model][0] if policies[model] else 0.0)
+    estimate = df["model"].map(lambda model: bool(policies[model] and policies[model][1]))
+    enabled = df["model"].map(lambda model: policies[model] is not None)
+    reported = pd.to_numeric(df["cached_input_tokens"], errors="coerce").fillna(0)
+    repeated = pd.to_numeric(df["repeated_input_tokens"], errors="coerce").fillna(0)
+    cached = reported.where(~estimate, np.maximum(reported, repeated))
+    cached = np.minimum(cached, df["input_tokens"]).where(enabled, 0.0)
+    return cached.astype(float), ratio.astype(float)
+
+
+def compute_game_costs(
+    tokens_df: pd.DataFrame,
+    catalog,
+    *,
+    estimate_reasoning: bool = True,
+    cached_input: bool = True,
+) -> pd.DataFrame:
+    """Price token rows and aggregate them to model/player/game records.
+
+    ``estimate_reasoning`` fills in missing reasoning for flagged models, and
+    ``cached_input`` prices cached input at the cache-read rate. Both mirror the
+    run spec's root ``token_estimates`` switches.
+    """
     pricing = catalog.pricing_per_million()
     df = tokens_df.copy()
     names = df["model_name"].where(df["model_name"].notna(), "Unattributed")
     df["model"] = names.astype(str).apply(catalog.canonicalize_model_name)
-    df["reasoning_estimated"] = _estimate_missing_reasoning(df, catalog)
+    if estimate_reasoning:
+        df["reasoning_estimated"] = _estimate_missing_reasoning(df, catalog)
+    else:
+        df["reasoning_estimated"] = False
 
     def numeric_column(name: str) -> pd.Series:
         if name not in df.columns:
@@ -91,14 +146,21 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
         + numeric_column("output_tokens").fillna(0)
     )
     df["input_tokens"] = numeric_column("input_tokens")
+    if cached_input:
+        df["cached_input_tokens"], read_ratio = _cached_input(df, catalog)
+    else:
+        df["cached_input_tokens"], read_ratio = 0.0, 0.0
+    # Keep missing input telemetry missing so the aggregate stays incomplete.
+    df["cached_input_tokens"] = df["cached_input_tokens"].where(df["input_tokens"].notna())
     df["input_per_million"] = df["model"].map(
         lambda model: pricing.get(model, {}).get("input_per_million")
     )
     df["output_per_million"] = df["model"].map(
         lambda model: pricing.get(model, {}).get("output_per_million")
     )
+    uncached = df["input_tokens"] - df["cached_input_tokens"]
     df["row_cost"] = (
-        df["input_tokens"] / 1_000_000 * df["input_per_million"]
+        (uncached + df["cached_input_tokens"] * read_ratio) / 1_000_000 * df["input_per_million"]
         + df["combined_output_tokens"] / 1_000_000 * df["output_per_million"]
     )
     identity_cols = ["game_id"]
@@ -108,6 +170,7 @@ def compute_game_costs(tokens_df: pd.DataFrame, catalog) -> pd.DataFrame:
     identity_cols.append("model")
     per_game = df.groupby(identity_cols, as_index=False).agg(
         input_tokens=("input_tokens", _complete_sum),
+        cached_input_tokens=("cached_input_tokens", _complete_sum),
         combined_output_tokens=("combined_output_tokens", _complete_sum),
         total_cost=("row_cost", _complete_sum),
         input_per_million=("input_per_million", "first"),
@@ -142,8 +205,11 @@ def summarize_game_costs(
         if column in work.columns and column not in group_cols:
             identity_cols.append(column)
     keys = [*identity_cols, *group_cols]
+    if "cached_input_tokens" not in work.columns:
+        work["cached_input_tokens"] = 0.0
     per_game = work.groupby(keys, as_index=False).agg(
         input_tokens=("input_tokens", _complete_sum),
+        cached_input_tokens=("cached_input_tokens", _complete_sum),
         combined_output_tokens=("combined_output_tokens", _complete_sum),
         total_cost=("total_cost", _complete_sum),
     )
@@ -163,6 +229,7 @@ def summarize_game_costs(
     )
     token_av = token_valid.groupby(group_cols, as_index=False).agg(
         avg_input=("input_tokens", "mean"),
+        avg_cached_input=("cached_input_tokens", "mean"),
         avg_output=("combined_output_tokens", "mean"),
     )
     cost_av = cost_valid.groupby(group_cols, as_index=False).agg(

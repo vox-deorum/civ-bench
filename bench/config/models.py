@@ -98,6 +98,8 @@ class RunConfig:
     friendly_name: str = ""
     description: str = ""
     presentation: dict = field(default_factory=dict)
+    # Root ``token_estimates`` switches: {"reasoning": bool, "cached_input": bool}.
+    token_estimates: dict = field(default_factory=dict)
     filters: dict = field(default_factory=dict)
     groupings: dict = field(default_factory=dict)
     data: dict = field(default_factory=dict)

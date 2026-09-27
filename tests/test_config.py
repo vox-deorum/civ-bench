@@ -126,6 +126,32 @@ def test_presentation_stage_overrides_only_on_supported_modules(dev_spec, write_
         load_config(write_spec(dev_spec))
 
 
+# ── token estimates ───────────────────────────────────────────────────────────
+def test_token_estimates_default_to_on(dev_spec, write_spec):
+    """Absent block: both switches default to true."""
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.token_estimates == {"reasoning": True, "cached_input": True}
+
+
+def test_token_estimates_missing_switch_keeps_its_default(dev_spec, write_spec):
+    dev_spec["token_estimates"] = {"cached_input": False}
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.token_estimates == {"reasoning": True, "cached_input": False}
+
+
+@pytest.mark.parametrize(
+    "block, match",
+    [
+        ({"bogus": True}, "unknown key"),
+        ({"reasoning": 3}, "token_estimates.reasoning"),
+    ],
+)
+def test_bad_token_estimates_is_loud(dev_spec, write_spec, block, match):
+    dev_spec["token_estimates"] = block
+    with pytest.raises(ConfigError, match=match):
+        load_config(write_spec(dev_spec))
+
+
 def test_uses_analyses_orders_consumer_after_producer(dev_spec, write_spec):
     _analysis(dev_spec, "perf_usage_efficiency")["uses"]["analyses"] = ["bt_main"]
     cfg = load_config(write_spec(dev_spec))

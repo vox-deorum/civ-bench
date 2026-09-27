@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from bench.catalog import Catalog
+from bench.config.errors import ConfigError
 
 
 @pytest.fixture
@@ -185,3 +186,50 @@ def test_split_condition_suffix_longest_baselines_and_explicit_restriction():
     assert cat.split_condition_suffix("Model-Simple-Per-5", ["-5"]) == (
         "Model-Simple-Per", "-5"
     )
+
+
+# ── cache_pricing ─────────────────────────────────────────────────────────────
+def _cache_catalog(cache_pricing):
+    return Catalog(
+        {
+            "strategist_models": [{"id": "A"}, {"id": "B"}],
+            "cache_pricing": cache_pricing,
+        },
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    "cache_pricing",
+    [
+        {"default_read_ratio": 0.1, "families": {}, "bogus": 1},
+        {"default_read_ratio": 1.5, "families": {}},
+        {"default_read_ratio": 0.1,
+         "families": {"f": {"models": ["A"], "read_ratio": -0.1}}},
+        {"default_read_ratio": 0.1, "families": {"f": {"models": ["A"], "bogus": 1}}},
+        {"default_read_ratio": 0.1, "families": {"f": {"models": []}}},
+        {"default_read_ratio": 0.1, "families": {"f": {"models": ["ghost"]}}},
+        {"default_read_ratio": 0.1,
+         "families": {"f1": {"models": ["A"]}, "f2": {"models": ["A"]}}},
+        {"default_read_ratio": 0.1,
+         "families": {"f": {"models": ["A"], "estimate": "no"}}},
+    ],
+)
+def test_cache_pricing_rejects_bad_blocks(cache_pricing):
+    with pytest.raises(ConfigError):
+        _cache_catalog(cache_pricing)
+
+
+def test_cache_policy_resolves_families_and_default():
+    cat = _cache_catalog({
+        "default_read_ratio": 0.2,
+        "families": {"f": {"models": ["A"], "read_ratio": 0.05, "estimate": False}},
+    })
+    assert cat.cache_policy("A") == (0.05, False)
+    # models outside any family fall back to the default with estimating on
+    assert cat.cache_policy("B") == (0.2, True)
+
+
+def test_cache_policy_without_block_is_none():
+    cat = Catalog({"strategist_models": [{"id": "A"}]}, {})
+    assert cat.cache_policy("A") is None

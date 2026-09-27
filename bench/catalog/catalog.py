@@ -61,6 +61,7 @@ class Catalog:
                     f"models.json strategist_models '{model.get('id')}'.estimate_reasoning "
                     f"must be true or false, got {flag!r}."
                 )
+        self._cache_policies = self._build_cache_policies()
 
     # ── construction ────────────────────────────────────────────────────────
     @classmethod
@@ -366,6 +367,70 @@ class Catalog:
         return {
             m["id"] for m in self.strategist_models() if m.get("estimate_reasoning", False)
         }
+
+    def _build_cache_policies(self) -> dict[str, tuple[float, bool]] | None:
+        """Validate ``cache_pricing`` into ``{model_id: (read_ratio, estimate)}``.
+
+        Returns ``None`` when the block is absent, which turns cache accounting off.
+        """
+        from bench.config.errors import ConfigError
+
+        block = self._models.get("cache_pricing")
+        if block is None:
+            return None
+        where = "models.json cache_pricing"
+
+        def check_keys(obj, allowed, at):
+            if not isinstance(obj, dict):
+                raise ConfigError(f"{at} must be an object.")
+            unknown = sorted(set(obj) - allowed)
+            if unknown:
+                raise ConfigError(f"{at}: unknown key(s) {unknown}. Allowed: {sorted(allowed)}.")
+
+        def check_ratio(value, at):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+                raise ConfigError(f"{at} must be a number from 0 to 1, got {value!r}.")
+            return float(value)
+
+        check_keys(block, {"default_read_ratio", "families"}, where)
+        default = check_ratio(block.get("default_read_ratio"), f"{where}.default_read_ratio")
+        known = {m["id"] for m in self._strategist_models}
+        families = block.get("families") or {}
+        if not isinstance(families, dict):
+            raise ConfigError(f"{where}.families must be an object.")
+        policies: dict[str, tuple[float, bool]] = {}
+        owner: dict[str, str] = {}
+        for name, family in families.items():
+            at = f"{where}.families.{name}"
+            check_keys(family, {"models", "read_ratio", "estimate"}, at)
+            models = family.get("models")
+            if not isinstance(models, list) or not models or not all(isinstance(m, str) for m in models):
+                raise ConfigError(f"{at}.models must be a non-empty list of model ids.")
+            ratio = check_ratio(family["read_ratio"], f"{at}.read_ratio") if "read_ratio" in family else default
+            estimate = family.get("estimate", True)
+            if not isinstance(estimate, bool):
+                raise ConfigError(f"{at}.estimate must be true or false, got {estimate!r}.")
+            for model in models:
+                if model not in known:
+                    raise ConfigError(f"{at}.models: '{model}' is not a strategist_models id.")
+                if model in owner:
+                    raise ConfigError(
+                        f"{at}.models: '{model}' is already in family '{owner[model]}'."
+                    )
+                owner[model] = name
+                policies[model] = (ratio, estimate)
+        policies[None] = (default, True)
+        return policies
+
+    def cache_policy(self, model_id: str) -> tuple[float, bool] | None:
+        """Return ``(read_ratio, estimate)`` for a model, or ``None`` without ``cache_pricing``.
+
+        ``estimate`` is false for families whose cached input comes only from
+        provider reports, never from the step-overlap estimate.
+        """
+        if self._cache_policies is None:
+            return None
+        return self._cache_policies.get(model_id, self._cache_policies[None])
 
     def strategist_model_colors(self) -> dict:
         return {m["id"]: m["color"] for m in self.strategist_models()}

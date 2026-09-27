@@ -16,6 +16,7 @@ TOP_LEVEL_OPTIONAL = (
     "description",
     "output",
     "presentation",
+    "token_estimates",
     "catalogs",
     "filters",
     "groupings",
@@ -34,6 +35,9 @@ PRESENTATION_KEYS = {"condition_pairing", "matchup_display"}
 CONDITION_PAIRING_KEYS = {"enabled", "suffixes", "base_label", "sort_condition"}
 CONDITION_PAIRING_OVERRIDE_KEYS = {"enabled", "suffixes", "sort_condition"}
 MATCHUP_DISPLAY = {"matrix", "vs_reference"}
+
+# ── token estimates ─────────────────────────────────────────────────────
+TOKEN_ESTIMATE_KEYS = ("reasoning", "cached_input")
 
 # ── catalogs ───────────────────────────────────────────────────────────────
 CATALOG_KEYS = {"paths", "models", "experiments"}

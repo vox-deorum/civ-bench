@@ -45,6 +45,7 @@ The dependency graph is resolved once at config-load time and then reused by the
 
   "output":     { /* §2.1 */ },          // optional: run output root + variant suffix (→ reports/, reports-cross/)
   "presentation": { /* §2.2 */ },        // optional: paired-condition and matchup figure display
+  "token_estimates": { /* §2.3 */ },     // optional: reasoning and cached-input cost switches
 
   "catalogs": {                          // optional: override lazily loaded sibling config files
     "paths":       "configs/paths.json",
@@ -63,7 +64,7 @@ The dependency graph is resolved once at config-load time and then reused by the
 }
 ```
 
-Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `friendly_name`, `description`, `output`, `presentation`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate. `friendly_name` is an optional human title: when set it becomes the report page title unless `report.title` overrides it, and `description` renders under the title on the report page (§7).
+Top-level keys: `name`, `seed`, `data`, `analyses`, `report` are **required**; `friendly_name`, `description`, `output`, `presentation`, `token_estimates`, `catalogs`, `filters`, `groupings`, `estimators`, and `adjust` are optional. Omit `estimators` (and `adjust`) for a run with no strength-based ratings; conversely, `ratings.bradley_terry`, `ratings.plackett_luce`, and `ratings.matchups` need an `adjust` stage to supply the `strength` table they rate. `friendly_name` is an optional human title: when set it becomes the report page title unless `report.title` overrides it, and `description` renders under the title on the report page (§7).
 
 **`catalogs` is lazy.** If omitted, each catalog-using stage resolves `paths.json`, `models.json`, and `experiments.json` from the **same directory as this run-spec file** only when it needs that catalog. Set a key only to point at a file elsewhere; unset keys still fall back to the sibling. A missing catalog is a load error only when an enabled stage needs it (for example, an estimator needs `models.json`, and orthodox `player_type` composition needs the model/experiment catalogs). Runs that do not touch a catalog do not require that sibling file to exist.
 
@@ -120,6 +121,21 @@ overrides the global block. Matchup modules accept `params.display`. In
 mode they keep their matrix CSVs but render interactive row-vs-Vanilla forest
 plots (paired when pairing is enabled). If Vanilla is absent, they warn and
 render the matrix instead.
+
+### 2.3 `token_estimates`: reasoning and cached-input switches
+
+```jsonc
+"token_estimates": {
+  "reasoning": true,       // default true: apply estimate_reasoning fill-ins (§6.2)
+  "cached_input": true     // default true: price cached input at the cache-read rate (§6.2)
+}
+```
+
+Both switches are optional, default to true, and accept a boolean or the
+strings `"true"` / `"false"`; unknown keys fail on load. `reasoning: false`
+skips the `estimate_reasoning` fill-in for every model. `cached_input: false`
+prices all input at the full rate, the behavior before cache accounting
+existed.
 
 ---
 
@@ -886,11 +902,51 @@ each showing the average metric per player per game. Models used by the same
 player in a game are summed
 before averaging across complete player-game records. Output tokens include
 reasoning. Token averages remain available when pricing is unknown; cost averages
-require complete telemetry and known prices. Costs exclude cache discounts.
+require complete telemetry and known prices. When the model catalog sets
+`cache_pricing` (below) and `token_estimates.cached_input` is on (§2.3), costs
+price cached input at the cache-read rate instead of the full input rate. Per
+tokens-table row the cached amount is
+`min(input_tokens, max(cached_input_tokens, repeated_input_tokens))` and the
+row costs `(input - cached) * input_price + cached * input_price * read_ratio
++ (reasoning + output) * output_price`; cache-write surcharges are ignored.
+Models in a family with `"estimate": false` use only the provider-reported
+count, so their cached amount is `min(input_tokens, cached_input_tokens)`. The
+tokens table carries the two facts behind this: `cached_input_tokens` (the
+provider-reported `tokens.input.cached` summed over agent spans, 0 when not
+reported) and `repeated_input_tokens` (per agent run, its step spans
+`agent.<name>.step.<k>` sorted by k, summing `min(input[k-1], input[k])` for
+k >= 2; a single-step run adds 0). A tokens table extracted with the older
+header is rebuilt automatically by the next `civ-bench extract`. The `usage`
+table gains `avg_cached_input`, and the interactive chart tooltip states the
+cached-input rule and shows the value. Result metadata reports the switch as
+`cached_input_estimated`.
+
+Cache pricing is an optional top-level `cache_pricing` block in
+`configs/models.json`. Without it, nothing is treated as cached.
+
+```jsonc
+"cache_pricing": {
+  "default_read_ratio": 0.1,  // required: cache-read price as a share of the input price
+  "families": {               // optional: per-model overrides keyed by family name
+    "claude":     { "models": ["Opus-5", "Sonnet-5", "Sonnet-4.5", "Haiku-4.5"], "read_ratio": 0.1, "estimate": false },
+    "claude-opus-5.5": { "models": ["Opus-5.5"], "read_ratio": 0.05, "estimate": false }
+  }
+}
+```
+
+`default_read_ratio` is a number from 0 to 1. A family takes `models` (a
+non-empty list of `strategist_models` ids; a model may belong to only one
+family), an optional `read_ratio` (defaults to `default_read_ratio`), and an
+optional boolean `estimate` (default true; false prices only
+provider-reported cache reads, never the step-overlap estimate). Unknown keys
+and invalid values are load errors. The shipped catalog puts the Claude
+models in reported-only families at read ratio 0.1, with Opus-5.5 at 0.05.
 
 Some providers report reasoning tokens on only part of a model's calls. Setting
 `"estimate_reasoning": true` on a `strategist_models` entry in
-`configs/models.json` fills in the gap for that model. A call counts as fully
+`configs/models.json` fills in the gap for that model; setting
+`token_estimates.reasoning: false` (§2.3) skips the fill-in for every model.
+A call counts as fully
 reported when its reasoning tokens exceed its output tokens. The
 tokens table records `reasoning_recorded_tokens` and
 `reasoning_recorded_output_tokens`, the reasoning and output tokens from those
@@ -933,7 +989,8 @@ within the displayed cohort, not predictions of gains from spending more.
 
 `usage_skill_fits` metadata and output columns use the metric keys `cost`, `input`,
 and `output`, such as `expected_elo_cost` and `efficiency_elo_cost`. Tables include
-`avg_cost_per_player_game`, `avg_input`, `avg_output`, and `player_games`.
+`avg_cost_per_player_game`, `avg_input`, `avg_cached_input`, `avg_output`, and
+`player_games`.
 `token_complete_player_games` and `token_na_player_games` count token coverage;
 `cost_complete_player_games` and `cost_na_player_games` count cost coverage.
 `complete_player_games` and `na_player_games` are aliases for the cost counts.
@@ -1277,3 +1334,4 @@ Publishing shells out to `git`, so `git` must be on `PATH` with `user.name` and 
 15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"`, `"best"`, or a `-`-prefixed suffix and, with an explicit list, a suffix must be a member (`"base"` and `"best"` need no membership). `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.
 16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.
 17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. Each `uses.analyses` entry must name an analysis whose module offers a Matched Maps tab (`MATCHED_MAPS_TAB_MODULES`, currently `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`, and `behavior.policies`); any other module is an error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).
+18. **Token estimates and cache pricing** (§2.3, §6.2): `token_estimates`, when present, accepts only `reasoning` and `cached_input`, each a boolean or the string `"true"`/`"false"`, defaulting to true; unknown keys fail. In `configs/models.json`, `cache_pricing`, when present, requires a numeric `default_read_ratio` in `[0, 1]` and a `families` object whose entries accept only `models`, `read_ratio`, and `estimate`: `models` is a non-empty list of `strategist_models` ids (unknown ids, non-strings, and membership in two families are errors), `read_ratio` is a number in `[0, 1]`, and `estimate` is a boolean.

@@ -135,6 +135,14 @@ class AnalysisContext:
             self.catalog,
         )
 
+    def token_estimates(self) -> dict:
+        """Root ``token_estimates`` switches, each defaulting to on."""
+        block = getattr(self.config, "token_estimates", None) or {}
+        return {
+            "reasoning": bool(block.get("reasoning", True)),
+            "cached_input": bool(block.get("cached_input", True)),
+        }
+
     def matchup_display(self) -> str:
         """Effective matchup figure mode (stage param > global > matrix)."""
         return str(

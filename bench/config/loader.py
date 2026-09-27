@@ -165,6 +165,19 @@ def _validate_presentation(presentation: Any) -> None:
         )
 
 
+def _parse_token_estimates(raw: dict) -> dict:
+    """Resolve the root ``token_estimates`` switches; every switch defaults on."""
+    block = raw.get("token_estimates")
+    if block is None:
+        block = {}
+    _require_mapping(block, "token_estimates")
+    _check_keys(block, set(S.TOKEN_ESTIMATE_KEYS), "token_estimates")
+    return {
+        key: coerce_bool(block.get(key, True), f"token_estimates.{key}")
+        for key in S.TOKEN_ESTIMATE_KEYS
+    }
+
+
 # ── data (§3) ───────────────────────────────────────────────────────────────
 def _validate_data(data: dict, presets: dict) -> dict:
     """Validate the `data` block and return the resolved global filter."""
@@ -793,6 +806,7 @@ def load_config(path: str | Path) -> RunConfig:
 
     output = _parse_output(raw)
     _validate_presentation(raw.get("presentation"))
+    token_estimates = _parse_token_estimates(raw)
     global_filter = _validate_data(raw["data"], presets)
     _validate_report(raw["report"])
 
@@ -805,6 +819,7 @@ def load_config(path: str | Path) -> RunConfig:
         friendly_name=friendly_name or "",
         description=raw.get("description", ""),
         presentation=raw.get("presentation") or {},
+        token_estimates=token_estimates,
         filters=presets,
         groupings=groupings,
         data=raw["data"],
