@@ -33,9 +33,7 @@ def cost_note(cached_input: bool, reported_only: list[str] = ()) -> str:
         if reported_only else ""
     )
     return (
-        "Cached input is estimated. Within each multi-step agent run, a step's "
-        "prompt overlap with the previous step is priced at the cache-read rate, "
-        "or the provider-reported cache count is used when it is higher. "
+        "Cached input may be estimated. "
         f"{reported}Output token averages include reasoning tokens."
     )
 
