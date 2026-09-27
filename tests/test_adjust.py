@@ -20,7 +20,7 @@ import pytest
 from bench.catalog import Catalog
 from bench.config import load_config
 from bench.adjust import AdjustError, run_adjust
-from bench.adjust.strength import build_strength_panel
+from bench.adjust.strength import build_strength_panel, cell_score
 from bench.stats.transforms import inv_logit, logit
 
 
@@ -641,3 +641,17 @@ def test_build_strength_panel_drops_flagged_games(tmp_path, catalog):
     assert set(art.panel["game_id"]) == {"g1"}
     # … nor to the civ-effects fit (Spain/Greece only appear in the flagged game)
     assert set(art.civ_effects["civilization"]) <= {"Rome", "Egypt"}
+
+
+def test_cell_score_curve():
+    x = logit(np.array([0.001, 0.01, 0.02, 0.1, 0.5, 0.9]))
+    for b in (0.002, 0.1, 0.63):
+        # bend 1 is the plain logit difference; any bend is level (0.5) at x = b
+        assert np.allclose(cell_score(x, logit(b), 1.0), inv_logit(x - logit(b)))
+        assert cell_score(logit(b), logit(b), 0.5) == pytest.approx(0.5)
+    # a flatter gain side over a weak baseline, monotone in x
+    y = cell_score(x, logit(0.002), 0.5)
+    assert np.all(np.diff(y) > 0)
+    assert y[1] < inv_logit(x[1] - logit(0.002))
+    # b >= 0.5 keeps the logit difference for every bend
+    assert np.allclose(cell_score(x, logit(0.63), 0.5), inv_logit(x - logit(0.63)))

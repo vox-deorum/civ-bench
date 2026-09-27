@@ -339,6 +339,12 @@ def _validate_strength_params(params: dict, where: str) -> None:
             raise ConfigError(
                 f"{where}.params.turn_progress_min: must be numeric in [0, 1]."
             )
+    if "cell_gain_bend" in params:
+        value = params["cell_gain_bend"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ConfigError(
+                f"{where}.params.cell_gain_bend: must be numeric in [0, 1]."
+            )
     if "enforce_winner" in params:
         params["enforce_winner"] = coerce_bool(
             params["enforce_winner"], f"{where}.params.enforce_winner"

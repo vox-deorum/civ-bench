@@ -212,8 +212,8 @@ def adjusted_curves(
     That value goes through the strength stage's own controlled adjustment
     (:func:`bench.adjust.strength.cell_adjust_rows`) with that stage's
     ``params``: leader normalization when ``relative_to`` is set, the clipped
-    logit, the matched start-cell VPAI baseline, the inverse logit of the
-    difference, and ``post_cell_normalize``. The curve is therefore the
+    logit, the matched start-cell VPAI baseline, the cell score with
+    ``cell_gain_bend``, and ``post_cell_normalize``. The curve is therefore the
     rating's adjusted strength if the game ended at ``t``; its last point
     approximates the panel value, and it starts after ``turn_progress_min``.
     0.5 means level with the matched baseline. Winner enforcement is off,

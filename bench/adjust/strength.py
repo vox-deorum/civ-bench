@@ -44,6 +44,9 @@ DEFAULT_PARAMS = {
     "block": "auto",
     "baseline_experiment": None,
     "post_cell_normalize": "none",
+    # Gain-side bend of the controlled cell curve: 1 is the plain logit
+    # difference, 0 a straight gain side. See cell_score.
+    "cell_gain_bend": 0.5,
 }
 
 # The persisted panel column contract (Done criterion). The first columns are the
@@ -400,6 +403,32 @@ def _normalize_to_leader(df: pd.DataFrame, mask: pd.Series) -> None:
     df.loc[mask, "adjusted_strength"] = df.loc[mask, "adjusted_strength"] / gmax
 
 
+def cell_score(logit_strength, baseline, bend: float):
+    """Score a seat against its matched cell baseline, with 0.5 meaning level.
+
+    ``x`` and ``b`` are the inverse logits of the seat's ``logit_strength`` and
+    the cell's mean-logit ``baseline``. The curve has two pieces that meet at
+    (b, 0.5) with equal slopes:
+
+    - gain side, x >= b: ``h = (x-b)/(1-b)``, ``y = 0.5 + 0.5 h / (h + r(1-h))``
+    - loss side, x < b: ``s = x/b``, ``y = 0.5 s / (s + q(1-s))``, ``q = b / (r(1-b))``
+
+    For b < 0.5, ``r = (2b)^bend``. ``bend = 1`` is the plain logit difference
+    ``inv_logit(logit x - logit b)``, and smaller values straighten the gain side
+    so small gains over a weak baseline are not inflated. For b >= 0.5,
+    ``r = 2b``, which is the logit difference for every ``bend``.
+    """
+    x = inv_logit(np.asarray(logit_strength, dtype=float))
+    b = inv_logit(np.asarray(baseline, dtype=float))
+    r = np.where(b < 0.5, np.power(2 * b, bend), 2 * b)
+    q = b / (r * (1 - b))
+    h = np.clip((x - b) / (1 - b), 0.0, 1.0)
+    s = np.clip(x / b, 0.0, 1.0)
+    gain = 0.5 + 0.5 * h / (h + r * (1 - h))
+    loss = 0.5 * s / (s + q * (1 - s))
+    return np.where(x >= b, gain, loss)
+
+
 def cell_adjust_rows(
     rows: pd.DataFrame,
     catalog: Catalog,
@@ -412,10 +441,11 @@ def cell_adjust_rows(
     ``experiment``, ``player_type``, ``seed``, ``controlled``, and ``is_winner``
     (``model`` optional). The same steps then run with the same ``params``:
     ``relative_to``, winner enforcement (``enforce_winner`` overrides the
-    param), the clipped logit, the selected matched cell baseline, the inverse
-    logit of the difference, and ``post_cell_normalize``. ``adjusted_strength``
-    is NaN on rows without a cell baseline. Returns ``None`` when ``block``
-    turns the cell adjustment off or no row is controlled.
+    param), the clipped logit, the selected matched cell baseline,
+    :func:`cell_score` with ``cell_gain_bend``, and ``post_cell_normalize``.
+    ``adjusted_strength`` is NaN on rows without a cell baseline. Returns
+    ``None`` when ``block`` turns the cell adjustment off or no row is
+    controlled.
     """
     p = _resolve_params(params)
     if enforce_winner is not None:
@@ -430,8 +460,10 @@ def cell_adjust_rows(
     cell_mask = df["controlled"] & baseline.notna()
     df["cell_baseline"] = baseline
     df["adjusted_strength"] = np.nan
-    df.loc[cell_mask, "adjusted_strength"] = inv_logit(
-        df.loc[cell_mask, "logit_strength"].to_numpy() - baseline[cell_mask].to_numpy()
+    df.loc[cell_mask, "adjusted_strength"] = cell_score(
+        df.loc[cell_mask, "logit_strength"].to_numpy(),
+        baseline[cell_mask].to_numpy(),
+        p["cell_gain_bend"],
     )
     if p["post_cell_normalize"] == "relative_to_leader":
         _normalize_to_leader(df, df["controlled"])
@@ -619,7 +651,11 @@ def build_strength_panel(
             df.loc[cell_mask, "logit_strength"].to_numpy()
             - cell_baseline_series[cell_mask].to_numpy()
         )
-        adjusted[cell_mask] = inv_logit(cell_diff)
+        adjusted[cell_mask] = cell_score(
+            df.loc[cell_mask, "logit_strength"].to_numpy(),
+            cell_baseline_series[cell_mask].to_numpy(),
+            p["cell_gain_bend"],
+        )
         cell_logit_advantage[cell_mask] = cell_diff
     rest = ~cell_mask
     if p["civ_adjust"] == "ols_logit":

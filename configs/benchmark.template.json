@@ -146,7 +146,8 @@
         "enforce_winner": true,
         "civ_adjust": "ols_logit",
         "block": "auto",
-        "post_cell_normalize": "none"
+        "post_cell_normalize": "none",
+        "cell_gain_bend": 0.5
       }
     }
   ],

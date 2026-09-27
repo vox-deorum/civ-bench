@@ -391,6 +391,7 @@ class AnalysisContext:
             "civ_adjust",
             "baseline_experiment",
             "post_cell_normalize",
+            "cell_gain_bend",
         ):
             if key in params and params[key] is not None:
                 out[f"adjust_{key}"] = params[key]

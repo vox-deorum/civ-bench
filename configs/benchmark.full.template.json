@@ -168,7 +168,8 @@
         "civ_adjust": "ols_logit",
         "block": "auto",
         "baseline_experiment": "vanilla-standard-fixed",
-        "post_cell_normalize": "none"
+        "post_cell_normalize": "none",
+        "cell_gain_bend": 0.5
       }
     }
   ],

@@ -315,6 +315,7 @@ STRENGTH_PARAM_KEYS = {
     "block",
     "baseline_experiment",
     "post_cell_normalize",
+    "cell_gain_bend",
 }
 STRENGTH_WEIGHT = {"turn_progress", "uniform"}
 STRENGTH_RELATIVE_TO = {"game_leader", "none"}

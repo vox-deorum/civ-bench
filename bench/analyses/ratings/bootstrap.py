@@ -28,7 +28,7 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
-from ...adjust.strength import fit_civ_effects
+from ...adjust.strength import DEFAULT_PARAMS, cell_score, fit_civ_effects
 from ...catalog import Catalog
 from ...stats.transforms import inv_logit
 from ..errors import AnalysisError
@@ -98,6 +98,7 @@ def readjust(
         return df  # nothing to refit (block:"none" panels still carry adjusted_strength)
     civ_adjust = params.get("civ_adjust", "ols_logit")
     baseline_experiment = params.get("baseline_experiment")
+    bend = params.get("cell_gain_bend", DEFAULT_PARAMS["cell_gain_bend"])
 
     # Refit civ effects on the whole resampled (pre-narrowing) panel; this is the
     # SAME population the adjust stage fits on, so the refit matches the point
@@ -121,7 +122,7 @@ def readjust(
         if method == "cell":
             base = cell_base.get(cell_key(row), np.nan)
             if np.isfinite(base):
-                adjusted[pos] = inv_logit(logit[pos] - base)
+                adjusted[pos] = cell_score(logit[pos], base, bend)
                 continue
             method = "civ" if civ_adjust == "ols_logit" else "relative"
         if method == "civ" and civ_adjust == "ols_logit":
