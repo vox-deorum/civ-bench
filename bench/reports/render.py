@@ -584,7 +584,7 @@ def render_html_site(doc: ReportDocument) -> dict[str, str]:
         if group.summary:
             parts.append(f"<p>{_md_inline_to_html(group.summary)}</p>")
         for section in group.sections:
-            _render_section_html(section, parts, anchors[id(section)])
+            _render_section_html(section, parts, anchors[id(section)], doc.model_tips)
         parts.append(render_footer_html(doc.footer))
         parts.append("</main>")
         if any(section.curve_charts for section in group.sections):
@@ -616,7 +616,9 @@ def render_html(doc: ReportDocument) -> str:
     return render_html_site(doc)["index.html"]
 
 
-def _render_section_html(section: Section, parts: list[str], anchor: str) -> None:
+def _render_section_html(
+    section: Section, parts: list[str], anchor: str, model_tips: dict[str, str] | None = None,
+) -> None:
     parts.append(f'<section aria-labelledby="{anchor}">')
     help_html = render_help_html(_section_details(section), "help-" + anchor)
     parts.append(f'<h2 id="{anchor}">{_html.escape(section.title)}{help_html}</h2>')
@@ -634,8 +636,8 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
         ))
     # Artifacts no view claims follow the views, so a section's tabs lead.
     if section.views:
-        _render_views_html(section, parts, anchor)
-    _render_artifacts_html(section.figures, section.tables, parts, anchor)
+        _render_views_html(section, parts, anchor, model_tips)
+    _render_artifacts_html(section.figures, section.tables, parts, anchor, model_tips)
     if section.downloads:
         parts.append('<details class="downloads">')
         parts.append(
@@ -651,7 +653,9 @@ def _render_section_html(section: Section, parts: list[str], anchor: str) -> Non
     parts.append("</section>")
 
 
-def _render_artifacts_html(figures, tables, parts: list[str], anchor: str = "") -> None:
+def _render_artifacts_html(
+    figures, tables, parts: list[str], anchor: str = "", model_tips: dict[str, str] | None = None,
+) -> None:
     for figure in figures:
         if figure.interactive:
             escaped_path = _html.escape(figure.rel_path)
@@ -672,27 +676,31 @@ def _render_artifacts_html(figures, tables, parts: list[str], anchor: str = "") 
             f'<figcaption class="caption">{_html.escape(figure.caption)}</figcaption></figure>'
         )
     for table in tables:
-        _render_table_html(table, parts, anchor)
+        _render_table_html(table, parts, anchor, model_tips)
 
 
-def _render_views_html(section: Section, parts: list[str], anchor: str) -> None:
+def _render_views_html(
+    section: Section, parts: list[str], anchor: str, model_tips: dict[str, str] | None = None,
+) -> None:
     """Render a section's views behind the shared tab switch (see render_view_group)."""
     views = []
     for view in section.views:
         body: list[str] = []
-        _render_artifacts_html(view.figures, view.tables, body, anchor)
+        _render_artifacts_html(view.figures, view.tables, body, anchor, model_tips)
         views.append((_slug(view.name), view.label, view.tip, "\n".join(body)))
     parts.append(render_view_group(anchor, views))
 
 
-def _render_table_html(table: Table, parts: list[str], anchor: str = "") -> None:
+def _render_table_html(
+    table: Table, parts: list[str], anchor: str = "", model_tips: dict[str, str] | None = None,
+) -> None:
     if table.heatmap is not None:
         link = (
             f'<a href="{_html.escape(table.rel_csv)}">full CSV</a>' if table.rel_csv else ""
         )
         help_text = str(table.heatmap.get("help") or "")
         help_html = render_help_html(help_text, f"help-{anchor or 'heat'}-{_slug(table.name)}") if help_text else ""
-        parts.append(render_heatmap_html(table.frame, table.heatmap, help_html, link))
+        parts.append(render_heatmap_html(table.frame, table.heatmap, help_html, link, model_tips))
         return
     parts.append(f"<p><strong>{_html.escape(table.name)}</strong></p>")
     parts.append('<div class="table-scroll" role="region" tabindex="0">')

@@ -138,6 +138,7 @@ def controlled_seed_document(ctx: ReportBuildContext) -> Optional[ControlledSeed
         output_root=ctx.meta["output_root"],
         description=ctx.meta.get("description", "") or "",
         footer=resolve_footer(ctx.meta.get("footer")),
+        model_tips=dict(ctx.meta.get("model_tips") or {}),
         section_id=section.id,
         summary=section.summary,
         metadata=dict(section.metadata or {}),
@@ -498,9 +499,9 @@ def _focus_legend_entries() -> list[list[str]]:
     return [[color, label] for label, color in FOCUS_COLORS.items()]
 
 
-def _render_table(frame: pd.DataFrame, spec: dict, help_id: str) -> str:
+def _render_table(doc: ControlledSeedDocument, frame: pd.DataFrame, spec: dict, help_id: str) -> str:
     help_html = render_help_html(str(spec.get("help") or ""), help_id)
-    return render_heatmap_html(frame, spec, help_html)
+    return render_heatmap_html(frame, spec, help_html, model_tips=doc.model_tips)
 
 
 def _tab_slice(frame: pd.DataFrame, **keys) -> pd.DataFrame:
@@ -536,7 +537,7 @@ def _extra_views(doc: ControlledSeedDocument, anchor: str, seat: bool, **keys) -
         if frame.empty or not spec:
             body = f'<p class="empty">No {_esc(tab.label.lower())} data for this {where}.</p>'
         else:
-            body = _render_table(frame, spec, f"{anchor}-{tab.name}-help")
+            body = _render_table(doc, frame, spec, f"{anchor}-{tab.name}-help")
         views.append((tab.name, tab.label, tab.tip, body))
     return views
 
@@ -607,9 +608,9 @@ def _render_overview(
             )
         views = [
             (STRENGTH_VIEW, "Strength", "Mean adjusted strength",
-             _render_table(*_strength_table(doc, seed, players), f"strength-{seed}-help")),
+             _render_table(doc, *_strength_table(doc, seed, players), f"strength-{seed}-help")),
             (FOCUS_VIEW, "Focus", "Dominant victory focus",
-             _render_table(*_focus_table(doc, seed, players), f"focus-{seed}-help")),
+             _render_table(doc, *_focus_table(doc, seed, players), f"focus-{seed}-help")),
             *_extra_views(doc, anchor, seat=False, seed=seed),
         ]
         parts.append(render_view_group(anchor, views))
@@ -879,9 +880,9 @@ def _render_detail(
     parts.append(f'<h2 id="comparison-heading">Comparison{tip}</h2>')
     views = [
         (STRENGTH_VIEW, "Strength", "Runs, win probability, and adjusted strength",
-         _render_table(*_seat_strength_table(doc, seed, player_id), "seat-strength-help")),
+         _render_table(doc, *_seat_strength_table(doc, seed, player_id), "seat-strength-help")),
         (FOCUS_VIEW, "Focus", "Victory focus shares",
-         _render_table(*_seat_focus_table(doc, seed, player_id), "seat-focus-help")),
+         _render_table(doc, *_seat_focus_table(doc, seed, player_id), "seat-focus-help")),
         *_extra_views(doc, "seat", seat=True, seed=seed, player_id=player_id),
     ]
     parts.append(render_view_group("seat", views))

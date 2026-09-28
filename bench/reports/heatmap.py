@@ -94,6 +94,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from bench.reports.model_tips import model_tip
+
 # matplotlib's RdYlBu (its 11 ColorBrewer anchors): position 0 is red, 0.5 is
 # pale yellow, 1 is blue.
 RDYLBU_SCALE = (
@@ -346,7 +348,7 @@ def _with_unit(text: str, unit: str) -> str:
     return f"{text}{unit}" if unit == "%" else f"{text} {unit}"
 
 
-def _label_html(label: str, tip: str) -> str:
+def label_html(label: str, tip: str) -> str:
     if tip:
         return f'<span tabindex="0" data-tip="{_esc(tip)}">{_esc(label)}</span>'
     return _esc(label)
@@ -403,7 +405,7 @@ def _header_html(frame: pd.DataFrame, spec: dict, columns: list[str]) -> list[st
 
     def header(index: int, column: str) -> str:
         divider = ' class="col-divider"' if column in dividers else ""
-        label = _label_html(_column_label(spec, column), str(tips.get(column, "")))
+        label = label_html(_column_label(spec, column), str(tips.get(column, "")))
         return f'<th scope="col"{divider} data-col="{index + 1}">{label}</th>'
 
     headers = "".join(header(i, c) for i, c in enumerate(columns))
@@ -428,14 +430,17 @@ def _header_html(frame: pd.DataFrame, spec: dict, columns: list[str]) -> list[st
     return parts
 
 
-def _rows_html(rows: list[str], columns: list[str], cells: dict, spec: dict, reference: bool) -> list[str]:
+def _rows_html(
+    rows: list[str], columns: list[str], cells: dict, spec: dict, reference: bool,
+    model_tips: dict[str, str] | None = None,
+) -> list[str]:
     tips = spec.get("row_tips") or {}
     parts = ['<tbody class="vanilla-body">' if reference else "<tbody>"]
     row_open = '<tr class="vanilla-row">' if reference else "<tr>"
     for row in rows:
         parts.append(
             f'{row_open}<th scope="row" class="row-label">'
-            f'{_label_html(row, str(tips.get(row, "")))}</th>'
+            f'{label_html(row, str(tips.get(row, "")) or model_tip(row, model_tips))}</th>'
         )
         parts.extend(_cell_html(cells.get((row, c)), spec, row, c) for c in columns)
         parts.append("</tr>")
@@ -462,7 +467,10 @@ def _legend_html(spec: dict) -> str:
     return f'<ul class="focus-legend">{"".join(items)}</ul>' if items else ""
 
 
-def render_heatmap_html(frame: pd.DataFrame, spec: dict, help_html: str = "", csv_link: str = "") -> str:
+def render_heatmap_html(
+    frame: pd.DataFrame, spec: dict, help_html: str = "", csv_link: str = "",
+    model_tips: dict[str, str] | None = None,
+) -> str:
     """One heatmap figure in the Matched Maps markup."""
     reference, body, columns, cells = _layout(frame, spec)
     title = str(spec.get("title", ""))
@@ -475,8 +483,8 @@ def render_heatmap_html(frame: pd.DataFrame, spec: dict, help_html: str = "", cs
         parts.append(f'<caption class="sr-only">{_esc(title)}</caption>')
     parts.extend(_header_html(frame, spec, columns))
     if reference:
-        parts.extend(_rows_html(reference, columns, cells, spec, reference=True))
-    parts.extend(_rows_html(body, columns, cells, spec, reference=False))
+        parts.extend(_rows_html(reference, columns, cells, spec, reference=True, model_tips=model_tips))
+    parts.extend(_rows_html(body, columns, cells, spec, reference=False, model_tips=model_tips))
     parts.append("</table></div>")
     parts.append(_legend_html(spec))
     if csv_link:

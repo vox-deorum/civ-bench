@@ -358,6 +358,7 @@ Example: put Matched Maps first and show two selected overview cards. This assum
 | `include_disabled` | Defaults to `false`; `true` allows explicitly listed disabled stages with saved results. Automatic fill still includes only enabled analyses |
 | `footer` | Markdown footer; `null` uses the default CivBench citation, `""` hides it |
 | `benchmark_citation` | Optional benchmark citation with `title` and `url`; see [schema section 7](../configs/benchmark.md#7-report-rendering) |
+| `model_tips` | Optional ordered `{models, tip}` rules that add a hover tooltip to "Strategist \| Condition" labels; see [schema section 7](../configs/benchmark.md#7-report-rendering) |
 | `replay` | Optional replay saves and viewer links; requires an enabled `performance.game_log` stage |
 
 Set `report.replay` to enable the Game Log and copied `.Civ5Save` files:

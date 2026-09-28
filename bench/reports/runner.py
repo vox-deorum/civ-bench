@@ -41,6 +41,7 @@ from .context import ReportBuildContext
 from .errors import ReportError
 from .heatmap import heatmap_spec, spec_fits, text_columns
 from .model import CurveChart, Download, Figure, GameLogDocument, Section, Table, View
+from .model_tips import resolve_model_tips
 from .render import render_html_site, render_markdown, render_stylesheet
 from .templates import default_template, family_of, family_sort_index
 
@@ -510,6 +511,17 @@ def _copy_asset(
 
 
 # ── entry point ────────────────────────────────────────────────────────────────
+def _model_tips(cfg: RunConfig, rules: list | None, warnings: list[str]) -> dict[str, str]:
+    """Resolve ``report.model_tips`` against the strategist catalog."""
+    if not rules:
+        return {}
+    from bench.catalog import Catalog
+
+    tips, problems = resolve_model_tips(rules, Catalog.from_run_config(cfg))
+    warnings.extend(problems)
+    return tips
+
+
 def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> dict:
     """Resolve model and condition labels from the configured catalogs."""
     if not any(context.has_table(s.id, "condition_progress") for s in context.sections):
@@ -642,6 +654,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "description": cfg.description,
         "footer": report_cfg.get("footer"),
         "benchmark_citation": report_cfg.get("benchmark_citation"),
+        "model_tips": _model_tips(cfg, report_cfg.get("model_tips"), warnings),
         "overview_section_ids": overview_ids,
         "formats": formats,
         "replay": report_cfg.get("replay"),

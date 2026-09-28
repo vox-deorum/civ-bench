@@ -126,3 +126,42 @@ def test_game_log_rejects_missing_canonical_columns(tmp_path, dev_spec, write_sp
     cfg = load_config(write_spec(dev_spec))
     with pytest.raises(AnalysisError, match="games is missing required column"):
         run_analysis(cfg, stage, catalog=Catalog.from_run_config(cfg))
+
+
+def test_game_log_label_cells_carry_model_tips():
+    from bench.reports.game_log import render_game_log_page
+    from bench.reports.model import GameLogDocument
+
+    def player(player_id, strategist, condition, vanilla=False, winner=False):
+        return {"game_id": "a", "player_id": player_id, "strategist": strategist,
+                "condition": condition, "is_vanilla": vanilla, "is_winner": winner,
+                "civilization": "Rome" if vanilla else "Greece"}
+
+    games = pd.DataFrame([{
+        "game_id": "a", "label": "GPT-OSS-120B-Simple | Every-turn", "controlled": True,
+        "seed": 2, "seating_rotation": 1, "date_utc": "2026-09-18", "turns": 240,
+        "timestamp": 1_700_000_000_000, "victory_type": "Science",
+        "winner_player_id": 1, "winner_civilization": "Greece", "winner_is_vanilla": False,
+    }])
+    game_players = pd.DataFrame([
+        player(0, "Vanilla", "", vanilla=True),
+        player(1, "GPT-OSS-120B-Simple", "Every-turn", winner=True),
+    ])
+    doc = GameLogDocument(
+        title="t", section_id="game_log", games=games, game_players=game_players,
+        metadata={"vanilla_label": "Vanilla"},
+        model_tips={"GPT-OSS-120B-Simple": "Served from a local endpoint."},
+    )
+    page = render_game_log_page(doc, [])
+    # The "Strategist | Condition" cell carries the model's tooltip.
+    assert ('<td><span tabindex="0" data-tip="Served from a local endpoint.">'
+            'GPT-OSS-120B-Simple | Every-turn</span></td>') in page
+    # Seat cells stay plain text, and the tip appears on no other cell.
+    assert "<td>P1 Greece (Won)</td>" in page
+    assert page.count('data-tip="Served from a local endpoint."') == 1
+    # Without model_tips the label cell is plain.
+    plain = GameLogDocument(
+        title="t", section_id="game_log", games=games, game_players=game_players,
+        metadata={"vanilla_label": "Vanilla"},
+    )
+    assert "<td>GPT-OSS-120B-Simple | Every-turn</td>" in render_game_log_page(plain, [])

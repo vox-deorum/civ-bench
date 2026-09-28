@@ -444,6 +444,7 @@ REPORT_KEYS = {
     "title",
     "footer",
     "benchmark_citation",
+    "model_tips",
     "include_disabled",
     "replay",
     "publish",
@@ -453,6 +454,7 @@ REPORT_REPLAY_KEYS = {"enabled", "viewer_url", "saves", "base_url", "latest_game
 REPORT_REPLAY_SAVES = {"all", "controlled"}
 REPORT_DEFAULT_VIEWER_URL = "https://vox-deorum.github.io/vox-deorum-replay/"
 REPORT_BENCHMARK_CITATION_KEYS = {"title", "url"}
+REPORT_MODEL_TIP_KEYS = {"models", "tip"}
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
 REPORT_FORMATS = {"md", "html", "pdf"}
 # Formats the report renders; also the default when `report.formats` is omitted.

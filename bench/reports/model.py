@@ -173,6 +173,8 @@ class ReportDocument:
     controlled_seed: Optional["ControlledSeedDocument"] = None
     footer: str = REPORT_DEFAULT_FOOTER
     benchmark_citation: dict[str, str] | None = None
+    # Model id -> "Strategist | Condition" label tooltip (report.model_tips).
+    model_tips: dict[str, str] = field(default_factory=dict)
     announcements: list[Announcement] = field(default_factory=list)
     game_log: Optional["GameLogDocument"] = None
 
@@ -235,6 +237,7 @@ class ControlledSeedDocument:
     footer: str = REPORT_DEFAULT_FOOTER
     game_log: Optional["GameLogDocument"] = None
     tabs: list[MatchedMapTab] = field(default_factory=list)
+    model_tips: dict[str, str] = field(default_factory=dict)
 
     @property
     def vanilla_label(self) -> str:
@@ -282,3 +285,4 @@ class GameLogDocument:
     # from the Matched Maps analysis; empty without it.
     ranks: dict[tuple[str, int], int] = field(default_factory=dict)
     footer: str = REPORT_DEFAULT_FOOTER
+    model_tips: dict[str, str] = field(default_factory=dict)

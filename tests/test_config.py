@@ -458,6 +458,45 @@ def test_report_benchmark_citation_rejects_invalid_values(dev_spec, write_spec, 
         load_config(write_spec(dev_spec))
 
 
+@pytest.mark.parametrize(
+    "model_tips",
+    [
+        None,
+        [
+            {"models": ["GPT-[0-9]*"], "tip": "Accessed through Codex."},
+            {"models": ["Opus-*", "Sonnet-*"], "tip": "Accessed through Claude Code."},
+            {"tip": "Reasoning set to effort \"high\"."},
+        ],
+    ],
+)
+def test_report_model_tips_loads(dev_spec, write_spec, model_tips):
+    dev_spec["report"]["model_tips"] = model_tips
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["model_tips"] == model_tips
+
+
+@pytest.mark.parametrize(
+    "model_tips",
+    [
+        "GPT-*",
+        {"models": ["GPT-*"], "tip": "Codex"},
+        [{"models": ["GPT-*"], "tip": "Codex", "note": "extra"}],  # unknown entry key
+        [{"models": ["GPT-*"]}],  # missing tip
+        [{"tip": "  "}],  # blank tip
+        [{"tip": ""}],
+        [{"tip": 42}],
+        [{"tip": "line one\nline two"}],  # multi-line tip
+        [{"models": [], "tip": "Codex"}],  # empty models list
+        [{"tip": "catch-all"}, {"models": ["GPT-*"], "tip": "Codex"}],  # catch-all not last
+        [{"tip": "catch one"}, {"tip": "catch two"}],  # two catch-alls
+    ],
+)
+def test_report_model_tips_rejects_invalid_values(dev_spec, write_spec, model_tips):
+    dev_spec["report"]["model_tips"] = model_tips
+    with pytest.raises(ConfigError, match=r"report\.model_tips"):
+        load_config(write_spec(dev_spec))
+
+
 def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
     """data.extract.auto_fix is an accepted bool (coerced from a string like the siblings)."""
     dev_spec["data"]["extract"]["auto_fix"] = "FALSE"

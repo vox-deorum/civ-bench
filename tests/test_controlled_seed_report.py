@@ -1124,6 +1124,18 @@ def test_mixed_vpai_keeps_its_condition_and_distinct_baseline():
     assert 'id="curve-data"' not in detail
 
 
+def test_matched_maps_row_labels_carry_model_tips():
+    doc = _tiny_doc()
+    doc.model_tips = {"Weird & <Model>": "Served from a local endpoint."}
+    overview = render_controlled_seed_site(doc)["controlled-seed/index.html"]
+    # The model row label carries its tip; the pinned VPAI row keeps its own
+    # row tip instead of taking a model tip.
+    assert ('<span tabindex="0" data-tip="Served from a local endpoint.">'
+            'Weird &amp; &lt;Model&gt; | Per 5</span>') in overview
+    assert ('<span tabindex="0" data-tip="VPAI self-play: all players use VPAI.">'
+            'VPAI</span>') in overview
+
+
 def test_game_log_links_and_seat_rows_follow_detail_filters():
     doc = _tiny_doc()
     doc.game_log = GameLogDocument(

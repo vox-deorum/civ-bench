@@ -1576,6 +1576,92 @@ def test_heatmap_text_columns_keep_their_text_through_the_csv(heatmap_env):
     assert "p\t0.500" in page
 
 
+# ── model tips (report.model_tips) ─────────────────────────────────────────────
+def _tips_catalog(*ids: str):
+    """A stand-in for the catalog that ``resolve_model_tips`` reads."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        vanilla_label="Vanilla",
+        null_label="Null",
+        strategist_models=lambda: [{"id": model_id} for model_id in ids],
+    )
+
+
+def test_resolve_model_tips_first_match_wins_and_catch_all_covers_the_rest():
+    from bench.reports.model_tips import resolve_model_tips
+
+    catalog = _tips_catalog("GPT-6-Luna-Simple", "GPT-5.5-Codex", "Sonnet-4.5",
+                            "Vanilla", "Null")
+    rules = [
+        {"models": ["GPT-6-*", "Ghost-*"], "tip": "first"},
+        {"models": ["GPT-*"], "tip": "second"},
+        {"tip": "catch-all"},
+    ]
+    tips, warnings = resolve_model_tips(rules, catalog)
+    # The first matching rule wins, the catch-all fills the rest, and Vanilla
+    # and Null are baselines, so they never get a tip.
+    assert tips == {"GPT-6-Luna-Simple": "first", "GPT-5.5-Codex": "second",
+                    "Sonnet-4.5": "catch-all"}
+    assert warnings == ["report.model_tips[0].models: 'Ghost-*' matches no strategist model."]
+    assert resolve_model_tips(None, catalog) == ({}, [])
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("GLM-5.3-Flash", "flash"),               # exact ids match
+        ("GLM-5.3", "base"),
+        ("GLM-5.3-Flash | Every-turn", "flash"),  # the longest match wins
+        ("GLM-5.3 | Per-5", "base"),
+        ("GLM-5.3-Foo", "base"),
+        ("GLM-5.30", ""),                         # no false prefix match
+        ("GLM-5.30 | Per-5", ""),
+        ("Other-9 | Per-5", ""),
+    ],
+)
+def test_model_tip_matches_the_longest_id_at_a_word_boundary(label, expected):
+    from bench.reports.model_tips import model_tip
+
+    tips = {"GLM-5.3": "base", "GLM-5.3-Flash": "flash"}
+    assert model_tip(label, tips) == expected
+
+
+def test_model_tip_handles_suffixed_ids_and_empty_tips():
+    from bench.reports.model_tips import model_tip
+
+    assert model_tip("ID-Simple", {"ID": "t"}) == "t"
+    assert model_tip("ID-Simple | Per-5", {"ID": "t"}) == "t"
+    assert model_tip("IDS", {"ID": "t"}) == ""
+    assert model_tip("ID-Simple", {}) == ""
+    assert model_tip("ID-Simple", None) == ""
+
+
+def test_heatmap_model_tips_label_only_the_row_labels():
+    from bench.reports.heatmap import render_heatmap_html
+
+    frame = pd.DataFrame([
+        {"row_label": "GLM-5.3-Flash | Per-5", "metric": "score", "mean": 62.0,
+         "color_position": 0.6},
+        {"row_label": "Vanilla", "metric": "score", "mean": 55.0, "color_position": 0.5},
+    ])
+    spec = {"row": "row_label", "column": "metric", "value": "mean", "decimals": 0,
+            "value_label": "Average", "column_labels": {"score": "GLM-5.3-Flash"},
+            "row_tips": {"Vanilla": "The in-game AI."}}
+    tips = {"GLM-5.3-Flash": "Reasoning set to high.", "Vanilla": "Never tips."}
+    page = render_heatmap_html(frame, spec, model_tips=tips)
+    # A model row label carries its hover tooltip.
+    assert ('<th scope="row" class="row-label"><span tabindex="0" '
+            'data-tip="Reasoning set to high.">GLM-5.3-Flash | Per-5</span></th>') in page
+    # An explicit row_tips entry wins over the model tip.
+    assert '<span tabindex="0" data-tip="The in-game AI.">Vanilla</span>' in page
+    # Column headers get no model tip.
+    assert '<th scope="col" data-col="1">GLM-5.3-Flash</th>' in page
+    # Without model_tips the markup is unchanged.
+    assert render_heatmap_html(frame, spec) == render_heatmap_html(frame, spec, model_tips=None)
+    assert render_heatmap_html(frame, spec) == render_heatmap_html(frame, spec, model_tips={})
+
+
 def test_copied_plotly_figures_share_one_runtime(report_env):
     from bench.plotting.interactive import figure_html, plotly_javascript
 

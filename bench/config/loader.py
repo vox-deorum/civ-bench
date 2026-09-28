@@ -668,6 +668,26 @@ def _validate_groupings(groupings: dict) -> None:
 
 
 # ── report (§7) ─────────────────────────────────────────────────────────────
+def _validate_model_tips(tips: Any) -> None:
+    """Ordered ``{models, tip}`` rules; one trailing entry without ``models`` catches the rest."""
+    if not isinstance(tips, list):
+        raise ConfigError("report.model_tips: expected a list.")
+    for i, entry in enumerate(tips):
+        where = f"report.model_tips[{i}]"
+        _require_mapping(entry, where)
+        _check_keys(entry, S.REPORT_MODEL_TIP_KEYS, where, required=("tip",))
+        tip = entry["tip"]
+        _check_type(tip, (str,), f"{where}.tip")
+        if not tip.strip() or "\n" in tip:
+            raise ConfigError(f"{where}.tip: expected a non-empty, single-line string.")
+        if "models" in entry:
+            _check_string_list(entry["models"], f"{where}.models", allow_empty=False)
+        elif i != len(tips) - 1:
+            raise ConfigError(
+                f"{where}: only the last entry may omit 'models' (it covers every other model)."
+            )
+
+
 def _validate_report(report: dict) -> None:
     _require_mapping(report, "report")
     _check_keys(report, S.REPORT_KEYS, "report")
@@ -687,6 +707,8 @@ def _validate_report(report: dict) -> None:
             _check_type(citation[key], (str,), f"{where}.{key}")
             if not citation[key].strip():
                 raise ConfigError(f"{where}.{key}: expected a non-empty string.")
+    if report.get("model_tips") is not None:
+        _validate_model_tips(report["model_tips"])
     if "include_disabled" in report:
         report["include_disabled"] = coerce_bool(
             report["include_disabled"], "report.include_disabled"

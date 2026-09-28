@@ -207,6 +207,7 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         description=meta.get("description", "") or "",
         footer=resolve_footer(meta.get("footer")),
         benchmark_citation=meta.get("benchmark_citation"),
+        model_tips=dict(meta.get("model_tips") or {}),
         groups=groups,
         overview_sections=overview_sections,
         controlled_seed=controlled,

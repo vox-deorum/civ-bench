@@ -12,7 +12,9 @@ from bench.config.schema import REPORT_DEFAULT_VIEWER_URL
 from bench.reports.content import render_footer_html, resolve_footer
 from bench.reports.context import ReportBuildContext
 from bench.reports.errors import ReportError
+from bench.reports.heatmap import label_html
 from bench.reports.model import Download, GameLogDocument, ReplayOptions
+from bench.reports.model_tips import model_tip
 
 
 def game_log_document(ctx: ReportBuildContext) -> GameLogDocument | None:
@@ -39,6 +41,7 @@ def game_log_document(ctx: ReportBuildContext) -> GameLogDocument | None:
         game_players=ctx.load_table(section.id, "game_players") if not section.empty else pd.DataFrame(),
         metadata=dict(section.metadata), downloads=downloads, replay=replay,
         footer=resolve_footer(ctx.meta.get("footer")),
+        model_tips=dict(ctx.meta.get("model_tips") or {}),
     )
 
 
@@ -236,8 +239,10 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
                  "timestamp": _number(game.get("timestamp")), "turns": _number(game.get("turns")),
                  "label": game["label"], "victory": game.get("victory_type", "")}
         parts.append('<tr ' + ' '.join(f'data-{k}="{_esc(v)}"' for k, v in attrs.items()) + '>')
-        cells = [game.get("date_utc"), game["label"], attrs["seed"], attrs["rotation"],
-                 attrs["turns"], *_seat_cells(doc, game, players, n_seats)]
+        parts.append(f'<td>{_esc(game.get("date_utc")) or "-"}</td>')
+        parts.append(f'<td>{_label_cell(doc, game["label"])}</td>')
+        cells = [attrs["seed"], attrs["rotation"], attrs["turns"],
+                 *_seat_cells(doc, game, players, n_seats)]
         parts.extend(f'<td>{_esc(cell) or "-"}</td>' for cell in cells)
         parts.append(f'<td>{_victory_html(game, players)}</td>')
         parts.append(f'<td>{replay_link_html(doc, game, players)}</td></tr>')
@@ -251,6 +256,12 @@ def render_game_log_page(doc: GameLogDocument, navigation: list[str]) -> str:
 
 def _llm_seats(players: list[dict]) -> list[dict]:
     return [p for p in players if not _flag(p.get("is_vanilla"))]
+
+
+def _label_cell(doc: GameLogDocument, label) -> str:
+    """A "Strategist | Condition" cell, with its model's tooltip when one is configured."""
+    text = _text(label)
+    return label_html(text, model_tip(text, doc.model_tips)) if text else "-"
 
 
 def _seat_cells(doc: GameLogDocument, game: dict, players: list[dict], n_seats: int) -> list[str]:
@@ -303,8 +314,9 @@ def render_seat_games(doc: GameLogDocument, seed: int, player_id: int, prefix: s
         parts.append(f'<tr class="game-row" data-strategist="{_esc(seat["strategist"])}" '
                      f'data-vanilla="{str(_flag(seat.get("is_vanilla"))).lower()}">')
         label = "VPAI" if _flag(seat.get("is_vanilla")) else player_label(seat)
-        cells = [game.get("date_utc"), label, _number(game.get("seating_rotation")),
-                 *_seat_cells(doc, game, players, n_seats)]
+        parts.append(f'<td>{_esc(game.get("date_utc")) or "-"}</td>')
+        parts.append(f'<td>{_label_cell(doc, label)}</td>')
+        cells = [_number(game.get("seating_rotation")), *_seat_cells(doc, game, players, n_seats)]
         parts.extend(f'<td>{_esc(value) or "-"}</td>' for value in cells)
         parts.append(f'<td>{_victory_html(game, players)}</td>')
         parts.append(f'<td>{replay_link_html(doc, game, players, prefix)}</td></tr>')
