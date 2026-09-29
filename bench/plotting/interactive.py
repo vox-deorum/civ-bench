@@ -112,6 +112,77 @@ def _table_tooltip_post_script() -> str:
 """
 
 
+def _hover_highlight_post_script() -> str:
+    """Return the opt-in behavior that fades other models while one is hovered.
+
+    Traces with ``meta.highlight`` take part. Hovering one of their points or
+    legend entries keeps every trace in the same legend group lit and fades
+    the rest. Styles go on each trace's child elements so Plotly's own
+    opacity (for example on hidden legend entries) is left alone, and they
+    are reapplied after every redraw.
+    """
+    return r"""
+(function () {
+    const plot = document.getElementById("{plot_id}");
+    if (!plot || !plot.layout || !plot.layout.meta || plot.layout.meta.hover_highlight !== true) {
+        return;
+    }
+    const faded = "0.15";
+    let current = null;
+
+    function traceOf(element) {
+        let data = element && element.__data__;
+        while (Array.isArray(data)) {
+            data = data[0];
+        }
+        return data && data.trace;
+    }
+
+    function apply() {
+        plot.querySelectorAll(".scatterlayer .trace, .legend .traces").forEach(function (element) {
+            const trace = traceOf(element);
+            if (!trace || !trace.meta || trace.meta.highlight !== true) {
+                return;
+            }
+            const opacity = current === null || trace.legendgroup === current ? "" : faded;
+            Array.from(element.children).forEach(function (child) {
+                child.style.opacity = opacity;
+            });
+        });
+    }
+
+    function highlight(trace) {
+        const group = trace && trace.meta && trace.meta.highlight === true ? trace.legendgroup : null;
+        if (group !== current) {
+            current = group;
+            apply();
+        }
+    }
+
+    plot.on("plotly_hover", function (eventData) {
+        const point = eventData && eventData.points && eventData.points[0];
+        highlight(point && point.fullData);
+    });
+    plot.on("plotly_unhover", function () {
+        highlight(null);
+    });
+    plot.addEventListener("mouseover", function (event) {
+        const item = event.target.closest && event.target.closest(".legend .traces");
+        if (item) {
+            highlight(traceOf(item));
+        }
+    });
+    plot.addEventListener("mouseout", function (event) {
+        const item = event.target.closest && event.target.closest(".legend .traces");
+        if (item && !item.contains(event.relatedTarget)) {
+            highlight(null);
+        }
+    });
+    plot.on("plotly_afterplot", apply);
+}());
+"""
+
+
 def figure_html(
     figure,
     name: str,
@@ -127,9 +198,12 @@ def figure_html(
     from plotly.io import to_html
 
     layout_meta = getattr(figure.layout, "meta", None)
-    post_script = None
-    if isinstance(layout_meta, dict) and layout_meta.get("table_tooltip"):
-        post_script = _table_tooltip_post_script()
+    post_scripts = []
+    if isinstance(layout_meta, dict):
+        if layout_meta.get("table_tooltip"):
+            post_scripts.append(_table_tooltip_post_script())
+        if layout_meta.get("hover_highlight"):
+            post_scripts.append(_hover_highlight_post_script())
 
     return to_html(
         figure,
@@ -137,7 +211,7 @@ def figure_html(
         full_html=full_html,
         include_plotlyjs=include_plotlyjs,
         config={"responsive": True, "displaylogo": False},
-        post_script=post_script,
+        post_script=post_scripts or None,
         default_width="100%",
         default_height="650px",
     )

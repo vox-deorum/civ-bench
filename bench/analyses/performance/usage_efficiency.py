@@ -186,6 +186,7 @@ class PerformanceUsageEfficiency(Analysis):
             condition: symbols[index % len(symbols)]
             for index, condition in enumerate(("base", *spec.suffixes))
         }
+        condition_rank = {condition: index for index, condition in enumerate(("base", *spec.suffixes))}
         trace_metrics = []
         metric_annotations = {}
         axis_titles = {}
@@ -197,7 +198,8 @@ class PerformanceUsageEfficiency(Analysis):
             axis_titles[metric] = f"Average {label.lower()} per player per game{unit}"
             annotations = [{
                 "x": 0, "y": -0.19, "xref": "paper", "yref": "paper", "xanchor": "left",
-                "text": "Hover for details. Select a resource above. Click legend entries to filter.<br>"
+                "text": "Hover a model for details and to highlight it. Select a resource above. "
+                        "Click legend entries to filter.<br>"
                         + ("Costs price cached input at the cache-read rate." if cached_input
                            else "Costs exclude cache discounts.")
                         + " Output includes reasoning tokens."
@@ -238,7 +240,11 @@ class PerformanceUsageEfficiency(Analysis):
                 "text": equation, "showarrow": False, "font": {"size": 12, "color": "#475569"},
             })
             for identity, group in plot.groupby("base_identity", sort=False):
-                group = group.sort_values("condition", kind="stable")
+                # The line runs from the base condition through the configured suffixes.
+                group = group.sort_values(
+                    "condition", kind="stable",
+                    key=lambda values: values.map(lambda c: condition_rank.get(c, len(condition_rank))),
+                )
                 details = []
                 for row in group.to_dict("records"):
                     def number(value, format_spec=",.0f"):
@@ -258,15 +264,17 @@ class PerformanceUsageEfficiency(Analysis):
                         number(complete), number(incomplete), label,
                         number(row.get("avg_cached_input")),
                     ])
+                color = get_player_color(ctx.catalog, str(identity))
                 fig.add_trace(go.Scatter(
                     x=group[column].tolist(), y=group["elo"].tolist(), name=escape(str(identity)),
-                    legendgroup=str(identity), mode="markers", visible=metric == "cost",
+                    legendgroup=str(identity), mode="lines+markers", visible=metric == "cost",
+                    line={"color": color, "width": 1.5},
                     marker={
-                        "color": get_player_color(ctx.catalog, str(identity)), "size": 11,
+                        "color": color, "size": 11,
                         "symbol": [condition_symbols.get(str(c), "circle") for c in group["condition"]],
                         "line": {"width": 1.5},
                     },
-                    customdata=details, meta={"table_tooltip": True}, hoverinfo="none",
+                    customdata=details, meta={"table_tooltip": True, "highlight": True}, hoverinfo="none",
                 ))
                 trace_metrics.append(metric)
 
@@ -306,7 +314,7 @@ class PerformanceUsageEfficiency(Analysis):
             height=650, margin={"b": 110, "t": 135}, annotations=metric_annotations["cost"],
             updatemenus=[{"buttons": buttons, "direction": "down", "x": 0, "y": 1.14,
                           "xanchor": "left", "yanchor": "top", "active": 0}],
-            meta={"table_tooltip": {
+            meta={"hover_highlight": True, "table_tooltip": {
                 "title_index": 0, "subtitle_index": 1,
                 "note": "Averages per player per game. Counts are player-games for the selected resource. "
                         + cost_note(cached_input, reported_only)

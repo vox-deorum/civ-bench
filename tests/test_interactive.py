@@ -9,7 +9,9 @@ import subprocess
 import plotly.graph_objects as go
 import pytest
 
-from bench.plotting.interactive import _table_tooltip_post_script, figure_html
+from bench.plotting.interactive import (
+    _hover_highlight_post_script, _table_tooltip_post_script, figure_html,
+)
 
 
 def test_table_tooltip_is_opt_in_and_uses_safe_text_nodes():
@@ -120,6 +122,68 @@ if (tooltip.style.display !== "none") throw new Error("resize did not hide toolt
         capture_output=True,
         check=False,
     )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_hover_highlight_is_opt_in_and_composes_with_tooltip():
+    figure = go.Figure(go.Scatter(x=[1], y=[2], meta={"table_tooltip": True, "highlight": True}))
+    figure.update_layout(meta={"table_tooltip": {"rows": []}})
+    assert "hover_highlight !== true" not in figure_html(figure, "tooltip-only", include_plotlyjs=False)
+
+    figure.update_layout(meta={"hover_highlight": True, "table_tooltip": {"rows": []}})
+    html = figure_html(figure, "both", include_plotlyjs=False)
+    assert "hover_highlight !== true" in html
+    assert "trace.meta.table_tooltip !== true" in html
+    assert 'getElementById("plotly-both")' in html
+
+
+def test_hover_highlight_fades_other_groups_from_points_and_legend():
+    """Run the generated highlight script against a small DOM and Plotly event mock."""
+    if shutil.which("node") is None:
+        pytest.skip("Node.js is required to execute the highlight behavior test.")
+
+    script = _hover_highlight_post_script().replace("{plot_id}", "plotly-test")
+    javascript = f"""
+function node(trace) {{
+    const children = [{{style: {{}}}}, {{style: {{}}}}];
+    const element = {{__data__: [[{{trace}}]], children, contains: (other) => other === element}};
+    element.closest = () => element;
+    return element;
+}}
+const a = {{legendgroup: "A", meta: {{highlight: true}}}};
+const b = {{legendgroup: "B", meta: {{highlight: true}}}};
+const fit = {{meta: {{}}}};
+const traces = [node(a), node(b), node(fit)];
+const legendB = node(b);
+const listeners = {{}};
+const plot = {{
+    layout: {{meta: {{hover_highlight: true}}}},
+    handlers: {{}},
+    on: (name, handler) => {{ plot.handlers[name] = handler; }},
+    addEventListener: (name, handler) => {{ listeners[name] = handler; }},
+    querySelectorAll: () => [...traces, legendB],
+}};
+const document = {{getElementById: () => plot}};
+const opacity = (element) => element.children.map((child) => child.style.opacity).join(",");
+eval({json.dumps(script)});
+plot.handlers.plotly_hover({{points: [{{fullData: a}}]}});
+if (opacity(traces[0]) !== ",") throw new Error("hovered group faded");
+if (opacity(traces[1]) !== "0.15,0.15") throw new Error("other group was not faded");
+if (opacity(legendB) !== "0.15,0.15") throw new Error("other legend entry was not faded");
+if (opacity(traces[2]) !== ",") throw new Error("non-model trace faded");
+plot.handlers.plotly_unhover();
+if (opacity(traces[1]) !== ",") throw new Error("unhover did not reset");
+listeners.mouseover({{target: legendB}});
+if (opacity(traces[0]) !== "0.15,0.15" || opacity(traces[1]) !== ",") throw new Error("legend hover failed");
+traces[0].children.forEach((child) => {{ child.style.opacity = ""; }});
+plot.handlers.plotly_afterplot();
+if (opacity(traces[0]) !== "0.15,0.15") throw new Error("redraw did not reapply the fade");
+listeners.mouseout({{target: legendB, relatedTarget: null}});
+if (opacity(traces[0]) !== ",") throw new Error("legend mouseout did not reset");
+"""
+
+    result = subprocess.run(["node", "-"], input=javascript, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stderr
 

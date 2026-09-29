@@ -1313,7 +1313,8 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x, null_baseline
             for annotation in button.args[1]["annotations"]
         )
         np.testing.assert_allclose(curve.y, fits[metric]["intercept"] + fits[metric]["slope"] * np.log10(curve.x))
-        markers = [trace for trace in visible if trace.mode == "markers"]
+        markers = [trace for trace in visible if trace.mode == "lines+markers"]
+        assert all(trace.meta["highlight"] is True for trace in markers)
         good = next(trace for trace in markers if trace.name == "Good")
         expected = table.loc[1, f"efficiency_elo_{metric}"]
         assert good.customdata[0][4] == f"{expected:+,.0f}"
@@ -1330,6 +1331,37 @@ def test_usage_chart_switches_points_fits_and_tooltips(env, log_x, null_baseline
             assert null_annotations == ["<b>Null baseline: 1,100 Elo</b>"]
         assert any(trace.name == "Free" for trace in markers) == (not log_x or metric == "input")
     assert fits["cost"]["slope"] != fits["input"]["slope"]
+    assert figure.layout.meta["hover_highlight"] is True
+
+
+def test_usage_chart_connects_conditions_in_configured_order(env):
+    from bench.analyses.base import AnalysisContext
+    from bench.analyses.performance.usage_efficiency import PerformanceUsageEfficiency, fit_usage_skill
+    from bench.plotting.pairing import PairingSpec
+
+    # Alphabetical order would put "-Brief" and "-Per-5" before "base".
+    table = pd.DataFrame({
+        "player_type": ["M-Per-5", "M-Brief", "M", "Other"],
+        "base_identity": ["M", "M", "M", "Other"],
+        "condition": ["-Per-5", "-Brief", "base", "base"],
+        "elo": [1400, 1450, 1500, 1550],
+        "avg_cost_per_player_game": [0.1, 0.2, 0.3, 0.4],
+        "avg_input": [10, 20, 30, 40], "avg_output": [1, 2, 3, 4],
+        "complete_player_games": [4] * 4, "na_player_games": [0] * 4,
+        "token_complete_player_games": [4] * 4, "token_na_player_games": [0] * 4,
+    })
+    fits = {metric: fit_usage_skill(table, metric) for metric in ("cost", "input", "output")}
+    ctx = AnalysisContext(config=env.cfg, catalog=env.catalog, stage_id="usage", stage_raw={},
+                          out_dir=Path(env.cfg.output.root))
+    figure = PerformanceUsageEfficiency._plot(
+        table, ctx, PairingSpec(("-Per-5", "-Brief"), "base", "Base"), "usd", True, False, fits,
+        1500, "Vanilla",
+    )
+    model = next(trace for trace in figure.data if trace.name == "M" and trace.visible)
+    assert model.mode == "lines+markers"
+    assert [row[0] for row in model.customdata] == ["M", "M-Per-5", "M-Brief"]
+    assert list(model.marker.symbol) == ["circle", "diamond-open", "square-open"]
+    assert model.line.color == model.marker.color
 
 
 # ── ratings (R fit monkeypatched) ─────────────────────────────────────────────────
