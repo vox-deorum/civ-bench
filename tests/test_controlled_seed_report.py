@@ -733,11 +733,11 @@ def test_chapter_pages_carry_the_site_sidebar(rendered):
     assert "<h1>" in index
     detail = _read(out, "controlled-seed/seed-1-player-0.html")
     assert '<a href="../index.html">Overview</a>' in detail
-    assert '<link rel="stylesheet" href="../assets/report.css">' in detail
+    assert '<link rel="stylesheet" href="../assets/report.css?v=' in detail
     # The shared util loads before the page script on every chapter page.
-    assert '<script src="../assets/report-common.js" defer></script>' in detail
-    assert '<script src="../assets/report-help.js" defer></script>' in detail
-    assert '<script src="../assets/controlled-seed-report.js" defer></script>' in detail
+    assert '<script src="../assets/report-common.js?v=' in detail
+    assert '<script src="../assets/report-help.js?v=' in detail
+    assert '<script src="../assets/controlled-seed-report.js?v=' in detail
     assert detail.index("report-help.js") < detail.index("controlled-seed-report.js")
     assert detail.index("report-common.js") < detail.index("controlled-seed-report.js")
     assert 'aria-describedby="chapter-help"' in index
@@ -878,7 +878,7 @@ def test_shared_color_util_and_adaptive_axis(rendered):
     # Relative (adjusted strength) and Absolute charts, the Plotly bundle once.
     assert 'id="plotly-matched-map-relative"' in detail
     assert 'id="plotly-matched-map-absolute"' in detail
-    assert detail.count('src="../assets/plotly.min.js"') == 1
+    assert detail.count('src="../assets/plotly.min.js?v=') == 1
     assert '"hovermode":"x unified"' in detail
 
 
@@ -914,7 +914,7 @@ def test_strategist_checkboxes_replace_the_dropdown(rendered):
     assert 'class="curve-chart" data-query-select="true" data-sync="matched-map"' in detail
     assert 'id="matched-map-relative-filters"' in detail
     assert 'id="matched-map-absolute-filters"' in detail
-    assert 'src="../assets/curve-chart.js"' in detail
+    assert 'src="../assets/curve-chart.js?v=' in detail
     # VPAI leads and controls the self-play reference; with only two other
     # strategists everyone is checked and no preset buttons appear. Each of
     # the two views has its own checkbox group.

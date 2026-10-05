@@ -13,6 +13,7 @@ fast and hermetic while testing exactly the report-stage contract.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -215,7 +216,7 @@ def test_replay_report_copies_saves_and_renders_game_links(replay_env):
     assert "Latest game" in index and "Player 5 (Persia, Won)" in index
     assert "Player 0" not in index
     assert "games.html" not in index.split("</aside>")[0]
-    assert 'src="assets/report-common.js"' in index
+    assert 'src="assets/report-common.js?v=' in index
     markdown = (out / "report.md").read_text(encoding="utf-8")
     assert "## Game Log" in markdown and "game_players (CSV)" in markdown
     assert "vox-deorum-replay/?file=" not in markdown
@@ -370,7 +371,7 @@ def test_run_report_writes_md_and_html(report_env):
     assert "pred_metrics" in prediction and "pred_compare" in prediction
     assert prediction_summary in prediction
     assert '<h2 id="section-cal-reliability">' not in prediction
-    assert 'href="assets/report.css"' in prediction
+    assert 'href="assets/report.css?v=' in prediction
     assert 'aria-current="page">Prediction</a>' in prediction
 
 
@@ -692,9 +693,9 @@ def test_curve_chart_renders_inline_on_the_family_page(report_env):
     html = (out / "performance.html").read_text(encoding="utf-8")
     assert 'class="curve-chart" data-query-select="false"' in html
     assert 'value="Kimi-K2.5" checked' in html
-    assert 'src="assets/plotly.min.js"' in html
-    assert 'src="assets/curve-chart.js"' in html
-    assert 'src="assets/report-common.js"' in html
+    assert 'src="assets/plotly.min.js?v=' in html
+    assert 'src="assets/curve-chart.js?v=' in html
+    assert 'src="assets/report-common.js?v=' in html
     assert '"name":"VPAI"' in html and '"name":"Kimi-K2.5"' in html
     assert "Each curve is a mean." in html
     assert "curve_chart" not in html  # layout metadata stays out of the tooltip
@@ -738,7 +739,7 @@ def test_curve_chart_views_render_as_synced_tabs(report_env):
     anchor = re.search(r'id="plotly-([\w-]+)-relative"', html).group(1)
     assert f'id="plotly-{anchor}-absolute"' in html
     assert html.count(f'data-sync="{anchor}"') == 2
-    assert html.count('src="assets/plotly.min.js"') == 1
+    assert html.count('src="assets/plotly.min.js?v=') == 1
     assert "Mean adjusted strength" in html and '"y0":0.5' in html
     assert "Adjusted strength over the game." in html and "Each curve is a mean." in html
 
@@ -897,12 +898,23 @@ def test_html_uses_one_shared_responsive_stylesheet(report_env):
     )]
     for page in pages:
         html = page.read_text(encoding="utf-8")
-        assert '<link rel="stylesheet" href="assets/report.css">' in html
+        assert '<link rel="stylesheet" href="assets/report.css?v=' in html
         assert "<style" not in html
 
     css = (out / "assets" / "report.css").read_text(encoding="utf-8")
     assert ".sidebar { position: fixed" in css
     assert "@media (max-width: 820px)" in css
+
+
+def test_asset_links_carry_a_content_version(report_env):
+    """A redeploy with a changed stylesheet or script must not reuse a cached copy."""
+    run_report(report_env)
+    out = report_dir(report_env)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    for name in ("report.css", "report-help.js"):
+        text = (out / "assets" / name).read_text(encoding="utf-8")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+        assert f'"assets/{name}?v={digest}"' in html
 
 
 def test_unknown_section_id_is_loud(report_env):
@@ -1792,7 +1804,7 @@ def test_front_page_renders_story_charts_and_cards(front_env):
     html = (out / "index.html").read_text(encoding="utf-8")
     assert "<h1>Which AI plans best?</h1>" in html
     assert html.count('<div class="front-chart"><svg') == 3  # leaderboard, cost, styles
-    assert '<script src="assets/front-page.js" defer></script>' in html
+    assert '<script src="assets/front-page.js?v=' in html
     assert (out / "assets/front-page.js").is_file()
     # Glossary terms get a hover tip once per prose block, never inside links.
     assert html.count('data-tip="A chess-style score.">rating</span>') == 1

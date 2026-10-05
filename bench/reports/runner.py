@@ -14,13 +14,17 @@ artifacts without re-running any analysis (invariant 3).
 Import-light relative to the analysis runner: it needs pandas + the stdlib only
 (analysis figures are already PNG or self-contained Plotly HTML files on disk).
 Copied Plotly figures are relinked to one shared ``assets/plotly.min.js``, and
-Matched Maps loads Plotly when rendering its probability charts.
+Matched Maps loads Plotly when rendering its probability charts. Pages link the
+shared stylesheet and scripts with a ``?v=<content hash>`` suffix, so a browser
+or CDN never pairs a new page with a cached old asset after a redeploy.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 from glob import escape as glob_escape
 import shutil
 import tempfile
@@ -446,6 +450,34 @@ def _caption(stage_id: str, name: str) -> str:
     return f"{stage_id}: {name}" if name != stage_id else stage_id
 
 
+_ASSET_LINK = re.compile(r'((?:href|src)=")((?:\.\./)*)(assets/[^"/?]+\.(?:css|js))"')
+
+
+def _version_asset_links(site: dict[str, str]) -> dict[str, str]:
+    """Add ``?v=<content hash>`` to every page link to a shared site asset.
+
+    Only the top-level ``assets/*.css`` and ``assets/*.js`` files in ``site``
+    are stamped. The hash comes from the file's text, so the output stays
+    byte-stable and a link changes only when its asset does.
+    """
+    versions = {
+        name: hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+        for name, text in site.items()
+        if _ASSET_LINK.fullmatch(f'src="{name}"')
+    }
+
+    def stamp(match: re.Match) -> str:
+        version = versions.get(match.group(3))
+        if version is None:
+            return match.group(0)
+        return f'{match.group(1)}{match.group(2)}{match.group(3)}?v={version}"'
+
+    return {
+        name: _ASSET_LINK.sub(stamp, text) if name.endswith(".html") else text
+        for name, text in site.items()
+    }
+
+
 def _link_shared_plotly(assets_root: Path, rel: str) -> None:
     """Point a copied interactive figure at the report's one shared Plotly runtime.
 
@@ -751,12 +783,10 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
             path.write_text(render_markdown(document), encoding="utf-8")
             written_rel.append(Path("report.md"))
         if "html" in formats:
-            stylesheet = assets_root / "report.css"
-            stylesheet.write_text(render_stylesheet(), encoding="utf-8")
-            written_rel.append(Path("assets") / "report.css")
-            # The family pages plus, when the document carries it, the
-            # controlled-seed heatmap annex.
-            for filename, text in render_html_site(document).items():
+            # The stylesheet, the family pages, and, when the document carries
+            # it, the controlled-seed heatmap annex.
+            site = {"assets/report.css": render_stylesheet(), **render_html_site(document)}
+            for filename, text in _version_asset_links(site).items():
                 path = staging / filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
