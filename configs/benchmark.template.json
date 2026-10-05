@@ -377,6 +377,166 @@
     "section_overrides": {},
     "title": null,
     "footer": null,
+    "intro": {
+      "eyebrow": "CivBench · Civilization V with Vox Populi 5.2.7",
+      "headline": "Which AI makes the best long-term strategist?",
+      "body": "Civilization V is a strategy game where you lead a nation from its first village to the space age. A single game takes hundreds of turns, and the winner is often decided by choices made long before the end. That makes it a good test of whether an AI can plan ahead.\n\nIn each game, one AI model guides two of the eight nations. It sets their long-term plans: what to focus on, who to befriend, and when to go to war. The built-in AI runs the other six. Every model plays the same three maps from every starting spot, so nobody wins on luck. A game has only one winner, so we also follow each player's chance of winning at every turn, and turn all of that into a rating.",
+      "glossary": {
+        "built-in AI": "The computer players that come with Vox Populi. They are among the strongest AI opponents made for Civilization V.",
+        "chance of winning": "At every turn, a model trained on hundreds of past games estimates each player's chance of winning from the state of the game: cities, science, army, and more.",
+        "rating": "A chess-style score. 1500 means exactly as strong as the built-in AI. Each 100 points above that means winning head-to-head about 64% of the time instead of 50%."
+      },
+      "names": {
+        "Vanilla": "Built-in AI",
+        "Null": "Do-nothing player"
+      },
+      "conditions": {
+        "Every-turn": {
+          "label": "every turn",
+          "tip": "The AI is asked for a new plan on every turn."
+        },
+        "Per-5": {
+          "label": "every 5 turns",
+          "tip": "The AI is asked for a new plan every 5 turns, or sooner when something big happens, like a declaration of war. This costs much less than asking every turn."
+        }
+      },
+      "series": [
+        {
+          "name": "Claude",
+          "models": [
+            "Opus-*",
+            "Sonnet-*",
+            "Haiku-*"
+          ]
+        },
+        {
+          "name": "GPT",
+          "models": [
+            "GPT-*"
+          ]
+        },
+        {
+          "name": "Gemma",
+          "models": [
+            "Gemma-*",
+            "Gemini-*"
+          ]
+        },
+        {
+          "name": "Qwen",
+          "models": [
+            "Qwen-*"
+          ]
+        },
+        {
+          "name": "GLM",
+          "models": [
+            "GLM-*"
+          ]
+        },
+        {
+          "name": "Kimi",
+          "models": [
+            "Kimi-*"
+          ]
+        },
+        {
+          "name": "DeepSeek",
+          "models": [
+            "DeepSeek-*"
+          ]
+        },
+        {
+          "name": "MiniMax",
+          "models": [
+            "MiniMax-*"
+          ]
+        },
+        {
+          "name": "Nemotron",
+          "models": [
+            "Nemotron-*"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "value": "models",
+          "label": "AI models",
+          "tip": "Language models from {makers} makers, from large commercial ones to small open ones you can run at home."
+        },
+        {
+          "value": "setups",
+          "label": "setups tested",
+          "tip": "Most models are tested two ways: deciding every turn, and deciding every 5 turns."
+        },
+        {
+          "value": "games",
+          "label": "games played",
+          "tip": "Each game has 8 nations. Every setup plays at least {min_games} games."
+        },
+        {
+          "value": "turns",
+          "label": "turns per game",
+          "tip": "The typical game length. Half of all games run longer than this."
+        },
+        {
+          "value": "starts",
+          "label": "fixed starts",
+          "tip": "Every AI plays the same {starts} maps and rotates through every starting spot, so no one gets a lucky map or a lucky start."
+        }
+      ],
+      "projects": {
+        "title": "What is this built on?",
+        "text": "Three pieces of software make these games possible. You do not need to play any of them to read this report.",
+        "items": [
+          {
+            "name": "Civilization V",
+            "url": "https://store.steampowered.com/app/8930/",
+            "link": "Steam store page",
+            "text": "A 2010 strategy game by Firaxis. You lead a nation through history one turn at a time: building cities, trading, making friends and enemies."
+          },
+          {
+            "name": "Vox Populi",
+            "url": "https://github.com/LoneGazebo/Community-Patch-DLL",
+            "link": "Vox Populi on GitHub",
+            "text": "A large community mod that rebalances Civilization V and makes its computer players much smarter. All games here use version 5.2.7."
+          },
+          {
+            "name": "Vox Deorum",
+            "url": "https://github.com/vox-deorum",
+            "link": "Vox Deorum on GitHub",
+            "text": "Our open-source bridge that lets a language model read the game and steer a nation. The built-in AI still moves the units; the language model sets the strategy."
+          }
+        ],
+        "links": [
+          {
+            "label": "Watch any game in the replay viewer",
+            "url": "https://vox-deorum.github.io/vox-deorum-replay/"
+          },
+          {
+            "label": "Read the CivBench paper",
+            "url": "https://arxiv.org/abs/2604.07733"
+          },
+          {
+            "label": "Read the Vox Deorum paper",
+            "url": "https://arxiv.org/abs/2512.18564"
+          }
+        ]
+      },
+      "charts": {
+        "leaderboard": {
+          "stage": "bt_main",
+          "title": "Who plays best?",
+          "text": "Each bar shows how far an AI setup's rating sits above or below the built-in AI, the dashed line. Hover a row for details."
+        },
+        "cost": {
+          "stage": "perf_usage_efficiency",
+          "title": "Is the pricier model worth it?",
+          "text": "Paying more usually buys a bit more skill. Setups above the dashed line play better than their price suggests. Hover a series or a point to pick out its models, or click a series to keep it picked."
+        }
+      }
+    },
     "include_disabled": false,
     "replay": null,
     "publish": {

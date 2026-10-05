@@ -445,6 +445,7 @@ REPORT_KEYS = {
     "footer",
     "benchmark_citation",
     "model_tips",
+    "intro",
     "include_disabled",
     "replay",
     "publish",
@@ -456,6 +457,28 @@ REPORT_DEFAULT_VIEWER_URL = "https://vox-deorum.github.io/vox-deorum-replay/"
 REPORT_BENCHMARK_CITATION_KEYS = {"title", "url"}
 REPORT_MODEL_TIP_KEYS = {"models", "tip"}
 REPORT_SECTION_OVERRIDE_KEYS = {"tables", "figures"}
+# report.intro: the plain-language front page (see configs/benchmark.md).
+REPORT_INTRO_KEYS = {
+    "eyebrow", "headline", "body", "glossary", "names", "conditions",
+    "series", "facts", "projects", "charts",
+}
+REPORT_INTRO_CONDITION_KEYS = {"label", "tip"}
+REPORT_INTRO_SERIES_KEYS = {"name", "models"}
+REPORT_INTRO_FACT_KEYS = {"value", "label", "tip"}
+# Values a fact chip can show; a fact's tip may also use any of them, plus
+# {min_games}, as a {placeholder}.
+REPORT_INTRO_FACT_VALUES = {"models", "setups", "makers", "games", "turns", "starts"}
+REPORT_INTRO_FACT_PLACEHOLDERS = REPORT_INTRO_FACT_VALUES | {"min_games"}
+REPORT_INTRO_PROJECTS_KEYS = {"title", "text", "items", "links"}
+REPORT_INTRO_PROJECT_KEYS = {"name", "url", "link", "text"}
+REPORT_INTRO_LINK_KEYS = {"label", "url"}
+REPORT_INTRO_CHART_KEYS = {"stage", "title", "text"}
+# Chart kind -> the analysis modules that can feed it.
+REPORT_INTRO_CHART_MODULES = {
+    "leaderboard": {"ratings.bradley_terry", "ratings.plackett_luce"},
+    "cost": {"performance.usage_efficiency"},
+    "styles": {"behavior.commitment"},
+}
 REPORT_FORMATS = {"md", "html", "pdf"}
 # Formats the report renders; also the default when `report.formats` is omitted.
 REPORT_DEFAULT_FORMATS = ["md", "html"]

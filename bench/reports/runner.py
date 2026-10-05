@@ -556,6 +556,60 @@ def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> 
     return labels
 
 
+# Saved tables that list the identities each front-page chart draws.
+_FRONT_TABLES = {"leaderboard": "ratings", "cost": "usage_vs_rating", "styles": "grand_strategy"}
+
+
+def _front_page_catalog(cfg: RunConfig, context: ReportBuildContext) -> dict:
+    """Catalog facts the front page needs, so the builder never reads the catalog.
+
+    ``models`` lists ``[id, color]`` in catalog order (series colors come from
+    the first matching model). ``identities`` maps each charted player type to
+    its catalog model, condition label, color, whether it is a baseline, and
+    whether it is the built-in AI that head-to-head odds compare against.
+    """
+    intro = (cfg.report or {}).get("intro")
+    if not intro:
+        return {}
+    from bench.catalog import Catalog
+
+    catalog = Catalog.from_run_config(cfg)
+    resolved = {section.id for section in context.sections}
+    identities: set[str] = set()
+    for kind, chart in (intro.get("charts") or {}).items():
+        stage, table = chart["stage"], _FRONT_TABLES[kind]
+        if stage in resolved and context.has_table(stage, table):
+            frame = context.load_table(stage, table)
+            if "player_type" in frame:
+                identities.update(frame["player_type"].dropna().astype(str))
+    # Setups still being tested appear in the game log before any chart.
+    for section in context.sections:
+        if section.module == "performance.game_log" and context.has_table(section.id, "game_players"):
+            players = context.load_table(section.id, "game_players")
+            if "player_type" in players:
+                identities.update(players["player_type"].dropna().astype(str))
+    presentation = dict(cfg.presentation.get("condition_pairing") or {})
+    suffixes = presentation.get("suffixes")
+    base_label = presentation.get("base_label", "Base")
+    baselines = {catalog.vanilla_label, catalog.null_label}
+    colors = catalog.strategist_model_colors()
+    out = {}
+    for identity in sorted(identities):
+        base, suffix = catalog.split_condition_suffix(identity, suffixes)
+        model = catalog.split_player_type(base)["model_id"] or identity
+        out[identity] = {
+            "model": model,
+            "condition": suffix.lstrip("-") if suffix else base_label,
+            "baseline": identity in baselines,
+            "reference": identity == catalog.vanilla_label,
+            "color": colors.get(model, ""),
+        }
+    return {
+        "models": [[m["id"], m.get("color", "")] for m in catalog.strategist_models()],
+        "identities": out,
+    }
+
+
 def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: list[str]) -> None:
     """Publish the available saves before rendering links to them."""
     if doc.replay is None or doc.games.empty:
@@ -655,6 +709,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         "footer": report_cfg.get("footer"),
         "benchmark_citation": report_cfg.get("benchmark_citation"),
         "model_tips": _model_tips(cfg, report_cfg.get("model_tips"), warnings),
+        "intro": report_cfg.get("intro"),
         "overview_section_ids": overview_ids,
         "formats": formats,
         "replay": report_cfg.get("replay"),
@@ -677,6 +732,7 @@ def run_report(cfg: RunConfig) -> ReportRunResult:
         ]
         context.sections = sections
         context.meta["rating_labels"] = _announcement_rating_labels(cfg, context)
+        context.meta["front_catalog"] = _front_page_catalog(cfg, context)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

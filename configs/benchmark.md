@@ -1111,6 +1111,7 @@ identity; they cannot run, so they never appear on a report.
   "footer": null,                        // optional markdown footer; null uses the default, empty hides it
   "benchmark_citation": null,             // optional object with required `title` and `url` strings
   "model_tips": null,                     // optional ordered list of {models, tip} label tooltips
+  "intro": null,                          // optional plain-language front page (§7.4 below)
   "include_disabled": false,             // never render skipped/disabled stages
   "replay": null,                         // optional replay saves and viewer links
   "publish": null                         // optional GitHub Pages publishing (§7.3); omitted or null = off
@@ -1327,6 +1328,71 @@ The tool never creates the GitHub repository. Setting up the first release is a 
 
 Publishing shells out to `git`, so `git` must be on `PATH` with `user.name` and `user.email` configured.
 
+### 7.4 The plain-language front page
+
+`intro` is optional. When it is omitted or `null`, the overview page is unchanged: `index.html` stays a card grid of the analysis summaries and `report.md` carries no extra section. When `intro` is set, `index.html` becomes a story-first front page. It shows, in order: the headline, the intro body with glossary hover terms, a row of fact chips, a leaderboard chart, a "What is this built on?" project block, a cost-vs-skill chart colored by model series, a play-style chart, a plain finding card for each `overview_sections` entry with the technical text kept behind its "?" button, the latest news, and finally the citation. `report.md` gains a short plain section that repeats the same points. Every report page sets its headings in EB Garamond, loaded from Google Fonts with a serif fallback, whether or not `intro` is set.
+
+Only the headline is required. A minimal block is `"intro": {"headline": "Which AI plays best?"}`. Every other key is optional. All numbers on the page come from the run's saved tables, never from the config, so `intro` only supplies the wording. Inline Markdown (bold and links) works in prose, and hover tips use the shared tooltip format.
+
+```jsonc
+"intro": {
+  "eyebrow": "CivBench · Civilization V with Vox Populi 5.2.7",
+  "headline": "Which AI makes the best long-term strategist?",
+  "body": "Civilization V is a strategy game where you lead a nation from its first village to the space age.\n\nEvery model plays the same maps from every starting spot, so nobody wins on luck.",
+  "glossary": {
+    "built-in AI": "The computer players that come with Vox Populi. They are among the strongest AI opponents made for Civilization V.",
+    "rating": "A chess-style score. 1500 means exactly as strong as the built-in AI."
+  },
+  "names": {
+    "Vanilla": "Built-in AI"
+  },
+  "conditions": {
+    "Every-turn": {"label": "every turn", "tip": "The AI is asked for a new plan on every turn."},
+    "Per-5": {"label": "every 5 turns", "tip": "The AI is asked for a new plan every 5 turns."}
+  },
+  "series": [
+    {"name": "Claude", "models": ["Opus-*", "Sonnet-*"]},
+    {"name": "GPT", "models": ["GPT-*"]}
+  ],
+  "facts": [
+    {"value": "models", "label": "AI models", "tip": "Language models from {makers} makers."},
+    {"value": "games", "label": "games played", "tip": "Every setup plays at least {min_games} games."}
+  ],
+  "projects": {
+    "title": "What is this built on?",
+    "text": "Three pieces of software make these games possible.",
+    "items": [
+      {"name": "Vox Populi", "url": "https://github.com/LoneGazebo/Community-Patch-DLL",
+       "link": "Vox Populi on GitHub", "text": "A community mod that makes the computer players much smarter."}
+    ],
+    "links": [
+      {"label": "Read the CivBench paper", "url": "https://arxiv.org/abs/2604.07733"}
+    ]
+  },
+  "charts": {
+    "leaderboard": {"stage": "bt_main", "title": "Who plays best?",
+                    "text": "Each bar shows how far a setup sits above or below the built-in AI."},
+    "cost": {"stage": "perf_usage_efficiency", "title": "Is the pricier model worth it?",
+             "text": "Paying more usually buys a bit more skill."},
+    "styles": {"stage": "beh_commitment", "title": "How do they like to win?",
+               "text": "Each bar shows how much of the game an AI spent aiming for each win."}
+  }
+}
+```
+
+| Key | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `headline` | string | required | The main heading, on one line. The only required key. |
+| `eyebrow` | string | optional | A short line above the headline, such as the game and mod. |
+| `body` | string | optional | Intro prose. Paragraphs split on blank lines; inline Markdown works. |
+| `glossary` | map | optional | Phrase to single-line tip. The first use of each phrase in every prose block gets a hover tip. |
+| `names` | map | optional | Player type or model id to display name, for example `Vanilla` to `Built-in AI`. |
+| `conditions` | map | optional | Condition label (such as `Every-turn` or `Per-5`) to an object with a required `label` and optional `tip`. The order sets the point shapes in the cost chart: circle, square, diamond, triangle. |
+| `series` | list | optional | Ordered `{name, models}` objects, each `models` a glob list; the first matching series wins. A series takes the color of the first catalog model it matches. Models no series matches go to `Other`. |
+| `facts` | list | optional | `{value, label, tip}` chips. `value` is one of `models`, `setups`, `makers`, `games`, `turns`, `starts`. `tip` may use the `{models}` `{setups}` `{makers}` `{games}` `{turns}` `{starts}` `{min_games}` placeholders. `games`, `turns`, `starts`, and `min_games` need a `performance.game_log` stage. A fact with no data is skipped with a warning. |
+| `projects` | object | optional | The "What is this built on?" block: a required `title`, optional `text`, `items` of `{name, url, link, text}`, and `links` of `{label, url}`. Every `url` must be an absolute http(s) URL. |
+| `charts` | object | optional | The front-page charts. Keys are `leaderboard`, `cost`, and `styles`; each is `{stage, title, text}` with `stage` and `title` required. `leaderboard` needs a `ratings.bradley_terry` or `ratings.plackett_luce` stage, `cost` needs `performance.usage_efficiency`, and `styles` needs `behavior.commitment`. An unknown stage id or a wrong module is a config error. A stage that is missing from the rendered report skips its chart with a warning. |
+
 ---
 
 ## 8. Validation rules (enforced on load)
@@ -1349,3 +1415,4 @@ Publishing shells out to `git`, so `git` must be on `PATH` with `user.name` and 
 16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.
 17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. Each `uses.analyses` entry must name an analysis whose module offers a Matched Maps tab (`MATCHED_MAPS_TAB_MODULES`, currently `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`, and `behavior.policies`); any other module is an error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).
 18. **Token estimates and cache pricing** (§2.3, §6.2): `token_estimates`, when present, accepts only `reasoning` and `cached_input`, each a boolean or the string `"true"`/`"false"`, defaulting to true; unknown keys fail. In `configs/models.json`, `cache_pricing`, when present, requires a numeric `default_read_ratio` in `[0, 1]` and a `families` object whose entries accept only `models`, `read_ratio`, and `estimate`: `models` is a non-empty list of `strategist_models` ids (unknown ids, non-strings, and membership in two families are errors), `read_ratio` is a number in `[0, 1]`, and `estimate` is a boolean.
+19. **Front page** (§7.4): `report.intro`, when present, requires a single-line `headline` and accepts only the keys listed in §7.4. Text fields must be non-empty, and labels and tips must be single-line. Fact `value`s and tip placeholders must come from the documented sets. Project and link URLs must be absolute http(s) URLs. Each `charts` entry must name an existing analysis stage whose module fits the chart kind.

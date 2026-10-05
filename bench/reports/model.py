@@ -151,6 +151,81 @@ class Announcement:
 
 
 @dataclass
+class FrontFact:
+    """One fact chip under the front-page headline, such as "804 games played"."""
+
+    value: str
+    label: str
+    tip: str = ""
+
+
+@dataclass
+class FrontLink:
+    """A project card (with ``text``) or a plain outside link."""
+
+    label: str
+    url: str
+    text: str = ""
+    name: str = ""
+
+
+@dataclass
+class FrontChart:
+    """One front-page chart: its heading, lede, and the rows it draws.
+
+    ``kind`` is ``leaderboard``, ``cost``, or ``styles``. ``rows`` holds one
+    dict per bar or point, prepared by :mod:`bench.reports.front_page` (names,
+    values, colors, and the hover tip text), so the SVG renderer only draws.
+    ``extra`` carries chart-wide values such as the cost fit and the legend.
+    """
+
+    kind: str
+    stage: str
+    title: str
+    text: str = ""
+    rows: list[dict] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class FrontCard:
+    """A plain-language finding card for one overview section."""
+
+    section: Section
+    label: str
+    icon: str
+    text: str  # inline Markdown
+
+
+@dataclass
+class FrontPage:
+    """The plain-language front page built from ``report.intro``.
+
+    Text comes from the config; facts, charts, and card sentences come from
+    the run's saved tables. ``glossary`` phrases get a hover explanation where
+    they first appear in each block of prose.
+    """
+
+    headline: str
+    eyebrow: str = ""
+    body: list[str] = field(default_factory=list)  # inline-Markdown paragraphs
+    glossary: dict[str, str] = field(default_factory=dict)
+    facts: list[FrontFact] = field(default_factory=list)
+    leader: str = ""  # inline Markdown
+    charts: list[FrontChart] = field(default_factory=list)
+    projects_title: str = ""
+    projects_text: str = ""
+    projects: list[FrontLink] = field(default_factory=list)
+    links: list[FrontLink] = field(default_factory=list)
+    cards: list[FrontCard] = field(default_factory=list)
+    # The report's announcements with plain player names.
+    news: list["Announcement"] = field(default_factory=list)
+
+    def chart(self, kind: str) -> Optional[FrontChart]:
+        return next((chart for chart in self.charts if chart.kind == kind), None)
+
+
+@dataclass
 class ReportDocument:
     """The full report: a title, run provenance, and grouped sections.
 
@@ -177,6 +252,8 @@ class ReportDocument:
     model_tips: dict[str, str] = field(default_factory=dict)
     announcements: list[Announcement] = field(default_factory=list)
     game_log: Optional["GameLogDocument"] = None
+    # The plain-language front page; None keeps the classic overview.
+    front_page: Optional[FrontPage] = None
 
     @property
     def n_sections(self) -> int:

@@ -10,6 +10,7 @@ root, and the strength params available before the stage implementation lands.
 from __future__ import annotations
 
 import json
+import string
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterable
@@ -688,6 +689,130 @@ def _validate_model_tips(tips: Any) -> None:
             )
 
 
+def _check_text(value: Any, where: str, *, single_line: bool = False) -> str:
+    """A non-blank string, optionally without line breaks."""
+    _check_type(value, (str,), where)
+    if not value.strip() or (single_line and "\n" in value):
+        kind = "non-empty, single-line" if single_line else "non-empty"
+        raise ConfigError(f"{where}: expected a {kind} string.")
+    return value
+
+
+def _check_text_map(value: Any, where: str) -> None:
+    """A mapping of non-blank strings to non-blank single-line strings."""
+    _require_mapping(value, where)
+    for key, text in value.items():
+        _check_text(key, f"{where} key", single_line=True)
+        _check_text(text, f"{where}.{key}", single_line=True)
+
+
+def _check_intro_link(entry: Any, keys: set, where: str) -> None:
+    _require_mapping(entry, where)
+    _check_keys(entry, keys, where, required=keys)
+    for key in sorted(keys):
+        _check_text(entry[key], f"{where}.{key}", single_line=key != "text")
+    _validate_absolute_http_url(entry["url"], f"{where}.url")
+
+
+def _validate_intro(intro: Any) -> None:
+    """``report.intro``: the plain-language front page. Stage references are
+    checked against the analyses later, in :func:`_validate_intro_charts`."""
+    where = "report.intro"
+    _require_mapping(intro, where)
+    _check_keys(intro, S.REPORT_INTRO_KEYS, where, required=("headline",))
+    _check_text(intro["headline"], f"{where}.headline", single_line=True)
+    if intro.get("eyebrow") is not None:
+        _check_text(intro["eyebrow"], f"{where}.eyebrow", single_line=True)
+    if intro.get("body") is not None:
+        _check_text(intro["body"], f"{where}.body")
+    for key in ("glossary", "names"):
+        if intro.get(key) is not None:
+            _check_text_map(intro[key], f"{where}.{key}")
+    conditions = intro.get("conditions")
+    if conditions is not None:
+        _require_mapping(conditions, f"{where}.conditions")
+        for label, entry in conditions.items():
+            at = f"{where}.conditions.{label}"
+            _require_mapping(entry, at)
+            _check_keys(entry, S.REPORT_INTRO_CONDITION_KEYS, at, required=("label",))
+            for key in entry:
+                _check_text(entry[key], f"{at}.{key}", single_line=True)
+    series = intro.get("series")
+    if series is not None:
+        _check_type(series, (list,), f"{where}.series")
+        for i, entry in enumerate(series):
+            at = f"{where}.series[{i}]"
+            _require_mapping(entry, at)
+            _check_keys(entry, S.REPORT_INTRO_SERIES_KEYS, at, required=S.REPORT_INTRO_SERIES_KEYS)
+            _check_text(entry["name"], f"{at}.name", single_line=True)
+            _check_string_list(entry["models"], f"{at}.models", allow_empty=False)
+    facts = intro.get("facts")
+    if facts is not None:
+        _check_type(facts, (list,), f"{where}.facts")
+        for i, entry in enumerate(facts):
+            at = f"{where}.facts[{i}]"
+            _require_mapping(entry, at)
+            _check_keys(entry, S.REPORT_INTRO_FACT_KEYS, at, required=("value", "label"))
+            _check_domain(entry["value"], S.REPORT_INTRO_FACT_VALUES, f"{at}.value")
+            _check_text(entry["label"], f"{at}.label", single_line=True)
+            if "tip" in entry:
+                _check_text(entry["tip"], f"{at}.tip", single_line=True)
+                try:
+                    names = {
+                        name for _, name, _, _ in string.Formatter().parse(entry["tip"]) if name
+                    }
+                except ValueError as exc:
+                    raise ConfigError(f"{at}.tip: {exc}.")
+                unknown = sorted(names - S.REPORT_INTRO_FACT_PLACEHOLDERS)
+                if unknown:
+                    raise ConfigError(
+                        f"{at}.tip: unknown placeholder(s) {unknown}. "
+                        f"Allowed: {sorted(S.REPORT_INTRO_FACT_PLACEHOLDERS)}."
+                    )
+    projects = intro.get("projects")
+    if projects is not None:
+        at = f"{where}.projects"
+        _require_mapping(projects, at)
+        _check_keys(projects, S.REPORT_INTRO_PROJECTS_KEYS, at, required=("title",))
+        _check_text(projects["title"], f"{at}.title", single_line=True)
+        if projects.get("text") is not None:
+            _check_text(projects["text"], f"{at}.text")
+        for key, keys in (("items", S.REPORT_INTRO_PROJECT_KEYS), ("links", S.REPORT_INTRO_LINK_KEYS)):
+            entries = projects.get(key) or []
+            _check_type(entries, (list,), f"{at}.{key}")
+            for i, entry in enumerate(entries):
+                _check_intro_link(entry, keys, f"{at}.{key}[{i}]")
+    charts = intro.get("charts")
+    if charts is not None:
+        _require_mapping(charts, f"{where}.charts")
+        _check_keys(charts, S.REPORT_INTRO_CHART_MODULES, f"{where}.charts")
+        for kind, chart in charts.items():
+            at = f"{where}.charts.{kind}"
+            _require_mapping(chart, at)
+            _check_keys(chart, S.REPORT_INTRO_CHART_KEYS, at, required=("stage", "title"))
+            _check_text(chart["stage"], f"{at}.stage", single_line=True)
+            _check_text(chart["title"], f"{at}.title", single_line=True)
+            if chart.get("text") is not None:
+                _check_text(chart["text"], f"{at}.text")
+
+
+def _validate_intro_charts(report: dict, analyses: list) -> None:
+    """Each front-page chart names an analysis whose module can feed it."""
+    charts = (report.get("intro") or {}).get("charts") or {}
+    modules = {stage.id: stage.raw.get("module") for stage in analyses}
+    for kind, chart in charts.items():
+        where = f"report.intro.charts.{kind}.stage"
+        stage = chart["stage"]
+        if stage not in modules:
+            raise ConfigError(f"{where}: '{stage}' is not an analysis stage id.")
+        allowed = S.REPORT_INTRO_CHART_MODULES[kind]
+        if modules[stage] not in allowed:
+            raise ConfigError(
+                f"{where}: '{stage}' runs '{modules[stage]}'; a {kind} chart needs "
+                f"one of {sorted(allowed)}."
+            )
+
+
 def _validate_report(report: dict) -> None:
     _require_mapping(report, "report")
     _check_keys(report, S.REPORT_KEYS, "report")
@@ -709,6 +834,8 @@ def _validate_report(report: dict) -> None:
                 raise ConfigError(f"{where}.{key}: expected a non-empty string.")
     if report.get("model_tips") is not None:
         _validate_model_tips(report["model_tips"])
+    if report.get("intro") is not None:
+        _validate_intro(report["intro"])
     if "include_disabled" in report:
         report["include_disabled"] = coerce_bool(
             report["include_disabled"], "report.include_disabled"
@@ -879,6 +1006,7 @@ def load_config(path: str | Path) -> RunConfig:
         for i, a in enumerate(analyses_raw)
     ]
     _validate_behavior_columns(cfg.analyses, cfg.data)
+    _validate_intro_charts(cfg.report, cfg.analyses)
 
     cfg._resolved_graph = resolve_stage_graph(cfg)
     return cfg

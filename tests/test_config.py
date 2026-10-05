@@ -497,6 +497,82 @@ def test_report_model_tips_rejects_invalid_values(dev_spec, write_spec, model_ti
         load_config(write_spec(dev_spec))
 
 
+@pytest.mark.parametrize("intro", [None, {"headline": "x"}])
+def test_report_intro_loads(dev_spec, write_spec, intro):
+    """``report.intro`` is optional; null or a headline-only block loads unchanged."""
+    dev_spec["report"]["intro"] = intro
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report.get("intro") == intro
+
+
+def test_report_intro_full_loads(dev_spec, write_spec):
+    """A complete front page validates; its charts point at dev-spec analyses.
+
+    The styles chart kind is left out: the synthetic dev spec has no
+    ``behavior.commitment`` stage to point it at.
+    """
+    dev_spec["report"]["intro"] = {
+        "headline": "Which AI makes the best long-term strategist?",
+        "eyebrow": "CivBench · Vox Populi 5.2.7",
+        "body": "First paragraph.\n\nSecond paragraph.",
+        "glossary": {"rating": "A chess-style score."},
+        "names": {"Vanilla": "Built-in AI"},
+        "conditions": {
+            "Every-turn": {"label": "every turn", "tip": "Asked every turn."},
+            "Per-5": {"label": "every 5 turns"},
+        },
+        "series": [{"name": "Claude", "models": ["Opus-*", "Sonnet-*"]}],
+        "facts": [
+            {"value": "games", "label": "games played", "tip": "At least {min_games} each."},
+            {"value": "models", "label": "AI models"},
+        ],
+        "projects": {
+            "title": "What is this built on?",
+            "text": "Three projects.",
+            "items": [
+                {"name": "Vox Deorum", "url": "https://github.com/vox-deorum",
+                 "link": "on GitHub", "text": "Our bridge."}
+            ],
+            "links": [{"label": "Paper", "url": "https://arxiv.org/abs/2604.07733"}],
+        },
+        "charts": {
+            "leaderboard": {"stage": "bt_main", "title": "Who plays best?"},
+            "cost": {"stage": "perf_usage_efficiency", "title": "Is the pricier model worth it?"},
+        },
+    }
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.report["intro"]["headline"].startswith("Which AI")
+
+
+@pytest.mark.parametrize(
+    "intro, match",
+    [
+        ({"body": "x"}, r"missing required key"),  # headline is required
+        ({"headline": "x", "bogus": 1}, r"report\.intro: unknown key"),
+        ({"headline": "a\nb"}, r"single-line"),  # headline must be one line
+        ({"headline": "x", "facts": [{"value": "bogus", "label": "n"}]},
+         r"report\.intro\.facts\[0\]\.value"),  # unknown fact value
+        ({"headline": "x", "facts": [{"value": "games", "label": "n", "tip": "{nope}"}]},
+         r"unknown placeholder"),  # bad fact tip placeholder
+        ({"headline": "x", "series": [{"name": "S"}]},
+         r"report\.intro\.series\[0\]: missing required key"),  # series without models
+        ({"headline": "x",
+          "projects": {"title": "t", "links": [{"label": "l", "url": "ftp://x"}]}},
+         r"absolute http"),  # non-http project url
+        ({"headline": "x", "charts": {"bogus": {"stage": "bt_main", "title": "t"}}},
+         r"report\.intro\.charts"),  # unknown charts key
+        ({"headline": "x", "charts": {"leaderboard": {"stage": "nope", "title": "t"}}},
+         r"is not an analysis stage id"),  # stage id not among analyses
+        ({"headline": "x", "charts": {"leaderboard": {"stage": "perf_strength", "title": "t"}}},
+         r"leaderboard chart needs"),  # stage whose module does not fit the chart kind
+    ],
+)
+def test_report_intro_rejects_invalid_values(dev_spec, write_spec, intro, match):
+    dev_spec["report"]["intro"] = intro
+    with pytest.raises(ConfigError, match=match):
+        load_config(write_spec(dev_spec))
+
+
 def test_extract_auto_fix_loads_and_coerces(dev_spec, write_spec):
     """data.extract.auto_fix is an accepted bool (coerced from a string like the siblings)."""
     dev_spec["data"]["extract"]["auto_fix"] = "FALSE"

@@ -23,6 +23,7 @@ from bench.reports.announcements import build_announcements
 from bench.reports.game_log import game_log_document
 from .context import ReportBuildContext
 from bench.reports.content import resolve_footer
+from .front_page import front_page_document
 from .controlled_seed import (
     CONTROLLED_SEED_DIR,
     CONTROLLED_SEED_OVERVIEW,
@@ -198,6 +199,7 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         if section_id in section_by_id
         and (game_log is None or section_id != game_log.section_id)
     ]
+    announcements = build_announcements(ctx)
     return ReportDocument(
         title=meta["title"],
         run_name=meta["run_name"],
@@ -212,5 +214,6 @@ def default_template(ctx: ReportBuildContext) -> ReportDocument:
         overview_sections=overview_sections,
         controlled_seed=controlled,
         game_log=game_log,
-        announcements=build_announcements(ctx),
+        announcements=announcements,
+        front_page=front_page_document(ctx, overview_sections, announcements),
     )

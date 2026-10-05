@@ -1693,3 +1693,183 @@ def test_share_plotly_leaves_html_without_the_runtime_alone():
     from bench.plotting.interactive import share_plotly
 
     assert share_plotly("<html><script>var x = 1;</script></html>", "../plotly.min.js") is None
+
+
+# ── plain-language front page (report.intro) ───────────────────────────────────
+_FRONT_IDS = ["GLM-5.3-Simple-Per-5", "Opus-5.5-Simple-Per-5", "Vanilla", "Qwen-3.5-Simple", "Null"]
+_FRONT_ELO = [1630.0, 1590.0, 1500.0, 1450.0, 1310.0]
+
+
+def _front_intro() -> dict:
+    return {
+        "eyebrow": "CivBench test",
+        "headline": "Which AI plans best?",
+        "body": "One model guides two nations against the built-in AI.\n\nWe turn games into a rating. "
+                "See [the rating page](https://example.com/rating).",
+        "glossary": {"built-in AI": "The computer players that ship with the game.",
+                     "rating": "A chess-style score."},
+        "names": {"Vanilla": "Built-in AI", "Null": "Do-nothing player"},
+        "conditions": {"Every-turn": {"label": "every turn", "tip": "Asked every turn."},
+                       "Per-5": {"label": "every 5 turns", "tip": "Asked every 5 turns."}},
+        "series": [{"name": "Claude", "models": ["Opus-*"]}, {"name": "GLM", "models": ["GLM-*"]},
+                   {"name": "Qwen", "models": ["Qwen-*"]}],
+        "facts": [{"value": "models", "label": "AI models", "tip": "From {makers} makers."},
+                  {"value": "games", "label": "games played", "tip": "At least {min_games} per setup."},
+                  {"value": "starts", "label": "fixed starts"}],
+        "projects": {"title": "What is this built on?", "text": "Three projects.",
+                     "items": [{"name": "Vox Populi", "url": "https://example.com/vp",
+                                "link": "Vox Populi on GitHub", "text": "A community mod."}],
+                     "links": [{"label": "Read the paper", "url": "https://example.com/paper"}]},
+        "charts": {
+            "leaderboard": {"stage": "bt_main", "title": "Who plays best?", "text": "Bars against the built-in AI."},
+            "cost": {"stage": "perf_usage_efficiency", "title": "Is the pricier model worth it?"},
+            "styles": {"stage": "beh_commitment", "title": "How do they like to win?"},
+        },
+    }
+
+
+@pytest.fixture
+def front_env(tmp_path, write_spec, dev_spec):
+    root = str(tmp_path / "out")
+    spec = dev_spec
+    spec["output"] = {"root": root, "suffix": ""}
+    spec["data"]["extract"]["enabled"] = False
+    spec["presentation"] = {"condition_pairing": {"enabled": True, "suffixes": None,
+                                                  "base_label": "Every-turn", "sort_condition": "best"}}
+    spec["analyses"] = [
+        {"id": "bt_main", "module": "ratings.bradley_terry", "enabled": True,
+         "uses": {"tables": ["strength"]}, "params": {"group_by": ["player_type"]}},
+        {"id": "perf_usage_efficiency", "module": "performance.usage_efficiency",
+         "enabled": True, "uses": {"tables": ["tokens"]}, "params": {}},
+        {"id": "beh_commitment", "module": "behavior.commitment", "enabled": True, "params": {}},
+        {"id": "game_log", "module": "performance.game_log", "params": {}},
+    ]
+    spec["report"] = {"out_dir": root + "/", "formats": ["md", "html"], "sections": None,
+                      "overview_sections": ["bt_main", "perf_usage_efficiency", "beh_commitment"],
+                      "title": None, "include_disabled": False, "intro": _front_intro()}
+    cfg = load_config(write_spec(spec))
+    _emit(cfg, "bt_main", "ratings.bradley_terry",
+          summary="GLM-5.3-Simple-Per-5 leads **5** identities at **1630 Elo**.",
+          metadata={"group_by": ["player_type"]},
+          tables={"ratings": pd.DataFrame({"player_type": _FRONT_IDS, "elo": _FRONT_ELO,
+                                           "se_elo": [15.0] * 5})})
+    llm = [pt for pt in _FRONT_IDS if pt not in {"Vanilla", "Null"}]
+    usage = pd.DataFrame({
+        "player_type": llm + ["Vanilla"],
+        "avg_cost_per_player_game": [12.0, 30.0, 0.5, 0.0],
+        "elo": [1630.0, 1590.0, 1450.0, 1500.0],
+        "efficiency_elo_cost": [80.0, 20.0, -40.0, None],
+        "is_baseline": [False, False, False, True],
+    })
+    _emit(cfg, "perf_usage_efficiency", "performance.usage_efficiency",
+          summary="Most cost-efficient: **GLM-5.3-Simple-Per-5**.",
+          metadata={"usage_skill_fits": {"cost": {"intercept": 1450.0, "slope": 60.0}}},
+          tables={"usage_vs_rating": usage})
+    goals = ["Conquest", "Culture", "UnitedNations", "Spaceship"]
+    shares = {"GLM-5.3-Simple-Per-5": [40, 20, 10, 30], "Opus-5.5-Simple-Per-5": [10, 50, 10, 30],
+              "Qwen-3.5-Simple": [25, 25, 25, 25], "Vanilla": [30, 30, 10, 30]}
+    strategy = pd.DataFrame([
+        {"row_kind": "group", "player_type": pt, "metric": f"grand_strategy_share_{goal.lower()}",
+         "category": goal, "mean": float(value)}
+        for pt, values in shares.items() for goal, value in zip(goals, values)
+    ])
+    _emit(cfg, "beh_commitment", "behavior.commitment", summary="**Domination**: Gemma.",
+          tables={"grand_strategy": strategy})
+    games = pd.DataFrame({"game_id": ["g1", "g2", "g3"], "date_utc": ["2026-10-01"] * 3,
+                          "label": ["GLM-5.3-Simple | Per-5"] * 3, "seed": [1, 2, 2],
+                          "turns": [300, 400, 500]})
+    players = pd.DataFrame({"game_id": ["g1", "g2", "g3", "g1", "g2"],
+                            "player_type": ["GLM-5.3-Simple-Per-5"] * 3 + ["Vanilla"] * 2,
+                            "player_id": [0, 0, 0, 1, 1]})
+    _emit(cfg, "game_log", "performance.game_log", tables={"games": games, "game_players": players},
+          metadata={"vanilla_label": "Vanilla"})
+    return cfg
+
+
+def test_front_page_renders_story_charts_and_cards(front_env):
+    result = run_report(front_env)
+    out = report_dir(front_env)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert "<h1>Which AI plans best?</h1>" in html
+    assert html.count('<div class="front-chart"><svg') == 3  # leaderboard, cost, styles
+    assert '<script src="assets/front-page.js" defer></script>' in html
+    assert (out / "assets/front-page.js").is_file()
+    # Glossary terms get a hover tip once per prose block, never inside links.
+    assert html.count('data-tip="A chess-style score.">rating</span>') == 1
+    assert '<a href="https://example.com/rating">the rating page</a>' in html
+    # Fact chips fill numbers and placeholders from the saved tables.
+    assert "<b>3</b><span>AI models</span>" in html
+    assert 'data-tip="From 3 makers."' in html
+    assert 'data-tip="At least 3 per setup."' in html
+    assert "<b>2</b><span>fixed starts</span>" in html
+    # Plain names, condition words, and bulleted tips.
+    assert "<strong>GLM-5.3</strong>, deciding every 5 turns, rated <strong>1630</strong>" in html
+    assert (
+        "GLM-5.3 (deciding every 5 turns)\n- Rating: **1630** (±29, #1)\n"
+        "- Beats the built-in AI **68%** of the time head-to-head\n"
+        "- Favorite way to win: **Domination** (40%)\n"
+        "- Costs about **$12.00** per player per game"
+    ) in _PageTips(html).tips
+    assert 'class="series-key" data-series="GLM"' in html
+    # Finding cards lead with a plain sentence; the technical summary sits behind "?".
+    assert "<strong>GLM-5.3</strong> (every 5 turns) is the strongest so far." in html
+    assert "<strong>GLM-5.3</strong> (every 5 turns) gets the most skill for its price." in html
+    assert 'href="https://example.com/vp">Vox Populi on GitHub' in html
+    # The citation stays a top-level heading, not a folded block.
+    assert "<h2>Citation</h2>" in html and '<details class="cite"' not in html
+    assert "overview-heading" not in html
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert "## Which AI plans best?" in md
+    assert "| 1 | GLM-5.3 | every 5 turns | 1630 | 1601 to 1659 |" in md
+    assert "- **Strongest player**: **GLM-5.3** (every 5 turns) is the strongest so far." in md
+    assert not [w for w in result.warnings if "report.intro" in w]
+
+
+def test_front_page_is_byte_stable(front_env):
+    run_report(front_env)
+    out = report_dir(front_env)
+    first = {name: (out / name).read_bytes() for name in ("index.html", "report.md", "assets/report.css")}
+    run_report(front_env)
+    assert first == {name: (out / name).read_bytes() for name in first}
+
+
+def test_front_page_skips_a_chart_whose_stage_is_off(front_env, write_spec):
+    spec = json.loads(json.dumps(front_env.raw))
+    for stage in spec["analyses"]:
+        if stage["id"] == "beh_commitment":
+            stage["enabled"] = False
+    spec["report"]["overview_sections"] = ["bt_main", "perf_usage_efficiency"]
+    cfg = load_config(write_spec(spec))
+    result = run_report(cfg)
+    html = (report_dir(cfg) / "index.html").read_text(encoding="utf-8")
+    assert html.count('<div class="front-chart"><svg') == 2
+    assert any("report.intro.charts.styles" in w for w in result.warnings)
+
+
+def test_no_intro_keeps_the_classic_overview(report_env):
+    run_report(report_env)
+    out = report_dir(report_env)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert '<h2 id="overview-heading">Overview</h2>' in html
+    assert "front-page.js" not in html and not (out / "assets/front-page.js").exists()
+
+
+def test_report_headings_use_eb_garamond(report_env):
+    run_report(report_env)
+    css = (report_dir(report_env) / "assets/report.css").read_text(encoding="utf-8")
+    assert css.startswith('@import url("https://fonts.googleapis.com/css2?family=EB+Garamond')
+    assert 'h1, h2, h3 { font-family: "EB Garamond", Garamond, Georgia, serif;' in css
+
+
+class _PageTips(HTMLParser):
+    """Every data-tip value on a page, unescaped."""
+
+    def __init__(self, source):
+        super().__init__()
+        self.tips = []
+        self.feed(source)
+
+    def handle_starttag(self, tag, attrs):
+        tip = dict(attrs).get("data-tip")
+        if tip:
+            self.tips.append(tip)
