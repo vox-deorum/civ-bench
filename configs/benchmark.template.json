@@ -528,12 +528,12 @@
         "leaderboard": {
           "stage": "bt_main",
           "title": "Who plays best?",
-          "text": "Each bar shows how far an AI setup's rating sits above or below the built-in AI, the dashed line. Hover a row for details."
+          "text": "Each bar shows how far an AI setup's rating sits above or below the built-in AI, the dashed line."
         },
         "cost": {
           "stage": "perf_usage_efficiency",
           "title": "Is the pricier model worth it?",
-          "text": "Paying more usually buys a bit more skill. Setups above the dashed line play better than their price suggests. Hover a series or a point to pick out its models, or click a series to keep it picked."
+          "text": "More compute usually buys a bit more skill. Setups above the dashed line play better than their price suggests."
         }
       }
     },
