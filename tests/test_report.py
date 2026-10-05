@@ -1788,10 +1788,14 @@ def front_env(tmp_path, write_spec, dev_spec):
     _emit(cfg, "beh_commitment", "behavior.commitment", summary="**Domination**: Gemma.",
           tables={"grand_strategy": strategy})
     games = pd.DataFrame({"game_id": ["g1", "g2", "g3"], "date_utc": ["2026-10-01"] * 3,
+                          "experiment": ["front-exp"] * 3, "controlled": [True] * 3,
                           "label": ["GLM-5.3-Simple | Per-5"] * 3, "seed": [1, 2, 2],
                           "turns": [300, 400, 500]})
     players = pd.DataFrame({"game_id": ["g1", "g2", "g3", "g1", "g2"],
                             "player_type": ["GLM-5.3-Simple-Per-5"] * 3 + ["Vanilla"] * 2,
+                            "strategist": ["GLM-5.3-Simple"] * 3 + ["Vanilla"] * 2,
+                            "condition": ["Per-5"] * 3 + [""] * 2,
+                            "is_winner": [False, True, False, True, False],
                             "player_id": [0, 0, 0, 1, 1]})
     _emit(cfg, "game_log", "performance.game_log", tables={"games": games, "game_players": players},
           metadata={"vanilla_label": "Vanilla"})
@@ -1835,6 +1839,40 @@ def test_front_page_renders_story_charts_and_cards(front_env):
     assert "| 1 | GLM-5.3 | every 5 turns | 1630 | 1601 to 1659 |" in md
     assert "- **Strongest player**: **GLM-5.3** (every 5 turns) is the strongest so far." in md
     assert not [w for w in result.warnings if "report.intro" in w]
+
+
+def test_front_page_leads_with_news_and_links_players_to_their_games(front_env):
+    run_report(front_env)
+    html = (report_dir(front_env) / "index.html").read_text(encoding="utf-8")
+    # The news, with the leader inside it, comes before the leaderboard.
+    news, leader, board = (html.index(text) for text in
+                           ('id="front-news"', "Leading right now", 'id="front-leaderboard"'))
+    assert news < leader < board
+    # Leaderboard rows and play-style rows open the player's filtered Game Log.
+    games = "games.html?strategist=GLM-5.3-Simple&amp;condition=Per-5"
+    assert f'<a class="lb-row up" href="{games}"' in html
+    assert f'<a class="st-row" href="{games}"' in html
+    assert '<a class="lb-row ref" href="games.html?strategist=Vanilla"' in html
+    assert html.count("Click a player to see its games") == 2
+    # Without replays there is nothing to watch.
+    assert "Watch a game" not in html
+
+
+def test_front_page_leader_links_a_replay_it_won(front_env, write_spec, tmp_path):
+    spec = json.loads(json.dumps(front_env.raw))
+    runs = tmp_path / "source"
+    spec["data"]["extract"]["runs_dir"] = str(runs)
+    spec["report"]["replay"] = {"enabled": True}
+    (runs / "front-exp").mkdir(parents=True)
+    for game_id in ("g1", "g2", "g3"):
+        (runs / "front-exp" / f"{game_id}_1.Civ5Save").write_bytes(b"save")
+    cfg = load_config(write_spec(spec))
+    run_report(cfg)
+    html = (report_dir(cfg) / "index.html").read_text(encoding="utf-8")
+    leader = html[html.index("Leading right now"):html.index("</p>", html.index("Leading right now"))]
+    # g1 is newer, but the leader won g2.
+    assert '<a class="replay-link" href="saves/front-exp/g2.Civ5Save"' in leader
+    assert ">▶ Watch a game</a>" in leader
 
 
 def test_front_page_is_byte_stable(front_env):

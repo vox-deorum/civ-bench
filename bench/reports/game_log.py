@@ -142,6 +142,43 @@ def games_url(prefix: str = "", **filters) -> str:
     return prefix + "games.html" + ("?" + query if query else "")
 
 
+def example_game(doc: GameLogDocument, player_types) -> tuple[dict, list[dict]] | None:
+    """The newest replayable game of the first player type that has one, preferring a win.
+
+    Returns the game and its seats, or ``None`` when no listed type has a saved game.
+    """
+    if (not doc.replay or not doc.replay.save_paths
+            or not {"game_id", "player_type"} <= set(doc.game_players.columns)):
+        return None
+    seats = doc.game_players.assign(game_id=doc.game_players["game_id"].astype(str),
+                                    player_type=doc.game_players["player_type"].astype(str))
+    seats = seats[seats["game_id"].isin(doc.replay.save_paths)]
+    newest = doc.games["game_id"].astype(str).tolist()
+    for player_type in player_types:
+        own = seats[seats["player_type"] == str(player_type)]
+        won = set(own.loc[own["is_winner"].map(_flag), "game_id"]) if "is_winner" in own else set()
+        for pool in (won, set(own["game_id"])):
+            index = next((i for i, gid in enumerate(newest) if gid in pool), None)
+            if index is not None:
+                return doc.games.iloc[index].to_dict(), game_players(doc, newest[index])
+    return None
+
+
+def watch_game_html(doc: GameLogDocument | None, player_types) -> str:
+    """A "Watch a game" replay link for one of ``player_types``, or ``""``."""
+    found = example_game(doc, player_types) if doc is not None else None
+    return replay_link_html(doc, *found, label="▶ Watch a game") if found else ""
+
+
+def watch_game_markdown(doc: GameLogDocument | None, player_types) -> str:
+    """The Markdown form of :func:`watch_game_html`; only direct viewer links work there."""
+    found = example_game(doc, player_types) if doc is not None else None
+    if not found or not doc.replay.base_url:
+        return ""
+    href, _ = replay_target(doc, *found)
+    return f" [Watch a game]({href})"
+
+
 def latest_game_card_html(doc: GameLogDocument) -> str:
     if not doc.replay or not doc.replay.latest_game or doc.games.empty:
         return ""

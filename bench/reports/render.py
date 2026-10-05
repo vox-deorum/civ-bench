@@ -14,12 +14,18 @@ from __future__ import annotations
 
 import html as _html
 import re
-from dataclasses import replace
 from datetime import date
 
 from bench.plotting.interactive import plotly_javascript
 from bench.reports.assets import FRONT_PAGE_JS, REPORT_COMMON_JS, REPORT_HELP_JS
-from bench.reports.game_log import GAME_LOG_JS, game_log_markdown, latest_game_card_html, render_game_log_page
+from bench.reports.game_log import (
+    GAME_LOG_JS,
+    game_log_markdown,
+    latest_game_card_html,
+    render_game_log_page,
+    watch_game_html,
+    watch_game_markdown,
+)
 from bench.reports.content import (
     render_citation_html,
     render_citation_markdown,
@@ -41,7 +47,7 @@ from .controlled_seed import (
 from .heatmap import render_heatmap_html, render_heatmap_md
 from .front_page import in_sentence
 from .front_svg import cost_svg, leaderboard_svgs, shape_icon, styles_svg
-from .model import FrontChart, FrontPage, ReportDocument, Section, Table
+from .model import Announcement, FrontChart, FrontPage, ReportDocument, Section, Table
 
 
 def _annex_group(doc: ReportDocument):
@@ -120,9 +126,14 @@ def _announcement_date(value: str) -> str:
     return f"{recorded:%b} {recorded.day}, {recorded.year}"
 
 
-def _render_announcements(doc: ReportDocument) -> list[str]:
+def _watch_html(doc: ReportDocument, player_types) -> str:
+    link = watch_game_html(doc.game_log, player_types) if player_types else ""
+    return f" {link}" if link else ""
+
+
+def _render_announcements(doc: ReportDocument, announcements: list[Announcement]) -> list[str]:
     parts = []
-    for announcement in doc.announcements:
+    for announcement in announcements:
         kind = _html.escape(announcement.kind, quote=True)
         parts.append(f'<aside class="announcement" data-announcement="{kind}">')
         parts.append(f'<p class="eyebrow">{_html.escape(announcement.title)}')
@@ -131,7 +142,10 @@ def _render_announcements(doc: ReportDocument) -> list[str]:
                 f' &middot; <time datetime="{_html.escape(announcement.date, quote=True)}">'
                 f'{_announcement_date(announcement.date)}</time>'
             )
-        parts.append(f'</p><p>{_md_inline_to_html(announcement.text)}</p></aside>')
+        parts.append(
+            f'</p><p>{_md_inline_to_html(announcement.text)}'
+            f'{_watch_html(doc, announcement.player_types)}</p></aside>'
+        )
     return parts
 
 
@@ -149,12 +163,8 @@ def render_markdown(doc: ReportDocument) -> str:
         lines.append("")
     if doc.front_page is not None:
         _render_front_page_md(doc, anchors, lines)
-
-    for announcement in doc.announcements:
-        heading = announcement.title
-        if announcement.date:
-            heading += f" · {_announcement_date(announcement.date)}"
-        lines.extend([f"> **{heading}**", ">", f"> {announcement.text}", ""])
+    else:
+        _render_announcements_md(doc, doc.announcements, lines)
 
     if doc.overview_sections and doc.front_page is None:
         family_for = {
@@ -199,6 +209,15 @@ def render_markdown(doc: ReportDocument) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_announcements_md(doc: ReportDocument, announcements: list[Announcement], lines: list[str]) -> None:
+    for announcement in announcements:
+        heading = announcement.title
+        if announcement.date:
+            heading += f" · {_announcement_date(announcement.date)}"
+        text = announcement.text + watch_game_markdown(doc.game_log, announcement.player_types)
+        lines.extend([f"> **{heading}**", ">", f"> {text}", ""])
+
+
 def _plain_mode(row: dict) -> str:
     return row["mode"] or "-"
 
@@ -211,8 +230,12 @@ def _render_front_page_md(doc: ReportDocument, anchors: dict, lines: list[str]) 
         lines.extend([paragraph, ""])
     if front.facts:
         lines.extend([" · ".join(f"**{fact.value}** {fact.label}" for fact in front.facts), ""])
-    if front.leader:
-        lines.extend([f"Leading right now: {front.leader}.", ""])
+    if front.leader or front.news:
+        lines.extend(["### Latest news", ""])
+        if front.leader:
+            watch = watch_game_markdown(doc.game_log, [front.leader_type])
+            lines.extend([f"Leading right now: {front.leader}.{watch}", ""])
+        _render_announcements_md(doc, front.news, lines)
     board = front.chart("leaderboard")
     if board is not None:
         lines.extend([f"### {board.title}", ""])
@@ -499,6 +522,8 @@ th .sort-button:focus-visible { outline: 2px solid #175ca8; outline-offset: 2px;
 .facts span { color: #637083; font-size: .85rem; }
 .leader { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; margin: 1.2rem 0 0; border-left: 4px solid #b08732; border-radius: .3rem; padding: .65rem 1rem; background: #faf6eb; }
 .leader .eyebrow { margin: 0; color: #8a6a24; }
+.front-news .leader { margin-top: 1rem; }
+.front-news .replay-link { font-weight: 650; }
 .front-section .chart-link { margin: .5rem 0 0; font-size: .9rem; }
 .front-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.1rem; margin: 0 0 .75rem; padding: 0; list-style: none; color: #445164; font-size: .88rem; }
 .front-legend li { display: inline-flex; align-items: center; gap: .4rem; }
@@ -523,6 +548,8 @@ th .sort-button:focus-visible { outline: 2px solid #175ca8; outline-offset: 2px;
 .lb-row, .pt, .seg { outline: none; }
 .lb-row .hit { fill: transparent; }
 .lb-row:hover .hit, .lb-row:focus .hit { fill: #eef2f6; }
+a.lb-row:hover .name, a.lb-row:focus .name, a.st-row:hover .name, a.st-row:focus .name { fill: #175ca8; text-decoration: underline; }
+a.st-row:focus-visible { outline: 2px solid #175ca8; outline-offset: 2px; }
 .lb-row.up .bar { fill: #2c6aa8; }
 .lb-row.down .bar { fill: #b4885a; }
 .lb-row.ref .dot { fill: #18202a; }
@@ -727,9 +754,12 @@ def _legend_item(swatch: str, label_html: str, tip: str = "") -> str:
 
 def _chart_link(chart: FrontChart, targets: dict) -> str:
     target = targets.get(chart.stage)
-    if not target:
-        return ""
-    return f'<p class="chart-link"><a href="{_html.escape(target)}">Full results →</a></p>'
+    links = []
+    if chart.kind in {"leaderboard", "styles"} and any(row.get("href") for row in chart.rows):
+        links.append("Click a player to see its games")
+    if target:
+        links.append(f'<a href="{_html.escape(target)}">Full results →</a>')
+    return f'<p class="chart-link">{" · ".join(links)}</p>' if links else ""
 
 
 def _render_front_chart(chart: FrontChart, front: FrontPage, targets: dict) -> list[str]:
@@ -781,7 +811,7 @@ def _render_front_chart(chart: FrontChart, front: FrontPage, targets: dict) -> l
 
 
 def _render_front_page_html(doc: ReportDocument, targets: dict) -> list[str]:
-    """The plain-language front page: story, charts, projects, findings, news."""
+    """The plain-language front page: story, news, charts, projects, findings."""
     front = doc.front_page
     glossary = front.glossary
     parts = ['<main class="content front" id="main-content">', '<header class="hero">']
@@ -797,12 +827,22 @@ def _render_front_page_html(doc: ReportDocument, targets: dict) -> list[str]:
                 f"<li{attrs}><b>{_html.escape(fact.value)}</b><span>{_html.escape(fact.label)}</span></li>"
             )
         parts.append("</ul>")
-    if front.leader:
-        parts.append(
-            '<p class="leader"><span class="eyebrow">Leading right now</span>'
-            f"<span>{_prose_html(front.leader, glossary)}</span></p>"
-        )
     parts.append("</header>")
+
+    news = []
+    if front.leader:
+        news.append(
+            '<p class="leader"><span class="eyebrow">Leading right now</span>'
+            f"<span>{_prose_html(front.leader, glossary)}{_watch_html(doc, [front.leader_type])}</span></p>"
+        )
+    news.extend(_render_announcements(doc, front.news))
+    if doc.game_log is not None:
+        news.append(latest_game_card_html(doc.game_log) or '<p><a href="games.html">Browse recent games</a></p>')
+    if news:
+        parts.append('<section class="front-section front-news" aria-labelledby="front-news">')
+        parts.append('<h2 id="front-news">Latest news</h2>')
+        parts.extend(news)
+        parts.append("</section>")
 
     def chart(kind: str) -> None:
         found = front.chart(kind)
@@ -862,14 +902,6 @@ def _render_front_page_html(doc: ReportDocument, targets: dict) -> list[str]:
             parts.append("</article>")
         parts.append("</div></section>")
 
-    news = _render_announcements(replace(doc, announcements=front.news))
-    if doc.game_log is not None:
-        news.append(latest_game_card_html(doc.game_log) or '<p><a href="games.html">Browse recent games</a></p>')
-    if news:
-        parts.append('<section class="front-section" aria-labelledby="front-news">')
-        parts.append('<h2 id="front-news">Latest news</h2>')
-        parts.extend(news)
-        parts.append("</section>")
     parts.append(render_citation_html(doc.benchmark_citation))
     parts.append(render_footer_html(doc.footer))
     parts.append("</main>")
@@ -885,7 +917,7 @@ def _render_overview_html(doc: ReportDocument, anchors: dict, filenames: dict, f
         parts.append(f'<p class="caption">{_html.escape(doc.description)}</p>')
     if doc.intro:
         parts.append(f"<p>{_md_inline_to_html(doc.intro)}</p>")
-    parts.extend(_render_announcements(doc))
+    parts.extend(_render_announcements(doc, doc.announcements))
     if doc.game_log is not None:
         card = latest_game_card_html(doc.game_log)
         parts.append(card or '<p><a href="games.html">Browse recent games</a></p>')

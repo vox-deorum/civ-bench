@@ -80,6 +80,7 @@ def test_announcement_selects_newest_complete_condition_not_highest_rating(
     assert "2500" not in result.text
     assert "9999" not in result.text
     assert result.date == "2026-09-17"
+    assert latest_identity in result.player_types
     assert pending.kind == "testing"
     assert "**Pending** (20/24)" in pending.text
 

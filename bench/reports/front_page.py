@@ -23,6 +23,7 @@ import pandas as pd
 
 from .content import report_summary
 from .context import ReportBuildContext
+from .game_log import games_url
 from .model import Announcement, FrontCard, FrontChart, FrontFact, FrontLink, FrontPage, Section
 from .model_tips import model_tip
 
@@ -199,6 +200,7 @@ class _Builder:
             self.ratings = self.ratings[self.ratings["elo"].map(math.isfinite)]
             self.ratings = self.ratings.sort_values("elo", ascending=False, kind="mergesort").reset_index(drop=True)
             self.ratings["rank"] = range(1, len(self.ratings) + 1)
+        self.games = self._game_links()
         self.cost = {}
         if self.usage is not None:
             cost = _numeric(self.usage, "avg_cost_per_player_game")
@@ -229,6 +231,34 @@ class _Builder:
         frame = frame.copy()
         frame["player_type"] = frame["player_type"].astype(str)
         return frame
+
+    def _game_links(self) -> dict[str, str]:
+        """Each player type's Game Log page, filtered to its strategist and condition.
+
+        The page shows controlled games by default; a type with none of those
+        links to all of its games instead.
+        """
+        game_log = self._game_log()
+        if game_log is None:
+            return {}
+        games, players = game_log
+        if not {"game_id", "player_type", "strategist", "condition"} <= set(players.columns):
+            return {}
+        controlled = set()
+        if "controlled" in games:
+            flags = games["controlled"].astype(str).str.lower().isin({"true", "1", "1.0"})
+            controlled = set(games.loc[flags, "game_id"].astype(str))
+        links = {}
+        for pt, seats in players.groupby(players["player_type"].astype(str), sort=True):
+            first = seats.iloc[0]
+            strategist, condition = (str(first[key]) if pd.notna(first[key]) else ""
+                                     for key in ("strategist", "condition"))
+            if not strategist:
+                continue
+            any_controlled = seats["game_id"].astype(str).isin(controlled).any()
+            links[pt] = games_url(strategist=strategist, condition=condition or None,
+                                  controlled=None if any_controlled else "false")
+        return links
 
     @property
     def reference(self) -> tuple[str, float] | None:
@@ -288,7 +318,7 @@ class _Builder:
                 "mode_index": self.names.mode_index(pt),
                 "elo": elo, "low": elo - half, "high": elo + half, "rank": int(row.rank),
                 "kind": "ref" if self.names.baseline(pt) else ("up" if elo >= base else "down"),
-                "tip": self.tip(pt, lines),
+                "tip": self.tip(pt, lines), "href": self.games.get(pt, ""),
             })
         extra = {
             "reference": reference[1] if reference is not None else 1500.0,
@@ -369,7 +399,7 @@ class _Builder:
                 segments.append({"cls": cls, "label": label, "share": float(share[key]),
                                  "tip": "\n".join([self.names.title(pt), *lines])})
             rows.append({"key": pt, "name": self.names.name(pt), "mode": mode,
-                         "reference": pt in refs, "segments": segments})
+                         "reference": pt in refs, "segments": segments, "href": self.games.get(pt, "")})
         extra = {"goals": [{"cls": cls, "label": label, "tip": tip} for _, label, cls, tip in GOALS]}
         return FrontChart("styles", spec["stage"], spec["title"], spec.get("text", ""), rows, extra)
 
@@ -427,13 +457,18 @@ class _Builder:
             facts.append(FrontFact(f"{values[entry['value']]:,}", entry["label"], tip))
         return facts
 
-    def leader(self) -> str:
+    def leader_type(self) -> str:
+        """The highest-rated model setup, or ``""``."""
         if self.ratings is None:
             return ""
         llm = self.llm(self.ratings["player_type"])
-        if not llm:
+        return llm[0] if llm else ""
+
+    def leader(self) -> str:
+        pt = self.leader_type()
+        if not pt:
             return ""
-        best = self.ratings[self.ratings["player_type"] == llm[0]].iloc[0]
+        best = self.ratings[self.ratings["player_type"] == pt].iloc[0]
         mode, _ = self.names.mode(best.player_type)
         deciding = f", deciding {mode}," if mode else ""
         return f"**{self.names.name(best.player_type)}**{deciding} rated **{best.elo:.0f}**"
@@ -567,6 +602,7 @@ def front_page_document(
         glossary=dict(intro.get("glossary") or {}),
         facts=builder.facts(),
         leader=builder.leader(),
+        leader_type=builder.leader_type(),
         charts=charts,
         projects_title=projects.get("title", ""),
         projects_text=projects.get("text") or "",

@@ -142,12 +142,17 @@ class FamilyGroup:
 
 @dataclass
 class Announcement:
-    """A compact front-page update with inline Markdown and an optional ISO date."""
+    """A compact front-page update with inline Markdown and an optional ISO date.
+
+    ``player_types`` names the setups the update is about, best first, so the
+    renderer can offer one of their saved games as a replay.
+    """
 
     kind: str
     title: str
     text: str
     date: str | None = None
+    player_types: tuple[str, ...] = ()
 
 
 @dataclass
@@ -212,6 +217,7 @@ class FrontPage:
     glossary: dict[str, str] = field(default_factory=dict)
     facts: list[FrontFact] = field(default_factory=list)
     leader: str = ""  # inline Markdown
+    leader_type: str = ""  # the leading player type, for its example replay
     charts: list[FrontChart] = field(default_factory=list)
     projects_title: str = ""
     projects_text: str = ""

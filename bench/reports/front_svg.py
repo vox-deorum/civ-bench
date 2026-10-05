@@ -26,8 +26,16 @@ def _f(value: float) -> str:
     return f"{value:.1f}"
 
 
-def _tip(text: str) -> str:
-    return f' tabindex="0" data-tip="{_esc(text)}"' if text else ""
+def _tip(text: str, focus: bool = True) -> str:
+    """The hover tip; ``focus=False`` keeps it off the tab order, as inside a row link."""
+    if not text:
+        return ""
+    return (' tabindex="0"' if focus else "") + f' data-tip="{_esc(text)}"'
+
+
+def _link(row: dict) -> tuple[str, str]:
+    """The element and ``href`` attribute for a row that opens its games, if it has a page."""
+    return ("a", f' href="{_esc(row["href"])}"') if row.get("href") else ("g", "")
 
 
 # ── leaderboard ─────────────────────────────────────────────────────────────
@@ -66,8 +74,9 @@ def leaderboard_svgs(chart: FrontChart) -> tuple[str, str]:
         for i, row in enumerate(part):
             y = head + i * _ROW
             cy = y + _ROW / 2
+            tag, href = _link(row)
             out.append(
-                f'<g class="lb-row {row["kind"]}"{_tip(row["tip"])} '
+                f'<{tag} class="lb-row {row["kind"]}"{href}{_tip(row["tip"], tag == "g")} '
                 f'aria-label="{_esc(row["name"])}, rating {row["elo"]:.0f}">'
             )
             out.append(f'<rect class="hit" x="0" y="{y}" width="{WIDTH}" height="{_ROW}"/>')
@@ -77,7 +86,7 @@ def leaderboard_svgs(chart: FrontChart) -> tuple[str, str]:
                 width = round(len(row["mode"]) * 6.2 + 20)
                 left = _LB_LABEL - 14 - width
                 out.append(
-                    f'<g class="mode m{row.get("mode_index", 0)}"{_tip(row["mode_tip"])}>'
+                    f'<g class="mode m{row.get("mode_index", 0)}"{_tip(row["mode_tip"], tag == "g")}>'
                     f'<rect x="{left}" y="{_f(cy - 9)}" width="{width}" height="18" rx="9"/>'
                     f'<text x="{_f(left + width / 2)}" y="{_f(cy + 4)}" text-anchor="middle">{_esc(row["mode"])}</text></g>'
                 )
@@ -96,7 +105,7 @@ def leaderboard_svgs(chart: FrontChart) -> tuple[str, str]:
             vx = max(xe, w2) + 6 if up else min(xe, w1) - 6
             anchor = "start" if up else "end"
             out.append(f'<text class="val" x="{_f(vx)}" y="{_f(cy + 4)}" text-anchor="{anchor}">{row["elo"]:.0f}</text>')
-            out.append("</g>")
+            out.append(f"</{tag}>")
         out.append(f'<line class="base" x1="{_f(x0)}" x2="{_f(x0)}" y1="{head - 6}" y2="{height - 4}"/>')
         out.append("</svg>")
         return "\n".join(out)
@@ -258,12 +267,15 @@ def styles_svg(chart: FrontChart) -> str:
             out.append(f'<line class="grid" x1="0" x2="{WIDTH}" y1="{_f(y - gap / 2 - 1)}" y2="{_f(y - gap / 2 - 1)}"/>')
         name_cls = "name refname" if row["reference"] else "name"
         mode = f'<tspan class="sub"> · {_esc(row["mode"])}</tspan>' if row["mode"] else ""
+        _, href = _link(row)
+        if href:
+            out.append(f'<a class="st-row"{href} aria-label="{_esc(row["name"])}: see its games">')
         out.append(f'<text class="{name_cls}" x="0" y="{y + 16}">{_esc(row["name"])}{mode}</text>')
         x = float(_ST_LABEL)
         for segment in row["segments"]:
             width = segment["share"] * span
             out.append(
-                f'<g class="seg {segment["cls"]}"{_tip(segment["tip"])}>'
+                f'<g class="seg {segment["cls"]}"{_tip(segment["tip"], not href)}>'
                 f'<rect x="{_f(x)}" y="{y + 3}" width="{_f(width)}" height="22"/>'
             )
             if segment["share"] >= 0.1:
@@ -272,5 +284,7 @@ def styles_svg(chart: FrontChart) -> str:
                 )
             out.append("</g>")
             x += width
+        if href:
+            out.append("</a>")
     out.append("</svg>")
     return "\n".join(out)

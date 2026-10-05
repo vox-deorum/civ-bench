@@ -102,7 +102,9 @@ def _latest_result(ctx: ReportBuildContext, progress: pd.DataFrame) -> Announcem
         )
         descriptions.append(f"**{_literal(model)}** scored {values}")
     text = "; ".join(descriptions) + "."
+    best_first = condition.sort_values(["elo", "player_type"], ascending=[False, True], kind="mergesort")
     return Announcement(
         kind="result", title="Latest score", text=text,
         date=latest["completed_at"].date().isoformat(),
+        player_types=tuple(best_first["player_type"].astype(str)),
     )
