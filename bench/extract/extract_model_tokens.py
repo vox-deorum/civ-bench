@@ -499,7 +499,7 @@ def _describe_token_db(db_file, model_rows) -> str:
     return f"{unique_players} players, {unique_models} player-model rows"
 
 
-def export_model_token_data(db_files, available_game_ids, output_file, catalog: Catalog, prune_only=False, issues=None) -> int:
+def export_model_token_data(db_files, available_game_ids, output_file, catalog: Catalog, prune_only=False, issues=None, prune_gate=None) -> int:
     """Export model-token rows to ``output_file``; returns the count of new rows."""
     def _extract_rows(db_file, issues):
         return extract_game_model_token_data(db_file, catalog, issues=issues)
@@ -511,4 +511,5 @@ def export_model_token_data(db_files, available_game_ids, output_file, catalog: 
         dedupe_key=lambda r: (r.get("game_id"), r.get("player_id"), r.get("model_base")),
         describe_db=_describe_token_db,
         noun="model-token rows", prune_only=prune_only, issues=issues,
+        prune_gate=prune_gate,
     )

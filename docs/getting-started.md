@@ -58,6 +58,7 @@ Handy flags:
 - `--only <stage-id>` runs just that stage and its dependencies. Repeatable.
 - `--skip <stage-id>` drops a stage. `--skip all` is equivalent to a dry run. Repeatable.
 - `--force-rebuild` (or `-f`) re-extracts even when the CSVs are newer than the game DBs.
+- `--prune-missing` (with `extract` or `run`) removes games whose DB is gone from the CSVs, without extracting new games. It lists the games and asks before removing anything.
 - `--no-publish` (with `run` or `report`) skips the post-report offer to commit and push the rendered report. See [Release the report](#release-the-report).
 
 Your finished report lands in `reports/<run-name>/`. It contains `index.html`, a compact overview; `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html` for represented analysis families; `report.md`; and a self-contained `assets/` tree with `report.css`, figures, and full-table CSVs. Rendering is **deterministic** (no timestamps), so re-running `civ-bench report` reproduces every document byte-for-byte.
@@ -213,3 +214,4 @@ civ-bench run --config configs/benchmark.dev.json --skip extract       # reuse e
 - **`Rscript not found`.** Install R from [CRAN](https://cran.r-project.org/) and make sure `Rscript` is on your `PATH`, or set `CIV_BENCH_RSCRIPT` to its full path. The `ratings.*` analyses need it.
 - **A config error on load.** The loader fails loud on unknown keys and missing required fields. Read the message; it names the offending key. Cross-check against [configs/benchmark.md](../configs/benchmark.md).
 - **Extraction seems to do nothing.** It is skipped automatically when every output CSV already exists and is newer than the game DBs. Pass `--force-rebuild` to rebuild anyway.
+- **A game you moved out of `runs_dir` still shows up.** A skipped extract does not notice removed DBs. Run `civ-bench extract --config <spec> --prune-missing`, check the listed games, and answer `y`.

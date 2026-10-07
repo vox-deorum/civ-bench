@@ -1,7 +1,7 @@
 """``civ-bench`` command-line entrypoint.
 
     civ-bench extract|run|report --config <path> [--only ID] [--skip ID] [--dry-run]
-                                 [--no-publish]
+                                 [--no-publish] [--prune-missing]
 
 Stage 0 implements config loading + validation + DAG resolution + dry-run
 printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs);
@@ -15,6 +15,10 @@ resolved DAG (extract → estimators → adjust → analyses → report); the st
 records malformed DBs in ``import_issues.csv`` it repairs them (``civ-bench fix``)
 and re-imports so the ledger reflects the fixed state, before the rest of the DAG
 runs. Disable via ``data.extract.auto_fix: false`` or ``--no-fix``.
+
+Before any extract drops rows for games whose DB is gone, it lists those games and
+asks. ``--prune-missing`` runs a prune-only extract (no new games) for this
+invocation; a run that is skipped because its outputs are fresh never prunes.
 """
 
 from __future__ import annotations
@@ -81,6 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
                 help="do not auto-repair malformed DBs and re-import "
                      "(overrides data.extract.auto_fix)",
             )
+            p.add_argument(
+                "--prune-missing", "--prune_missing",
+                dest="prune_missing", action="store_true",
+                help="only drop rows for games whose DB is gone, without extracting "
+                     "new games; lists the games and asks first "
+                     "(overrides data.extract.prune_missing)",
+            )
 
     # `fix` repairs the malformed DBs recorded in import_issues.csv. It takes no
     # stage selection (--only/--skip are meaningless), so it gets a lean subparser
@@ -111,11 +122,41 @@ def _report_extract_issues(result) -> None:
         )
 
 
-def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
+def _confirm_prune(games: list[dict]) -> bool:
+    """List the games whose DB is gone and ask before dropping their rows.
+
+    A non-TTY stdin declines, so an unattended run never deletes data."""
+    print()
+    print(f"civ-bench: extract: {len(games)} game(s) in the tables have no database "
+          f"file under runs_dir:")
+    for game in games:
+        print(f"  {game['game_id']}  experiment={game.get('experiment', '?')}  "
+              f"seed={game.get('seed', '?')}")
+    if not sys.stdin.isatty():
+        print("civ-bench: extract: no interactive console; keeping their rows.")
+        return False
+    try:
+        answer = input("Remove these games from the canonical tables? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix, prune_missing=None):
     """Run extract; when it records malformed DBs and ``auto_fix`` is on, repair the
     flagged DBs (``civ-bench fix``) and re-import so the ledger reflects the repaired
-    state. Returns the final :class:`ExtractResult` (the re-import's, when one ran)."""
-    result = run_extract(cfg, catalog=catalog, force_rebuild=force_rebuild)
+    state. Returns the final :class:`ExtractResult` (the re-import's, when one ran).
+
+    ``prune_missing`` (``None`` = use the config) selects a prune-only run. Either
+    way, rows for games with no DB are dropped only after the user confirms; one
+    gate covers both passes, so the re-import does not ask again."""
+    from .extract.prune import PruneGate
+
+    prune_gate = PruneGate(_confirm_prune)
+    result = run_extract(
+        cfg, catalog=catalog, force_rebuild=force_rebuild,
+        prune_missing=prune_missing, prune_gate=prune_gate,
+    )
     if result.skipped:
         print(f"civ-bench: extract skipped: {result.reason}")
     _report_extract_issues(result)
@@ -142,7 +183,9 @@ def _extract_with_autofix(cfg, catalog, *, force_rebuild, auto_fix):
     catalog = catalog or Catalog.from_run_config(cfg)
     # force_rebuild + prune_missing=False so the repaired DBs are actually re-inspected
     # (a prune-only re-import would evaluate nothing and never clear the ledger).
-    result = run_extract(cfg, catalog=catalog, force_rebuild=True, prune_missing=False)
+    result = run_extract(
+        cfg, catalog=catalog, force_rebuild=True, prune_missing=False, prune_gate=prune_gate
+    )
     _report_extract_issues(result)
     return result
 
@@ -229,7 +272,7 @@ def _resolve_subset(dag: Dag, only: list[str], skip: list[str]) -> list[str]:
 
 def _run_pipeline(
     cfg, dag: Dag, subset: list[str], force_rebuild: bool, auto_fix: bool,
-    no_publish: bool = False,
+    no_publish: bool = False, prune_missing: Optional[bool] = None,
 ) -> int:
     """Execute every stage in ``subset`` (topo order).
 
@@ -250,7 +293,8 @@ def _run_pipeline(
             catalog = Catalog.from_run_config(cfg)
         if node.kind == "extract":
             _extract_with_autofix(
-                cfg, catalog, force_rebuild=force_rebuild, auto_fix=auto_fix
+                cfg, catalog, force_rebuild=force_rebuild, auto_fix=auto_fix,
+                prune_missing=prune_missing,
             )
         elif node.kind == "estimators":
             from .estimators import run_estimator  # lazy: pulls torch/xgboost
@@ -355,10 +399,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     # a per-invocation override. Ignored by report/fix (no --no-fix, no extract stage).
     extract_cfg = cfg.data.get("extract", {}) or {}
     auto_fix = bool(extract_cfg.get("auto_fix", True)) and not getattr(args, "no_fix", False)
+    # --prune-missing turns prune-only on for this invocation; without it the config decides.
+    prune_missing = True if getattr(args, "prune_missing", False) else None
 
     if args.command == "extract":
         try:
-            _extract_with_autofix(cfg, None, force_rebuild=force_rebuild, auto_fix=auto_fix)
+            _extract_with_autofix(
+                cfg, None, force_rebuild=force_rebuild, auto_fix=auto_fix,
+                prune_missing=prune_missing,
+            )
         except (ConfigError, ExtractError) as exc:
             print(f"civ-bench: extract error: {exc}", file=sys.stderr)
             return 2
@@ -391,7 +440,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
-        return _run_pipeline(cfg, dag, subset, force_rebuild, auto_fix, args.no_publish)
+        return _run_pipeline(
+            cfg, dag, subset, force_rebuild, auto_fix, args.no_publish, prune_missing
+        )
     except (ConfigError, ExtractError) as exc:
         print(f"civ-bench: run error: {exc}", file=sys.stderr)
         return 2

@@ -150,7 +150,7 @@ existed.
     "runs_dir": "runs/",                 // root searched for *.db game DBs
     "outputs": ["turns", "panel", "games", "tokens", "behavior"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
-    "prune_missing": false,              // true → only drop rows for missing DBs, no new extract
+    "prune_missing": false,              // true → only drop rows for missing DBs, no new extract (CLI: --prune-missing)
     "force_rebuild": false,              // true → rebuild even if outputs exist & are newer
     "auto_fix": true,                    // true → repair malformed DBs & re-import (--no-fix disables)
     "issues_path": "runs/import_issues.csv",  // where malformed/locked-DB import issues are recorded
@@ -184,7 +184,8 @@ existed.
 
 - **`filter` is optional**: omit it for "all rows". It accepts either an inline filter object or the **name of a preset** from top-level `filters` (§3.1). Every stage inherits this global filter and may narrow it (§6.1), never widen it.
 - **`extract.enabled: false`** is the "I already have CSVs" switch: the `extract` stage is dropped from the DAG and loaders read `tables.*` directly. Combine with `--skip extract` on the CLI for the same effect ad hoc.
-- The `extract` stage is **skipped automatically** when every `outputs` CSV already exists and is newer than the DBs, unless `force_rebuild: true`.
+- The `extract` stage is **skipped automatically** when every `outputs` CSV already exists and is newer than the DBs, unless `force_rebuild: true`. Removing a DB does not make the outputs stale, so a skipped run keeps that game's rows and its skip message names how many games in `tables.games` have no DB.
+- **Pruning asks first.** Any extract run that is not skipped drops rows for games whose DB is no longer under `runs_dir`. Before it drops anything, the CLI lists those games (game id, experiment, seed) and asks for confirmation. Declined games keep their rows and their import issues. Without an interactive console the answer is no. `prune_missing: true`, or `--prune-missing` on `civ-bench extract` or `civ-bench run` for one invocation, does only this pruning step and extracts no new games.
 - When a fresh extract records malformed DBs, they are **auto-repaired and re-imported** in place (extract → `fix` → re-import) before the rest of the DAG runs. Disable with `auto_fix: false` or the CLI `--no-fix` flag; games that recovery cannot save stay flagged and are excluded downstream, exactly as before.
 - When the selected stages need experiment ids or player-type names, they resolve through `catalogs.experiments` + `catalogs.models`. **`player_type` is composed at extract from the per-player game metadata** (`model-{id}` + `strategist-{id}`) via the catalog's template + aliases + unified label map (§3.3); the old seat→model mapping is only an optional fallback; never spell out seat→model mappings here.
 

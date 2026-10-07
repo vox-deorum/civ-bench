@@ -95,12 +95,14 @@ def _install(monkeypatch, extract_results, *, fix_result=None, fix_error=None) -
     ``extract_results`` is returned one-per-call (the last entry repeats). Returns a
     state dict: ``extract_calls`` (the ``force_rebuild`` of each call) and ``fix_calls``.
     """
-    state = {"extract_calls": [], "extract_prune": [], "fix_calls": 0, "fix_only_game_ids": []}
+    state = {"extract_calls": [], "extract_prune": [], "extract_gates": [],
+             "fix_calls": 0, "fix_only_game_ids": []}
     seq = list(extract_results)
 
-    def fake_extract(cfg, catalog=None, force_rebuild=False, prune_missing=None):
+    def fake_extract(cfg, catalog=None, force_rebuild=False, prune_missing=None, prune_gate=None):
         state["extract_calls"].append(force_rebuild)
         state["extract_prune"].append(prune_missing)
+        state["extract_gates"].append(prune_gate)
         return seq[min(len(state["extract_calls"]) - 1, len(seq) - 1)]
 
     def fake_fix(cfg, dry_run=False, force=False, only_game_ids=None):
@@ -130,6 +132,9 @@ def test_repairs_then_reimports(monkeypatch, tmp_path):
     assert st["extract_calls"] == [False, True]  # initial extract, then a forced re-import
     # the re-import re-inspects (prune_missing=False), never prune-only
     assert st["extract_prune"] == [None, False]
+    # one prune gate covers both passes, so a declined game is not asked about twice
+    gate = st["extract_gates"][0]
+    assert gate is not None and st["extract_gates"] == [gate, gate]
     # fix is scoped to exactly the games that failed THIS run
     assert st["fix_only_game_ids"] == [_issues_log().fresh_game_ids]
 
@@ -248,3 +253,64 @@ def test_cli_run_autofixes_then_reimports(monkeypatch, dev_spec, write_spec):
     assert rc == 0
     assert st["fix_calls"] == 1
     assert st["extract_calls"] == [False, True]
+
+
+# ── --prune-missing and the prune prompt ─────────────────────────────────────
+def test_cli_extract_prune_missing_flag_reaches_extract(monkeypatch, dev_spec, write_spec):
+    st = _install(monkeypatch, [_extract_result()])
+    rc = cli.main(["extract", "--config", str(write_spec(dev_spec)), "--prune-missing"])
+
+    assert rc == 0
+    assert st["extract_prune"] == [True]
+
+
+def test_cli_run_prune_missing_flag_reaches_extract(monkeypatch, dev_spec, write_spec):
+    monkeypatch.setattr(cli.Catalog, "from_run_config", staticmethod(lambda cfg: object()))
+    st = _install(monkeypatch, [_extract_result()])
+    rc = cli.main(["run", "--config", str(write_spec(dev_spec)), "--only", "extract",
+                   "--prune-missing"])
+
+    assert rc == 0
+    assert st["extract_prune"] == [True]
+
+
+def test_cli_extract_without_flag_defers_to_config(monkeypatch, dev_spec, write_spec):
+    st = _install(monkeypatch, [_extract_result()])
+    rc = cli.main(["extract", "--config", str(write_spec(dev_spec))])
+
+    assert rc == 0
+    assert st["extract_prune"] == [None]
+
+
+class _FakeStdin:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+_GONE = [{"game_id": "gone", "experiment": "old-exp", "seed": "1"}]
+
+
+def test_confirm_prune_lists_games_and_accepts_yes(monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(True))
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+
+    assert cli._confirm_prune(_GONE) is True
+    out = capsys.readouterr().out
+    assert "gone" in out and "experiment=old-exp" in out and "seed=1" in out
+
+
+def test_confirm_prune_defaults_to_no(monkeypatch):
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(True))
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+
+    assert cli._confirm_prune(_GONE) is False
+
+
+def test_confirm_prune_without_console_keeps_rows(monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(False))
+
+    assert cli._confirm_prune(_GONE) is False
+    assert "keeping their rows" in capsys.readouterr().out

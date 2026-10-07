@@ -46,6 +46,7 @@ def run_table_export(
     noun: str = "rows",
     prune_only: bool = False,
     issues=None,
+    prune_gate=None,
 ) -> int:
     """Incrementally export one canonical table; return the count of NEW rows.
 
@@ -53,6 +54,8 @@ def run_table_export(
     the game is skipped/failed). ``dedupe_key(row) -> tuple`` (``None`` for the
     one-row-per-game ``games`` table) collapses duplicate existing rows.
     ``describe_db(db_file, rows) -> str`` supplies the optional per-DB progress line.
+    ``prune_gate`` (a :class:`~bench.extract.prune.PruneGate`) must approve each game
+    whose DB is gone before its rows are dropped; declined games keep their rows.
     """
     existing_data, existing_game_ids, structure_matches = read_existing_csv(
         output_file, fieldnames
@@ -74,8 +77,12 @@ def run_table_export(
         existing_data = []
         existing_game_ids = set()
     else:
+        keep_ids = available_game_ids
+        missing_ids = existing_game_ids - available_game_ids
+        if prune_gate is not None and missing_ids:
+            keep_ids = available_game_ids | (missing_ids - prune_gate.review(missing_ids))
         existing_data, existing_game_ids, pruned_rows, pruned_game_ids = filter_existing_data(
-            existing_data, available_game_ids
+            existing_data, keep_ids
         )
         if pruned_rows > 0:
             print(

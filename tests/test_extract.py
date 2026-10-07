@@ -28,6 +28,7 @@ from bench.extract import (
 )
 from bench.extract.extract_games import export_game_data
 from bench.extract.extract_panel import _has_real_changes
+from bench.extract.prune import PruneGate
 from bench.extract.utilities import UNCONTROLLED
 
 
@@ -525,6 +526,107 @@ def test_run_extract_prune_only_reconciles_report_without_clobber(tmp_path, cata
     import csv
     persisted = {r["game_id"] for r in csv.DictReader(issues.open(encoding="utf-8"))}
     assert persisted == {"keep"}
+
+
+_GAMES_WITH_GONE = (
+    "game_id,timestamp,experiment,seed,seating_rotation\n"
+    "keep,100,exp,-1,-1\n"
+    "gone,100,old-exp,2,0\n"
+)
+
+
+def _read_game_ids(path: Path) -> set:
+    import csv
+    return {r["game_id"] for r in csv.DictReader(path.open(encoding="utf-8"))}
+
+
+def test_run_extract_prune_asks_once_and_drops_approved_games(tmp_path, catalog):
+    runs = tmp_path / "runs"
+    _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})
+    out = tmp_path / "game_data.csv"
+    out.write_text(_GAMES_WITH_GONE, encoding="utf-8")
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "prune_missing": True},
+        {"games": str(out)},
+    )
+    asked = []
+    gate = PruneGate(lambda games: asked.append(games) or True)
+    result = run_extract(cfg, catalog=catalog, prune_gate=gate)
+
+    # One prompt, describing the missing game from its game_data row.
+    assert len(asked) == 1
+    assert [(g["game_id"], g["experiment"], g["seed"]) for g in asked[0]] == [("gone", "old-exp", "2")]
+    assert result.pruned_game_ids == {"gone"}
+    assert result.kept_missing_game_ids == set()
+    assert _read_game_ids(out) == {"keep"}
+
+
+def test_run_extract_declined_prune_keeps_rows_and_issues(tmp_path, catalog):
+    runs = tmp_path / "runs"
+    _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})
+    out = tmp_path / "game_data.csv"
+    out.write_text(_GAMES_WITH_GONE, encoding="utf-8")
+    issues = tmp_path / "import_issues.csv"
+    issues.write_text(
+        "game_id,experiment,seed,seating_rotation,stages,players,db_name,message\n"
+        "gone,old-exp,2,0,panel,,gone_100.db,boom\n",
+        encoding="utf-8",
+    )
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"],
+         "force_rebuild": True, "issues_path": str(issues)},
+        {"games": str(out)},
+    )
+    result = run_extract(cfg, catalog=catalog, prune_gate=PruneGate(lambda games: False))
+
+    assert result.pruned_game_ids == set()
+    assert result.kept_missing_game_ids == {"gone"}
+    assert _read_game_ids(out) == {"keep", "gone"}
+    # The kept game keeps its recorded issue as well.
+    assert {i.game_id for i in result.issues.issues()} == {"gone"}
+
+
+def test_run_extract_skipped_run_names_missing_games(tmp_path, catalog):
+    # Removing a DB leaves the outputs "fresh", so the skip reason must point at
+    # --prune-missing instead of silently keeping the stale game.
+    runs = tmp_path / "runs"
+    _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})
+    out = tmp_path / "game_data.csv"
+    out.write_text(_GAMES_WITH_GONE, encoding="utf-8")
+    issues = tmp_path / "import_issues.csv"
+    issues.write_text("game_id,experiment,seed,seating_rotation,stages,players,db_name,message\n", encoding="utf-8")
+    time.sleep(0.01)
+    os.utime(str(out), None)
+    os.utime(str(issues), None)
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(runs), "outputs": ["games"], "issues_path": str(issues)},
+        {"games": str(out)},
+    )
+    asked = []
+    result = run_extract(cfg, catalog=catalog, prune_gate=PruneGate(lambda g: asked.append(g) or True))
+
+    assert result.skipped is True
+    assert "--prune-missing" in result.reason
+    assert result.kept_missing_game_ids == {"gone"}
+    assert asked == []  # a skipped run never prunes, so it never asks
+    assert _read_game_ids(out) == {"keep", "gone"}
+
+
+def test_prune_gate_asks_once_per_game():
+    asked = []
+    gate = PruneGate(lambda games: asked.append([g["game_id"] for g in games]) or True)
+    gate.add_details({"a": {"game_id": "a", "seed": "1"}})
+
+    assert gate.review({"a"}) == {"a"}
+    assert gate.review({"a", "b"}) == {"a", "b"}
+    assert asked == [["a"], ["b"]]  # "a" is not asked about twice
+
+
+def test_prune_gate_without_confirm_prunes_everything():
+    assert PruneGate().review({"x", "y"}) == {"x", "y"}
 
 
 def test_run_extract_does_not_skip_when_issue_report_missing(tmp_path, catalog):

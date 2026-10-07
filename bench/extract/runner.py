@@ -20,6 +20,7 @@ from .extract_model_tokens import MODEL_TOKEN_FIELDNAMES, export_model_token_dat
 from .extract_panel import PANEL_FIELD_MAPPINGS, export_panel_data
 from .extract_turns import TURN_FIELD_MAPPINGS, export_turn_data
 from .issues import DEFAULT_ISSUES_PATH, ImportIssueLog
+from .prune import PruneGate, read_game_rows
 from .utilities import csv_header_matches, find_all_databases, outputs_are_fresh
 
 
@@ -53,6 +54,10 @@ class ExtractResult:
     output_paths: dict = field(default_factory=dict)
     issues: ImportIssueLog = field(default_factory=ImportIssueLog)
     issues_path: str = ""
+    # Games with no DB file whose rows were dropped, or kept because pruning was
+    # declined (or, on a skipped run, never reviewed).
+    pruned_game_ids: set = field(default_factory=set)
+    kept_missing_game_ids: set = field(default_factory=set)
 
 
 def _table_path(cfg: RunConfig, key: str) -> str:
@@ -65,6 +70,7 @@ def run_extract(
     catalog: Optional[Catalog] = None,
     force_rebuild: bool = False,
     prune_missing: Optional[bool] = None,
+    prune_gate: Optional[PruneGate] = None,
 ) -> ExtractResult:
     """Run the extract stage for ``cfg`` and return a summary of what was written.
 
@@ -73,6 +79,10 @@ def run_extract(
     (``None`` = use the config value) lets a caller force a full re-import: the
     auto-fix re-import passes ``prune_missing=False`` so it actually re-inspects the
     repaired DBs instead of only pruning.
+
+    Rows for games with no DB file are dropped only when ``prune_gate`` approves
+    them. The CLI passes a gate that lists the games and asks first; without one,
+    every missing game is pruned.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
 
@@ -105,6 +115,12 @@ def run_extract(
     db_files = sorted(db_files)
     print(f"Found {len(db_files)} database files with {len(available_game_ids)} unique games")
 
+    # game_data is small, so read it up front: it names the games that would be
+    # pruned (with experiment and seed for the prompt) before any big table is read.
+    games_path = _table_path(cfg, "games")
+    game_rows = read_game_rows(games_path)
+    missing_game_ids = set(game_rows) - available_game_ids
+
     selected_db_files = db_files
     capped = max_dbs is not None and max_dbs < len(db_files)
     if max_dbs is not None:
@@ -128,13 +144,26 @@ def run_extract(
     )
     if not force_rebuild and not prune_only and not capped and headers_current \
             and outputs_are_fresh(freshness_paths, db_files):
+        reason = ("all outputs exist and are newer than the source DBs "
+                  "(pass force_rebuild to override).")
+        if missing_game_ids:
+            # Removing a DB does not make the outputs stale, so say how to drop its rows.
+            reason += (f" {len(missing_game_ids)} game(s) in {games_path} have no "
+                       f"database file; pass --prune-missing to review and remove them.")
         return ExtractResult(
             skipped=True,
-            reason="all outputs exist and are newer than the source DBs "
-                   "(pass force_rebuild to override).",
+            reason=reason,
             output_paths=output_paths,
             issues_path=issues_path,
+            kept_missing_game_ids=missing_game_ids,
         )
+
+    prune_gate = prune_gate or PruneGate()
+    prune_gate.add_details(game_rows)
+    if "games" in outputs and missing_game_ids:
+        # Ask about every game the games table already knows is missing in one go;
+        # the other tables only prompt for games this list did not cover.
+        prune_gate.review(missing_game_ids)
 
     catalog = catalog or Catalog.from_run_config(cfg)
 
@@ -152,23 +181,24 @@ def run_extract(
         print(f"EXTRACTING {key} → {path}")
         print("-" * 60)
         if key == "games":
-            new_rows[key] = export_game_data(selected_db_files, available_game_ids, path, prune_only=prune_only, issues=issues)
+            new_rows[key] = export_game_data(selected_db_files, available_game_ids, path, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
         elif key == "panel":
-            new_rows[key] = export_panel_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues)
+            new_rows[key] = export_panel_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
         elif key == "turns":
-            new_rows[key] = export_turn_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues)
+            new_rows[key] = export_turn_data(selected_db_files, available_game_ids, path, catalog=catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
         elif key == "tokens":
-            new_rows[key] = export_model_token_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only, issues=issues)
+            new_rows[key] = export_model_token_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
         elif key == "behavior":
-            new_rows[key] = export_behavior_data(selected_db_files, available_game_ids, path, behavior_spec, catalog=catalog, prune_only=prune_only, issues=issues)
+            new_rows[key] = export_behavior_data(selected_db_files, available_game_ids, path, behavior_spec, catalog=catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
 
     # Reconcile this run's findings with the prior report (carry forward issues for
     # games no stage re-examined; drop those whose DB is gone) and persist. This
     # also gives prune-only correct behavior: it inspects no DBs, so it simply drops
     # issues for removed games and keeps the rest, never clobbering with a clean
     # header. Fail loud if persistence fails (else the CLI would claim issues were
-    # "recorded" when nothing was written).
-    issues.reconcile(available_game_ids)
+    # "recorded" when nothing was written). Declined games keep their rows, so they
+    # keep their issues too.
+    issues.reconcile(available_game_ids | prune_gate.declined)
     if not issues.write_csv(issues_path):
         raise ExtractError(f"failed to write import-issues report to {issues_path}")
 
@@ -177,6 +207,10 @@ def run_extract(
     print("=" * 60)
     for key in outputs:
         print(f"  {key}: {new_rows.get(key, 0)} new rows → {output_paths[key]}")
+    if prune_gate.approved:
+        print(f"  pruned {len(prune_gate.approved)} game(s) without database files")
+    if prune_gate.declined:
+        print(f"  kept {len(prune_gate.declined)} game(s) without database files (pruning declined)")
 
     if issues:
         print(f"\nPROBLEM DATABASES ({len(issues)}) → {issues_path}")
@@ -189,4 +223,6 @@ def run_extract(
         output_paths=output_paths,
         issues=issues,
         issues_path=issues_path,
+        pruned_game_ids=set(prune_gate.approved),
+        kept_missing_game_ids=set(prune_gate.declined),
     )

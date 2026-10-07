@@ -588,7 +588,7 @@ def _describe_turn_db(db_file, turn_rows) -> str:
     )
 
 
-def export_turn_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
+def export_turn_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None, prune_gate=None) -> int:
     """Export turn rows to ``output_file``; returns the count of new rows."""
     def _extract_rows(db_file, issues):
         return extract_game_turn_data(db_file, catalog=catalog, issues=issues)
@@ -600,4 +600,5 @@ def export_turn_data(db_files, available_game_ids, output_file, catalog: Optiona
         dedupe_key=lambda r: (r.get("game_id"), r.get("player_id"), r.get("turn")),
         describe_db=_describe_turn_db,
         noun="turn records", prune_only=prune_only, issues=issues,
+        prune_gate=prune_gate,
     )

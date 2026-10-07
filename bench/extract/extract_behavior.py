@@ -96,7 +96,7 @@ def extract_game_behavior_data(db_path, spec: dict, catalog: Optional[Catalog] =
 
 
 def export_behavior_data(db_files, available_game_ids, output_file, spec: Optional[dict] = None,
-                         catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
+                         catalog: Optional[Catalog] = None, prune_only=False, issues=None, prune_gate=None) -> int:
     """Export behavior rows to ``output_file``; returns the count of new rows."""
     spec = resolve_behavior_spec(spec)
 
@@ -110,4 +110,5 @@ def export_behavior_data(db_files, available_game_ids, output_file, spec: Option
         dedupe_key=lambda r: (r.get("game_id"), r.get("player_id")),
         describe_db=lambda db_file, rows: f"{len(rows)} player rows",
         noun="behavior rows", prune_only=prune_only, issues=issues,
+        prune_gate=prune_gate,
     )

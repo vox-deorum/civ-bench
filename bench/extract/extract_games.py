@@ -68,7 +68,7 @@ def extract_game_row(db_path, issues=None) -> dict | None:
     }
 
 
-def export_game_data(db_files, available_game_ids, output_file, prune_only=False, issues=None) -> int:
+def export_game_data(db_files, available_game_ids, output_file, prune_only=False, issues=None, prune_gate=None) -> int:
     """Export per-game rows to ``output_file``; returns the count of new rows."""
     def _extract_rows(db_file, issues):
         row = extract_game_row(db_file, issues=issues)
@@ -79,4 +79,5 @@ def export_game_data(db_files, available_game_ids, output_file, prune_only=False
         db_files, available_game_ids, output_file,
         stage="games", fieldnames=GAME_FIELDNAMES, extract_rows=_extract_rows,
         dedupe_key=None, noun="game rows", prune_only=prune_only, issues=issues,
+        prune_gate=prune_gate,
     )

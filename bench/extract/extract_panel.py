@@ -416,7 +416,7 @@ def extract_game_panel_data(db_path, catalog: Optional[Catalog] = None, issues=N
         return []
 
 
-def export_panel_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None) -> int:
+def export_panel_data(db_files, available_game_ids, output_file, catalog: Optional[Catalog] = None, prune_only=False, issues=None, prune_gate=None) -> int:
     """Export panel rows to ``output_file``; returns the count of new rows."""
     def _extract_rows(db_file, issues):
         return extract_game_panel_data(db_file, catalog=catalog, issues=issues)
@@ -428,4 +428,5 @@ def export_panel_data(db_files, available_game_ids, output_file, catalog: Option
         dedupe_key=lambda r: (r.get("game_id"), r.get("player_id")),
         describe_db=lambda db_file, rows: f"{len(rows)} player rows",
         noun="panel rows", prune_only=prune_only, issues=issues,
+        prune_gate=prune_gate,
     )
