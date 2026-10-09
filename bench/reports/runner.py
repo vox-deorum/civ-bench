@@ -565,6 +565,8 @@ def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> 
 
     catalog = Catalog.from_run_config(cfg)
     stages = {stage.id: stage for stage in cfg.analyses}
+    # Plain condition words from the front page, such as "every 5 turns".
+    plain = ((cfg.report or {}).get("intro") or {}).get("conditions") or {}
     labels = {}
     for section in rating_sections:
         presentation = dict(cfg.presentation.get("condition_pairing") or {})
@@ -579,10 +581,11 @@ def _announcement_rating_labels(cfg: RunConfig, context: ReportBuildContext) -> 
         labels[section.id] = {}
         for identity in ratings["player_type"].dropna().astype(str).unique():
             model, suffix = catalog.split_condition_suffix(identity, suffixes)
+            label = suffix.lstrip("-") if suffix else base_label
             labels[section.id][identity] = {
                 "model": model,
                 "condition": suffix,
-                "label": suffix.lstrip("-") if suffix else base_label,
+                "label": plain.get(label, {}).get("label", label),
                 "baseline": identity in {catalog.vanilla_label, catalog.null_label},
             }
     return labels

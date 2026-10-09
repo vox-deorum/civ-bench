@@ -144,6 +144,53 @@ def test_render_updates_only_on_front_page_and_escapes_labels(announcement_conte
     assert render_html_site(doc) == pages
 
 
+def _report_from_fixture_artifacts(tmp_path, spec, write_spec, announcement_context):
+    """Write the fixture's rating and coverage tables as saved artifacts and run the report."""
+    root = str(tmp_path / "output")
+    spec["output"] = {"root": root, "suffix": ""}
+    spec["data"]["extract"]["enabled"] = False
+    spec["filters"]["complete"] = {"min_condition_completeness": 1}
+    spec["data"]["filter"] = "complete"
+    spec["presentation"] = {"condition_pairing": {
+        "enabled": True, "base_label": "Every turn", "suffixes": ["-Per-5"],
+    }}
+    spec["analyses"] = [
+        stage for stage in spec["analyses"]
+        if stage["id"] in {"bt_main", "perf_experiment_completeness"}
+    ]
+    spec["report"] = {"out_dir": root, "formats": ["html"], "sections": None, **spec.get("report", {})}
+    cfg = load_config(write_spec(spec))
+    for sid, source, module, table in [
+        ("bt_main", "rating", "ratings.bradley_terry", "ratings"),
+        ("perf_experiment_completeness", "coverage", "performance.experiment_completeness", "condition_progress"),
+    ]:
+        artifact_dir = Path(root) / "analyses" / sid
+        artifact_dir.mkdir(parents=True)
+        announcement_context.load_table(source, table).to_csv(artifact_dir / f"{table}.csv", index=False)
+        manifest = {
+            "id": sid, "module": module, "metadata": {},
+            "tables": [{"name": table, "file": f"{table}.csv"}],
+        }
+        (artifact_dir / "result.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = run_report(cfg)
+    return Path(result.report_dir, "index.html").read_text(encoding="utf-8")
+
+
+def test_front_page_latest_score_uses_plain_condition_words(
+    tmp_path, dev_spec, write_spec, announcement_context,
+):
+    spec = dev_spec
+    spec["report"] = {"intro": {
+        "headline": "Which AI plans best?",
+        "conditions": {"Every turn": {"label": "every turn"}, "Per-5": {"label": "every 5 turns"}},
+        "charts": {"leaderboard": {"stage": "bt_main", "title": "Who plays best?"}},
+    }}
+    front = _report_from_fixture_artifacts(tmp_path, spec, write_spec, announcement_context)
+    # The model name carries no condition of its own; each score names its condition.
+    assert ("<strong>Recent</strong> scored <strong>1430 Elo</strong> (every turn, #4) "
+            "or <strong>1637 Elo</strong> (every 5 turns, #1)") in front
+
+
 def test_report_loads_announcements_from_artifacts_with_filter_preset(
     tmp_path, dev_spec, write_spec, announcement_context,
 ):

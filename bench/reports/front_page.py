@@ -136,11 +136,15 @@ class _Names:
     def tip(self, pt: str) -> str:
         return model_tip(self.model(pt), self.model_tips)
 
-    def replace_labels(self, text: str) -> str:
-        """Swap technical identity labels in a summary for plain ones."""
+    def replace_labels(self, text: str, modes: bool = True) -> str:
+        """Swap technical identity labels in a summary for plain ones.
+
+        With ``modes=False`` every label becomes just the plain model name, for
+        text that already states each condition.
+        """
         forms: dict[str, str] = {}
         for pt, info in self.identities.items():
-            plain = self.plain(pt)
+            plain = self.plain(pt) if modes else f"**{self.name(pt)}**"
             forms[pt] = plain
             condition = str(info.get("condition") or "")
             base = pt[: len(pt) - len(condition) - 1] if pt.endswith("-" + condition) else pt
@@ -610,5 +614,7 @@ def front_page_document(
                   for p in projects.get("items") or []],
         links=[FrontLink(label=link["label"], url=link["url"]) for link in projects.get("links") or []],
         cards=builder.cards(overview_sections),
-        news=[replace(item, text=builder.names.replace_labels(item.text)) for item in announcements or []],
+        # The latest score names models and lists each condition after its Elo.
+        news=[replace(item, text=builder.names.replace_labels(item.text, modes=item.kind != "result"))
+              for item in announcements or []],
     )
