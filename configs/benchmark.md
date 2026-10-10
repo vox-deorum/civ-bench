@@ -953,6 +953,8 @@ optional boolean `estimate` (default true; false prices only
 provider-reported cache reads, never the step-overlap estimate). Unknown keys
 and invalid values are load errors. The shipped catalog puts the Claude
 models in reported-only families at read ratio 0.1, with Opus-5.5 at 0.05.
+Jev! sits in a `no-cache` family at read ratio 1, so its input is always
+billed at the full price.
 
 Some providers report reasoning tokens on only part of a model's calls. Setting
 `"estimate_reasoning": true` on a `strategist_models` entry in
