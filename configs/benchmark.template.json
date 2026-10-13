@@ -398,6 +398,10 @@
         "Per-5": {
           "label": "every 5 turns",
           "tip": "The AI is asked for a new plan every 5 turns, or sooner when something big happens, like a declaration of war. This costs much less than asking every turn."
+        },
+        "Agentic": {
+          "label": "agentic",
+          "tip": "The AI is asked for a new plan every 5 turns, or sooner when something big happens, with agentic capabilities enabled."
         }
       },
       "series": [
