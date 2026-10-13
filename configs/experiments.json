@@ -1,7 +1,7 @@
 {
   "player_type_labels": {
-    "*-per-5": "-Per-5",
-    "*-files-per-5": "-Agentic"
+    "*-files-per-5": "-Agentic",
+    "*-per-5": "-Per-5"
   },
 
   "condition_player_mapping": {
