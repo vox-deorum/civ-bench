@@ -26,7 +26,7 @@ class RatingsPlackettLuce(RatingsAnalysis):
         "from the full within-game ranking of model-adjusted strength "
         "(Plackett-Luce ratings)."
     )
-    report_defaults = {"tables": ["strategy_ratings"], "figures": ["ratings"]}
+    report_defaults = {"tables": ["strategy_ratings"], "figures": ["ratings", "ratings_*"]}
 
     def _calculate(self, strength_df: pd.DataFrame, reference: str) -> pd.DataFrame:
         return calculate_ratings_pl(strength_df, reference=reference)

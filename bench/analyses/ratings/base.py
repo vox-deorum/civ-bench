@@ -7,7 +7,8 @@ reference), optionally relabel identities for a multi-dimension ``group_by``
 exactly the legacy ``strategy_ratings`` composite trick), fit the MLE rating, and
 optionally attach bootstrap CIs. The subclass only supplies the per-fit calculator.
 
-A single ``group_by`` shows an interactive Elo forest plot (figure ``ratings``);
+A single ``group_by`` shows an interactive Elo forest plot (figure ``ratings``),
+plus one ``ratings_<condition>`` tab per condition when condition pairing is on;
 a strategy ``group_by`` shows the ``strategy_ratings`` HTML heatmap of Elo per
 player type and strategy (:mod:`bench.analyses.ratings.heatmaps`). The saved
 ``ratings`` table keeps its shape either way.
@@ -15,6 +16,7 @@ player type and strategy (:mod:`bench.analyses.ratings.heatmaps`). The saved
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 import numpy as np
@@ -162,10 +164,11 @@ class RatingsAnalysis(Analysis):
                 ctx, full_panel, panel, ratings, reference, bootstrap, "player_type"
             )
             ci_level = float((bootstrap or {}).get("ci_level", 0.95))
-            fig = self._forest(ratings, ctx, panel, reference, metadata, ci_level)
+            figures, views = self._forests(ratings, ctx, panel, reference, metadata, ci_level)
+            if views:
+                metadata["views"] = views
             tables = {"ratings": ratings}
-            return AnalysisResult(tables=tables, figures={"ratings": fig} if fig is not None else {},
-                                  summary=summary, metadata=metadata)
+            return AnalysisResult(tables=tables, figures=figures, summary=summary, metadata=metadata)
 
         if bootstrap is not None:
             raise AnalysisError(
@@ -334,13 +337,53 @@ class RatingsAnalysis(Analysis):
             f"**{top['elo']:.0f} Elo**; rating spread: **{rng:.0f}** points."
         )
 
-    def _forest(self, ratings: pd.DataFrame, ctx: AnalysisContext, panel: pd.DataFrame,
-                reference: str, metadata: dict, ci_level: float):
-        """The interactive Elo forest plot, with a table tooltip per point."""
+    def _forests(self, ratings: pd.DataFrame, ctx: AnalysisContext, panel: pd.DataFrame,
+                 reference: str, metadata: dict, ci_level: float) -> tuple[dict, dict]:
+        """The General leaderboard plus, under condition pairing, one per condition.
+
+        ``ratings`` ranks every player type together. With pairing enabled and at
+        least two conditions present, each condition adds a ``ratings_<slug>``
+        figure that ranks that condition's identities under their base names,
+        with the Vanilla and Null baselines kept for reference. The returned
+        views put each figure behind its own tab, General first.
+        """
+        from ...plotting.pairing import attach_pair_columns, condition_display
+
+        df = self._attach_appearances(ratings, panel, "player_type")
+        general = self._forest(df, ctx, reference, metadata, ci_level)
+        if general is None:
+            return {}, {}
+        figures = {"ratings": general}
+        spec = ctx.condition_pairing()
+        if spec is None:
+            return figures, {}
+        paired = attach_pair_columns(df, ctx.catalog, spec, "player_type")
+        views = {"general": {"label": "General", "tip": "All player types ranked together.",
+                             "figures": ["ratings"]}}
+        for condition in ("base", *spec.suffixes):
+            members = paired["condition"].eq(condition) & ~paired["is_baseline"]
+            if not members.any():
+                continue
+            subset = paired[members | paired["is_baseline"]].copy()
+            subset["player_type"] = subset["base_identity"]
+            label = condition_display(spec, condition, ctx.catalog.vanilla_label)
+            slug = re.sub(r"[^a-z0-9]+", "_", condition.lower()).strip("_")
+            fig = self._forest(subset, ctx, reference, metadata, ci_level, label)
+            if fig is None:
+                continue
+            figures[f"ratings_{slug}"] = fig
+            views[slug] = {"label": label, "figures": [f"ratings_{slug}"]}
+        if len(views) < 3:
+            return {"ratings": general}, {}
+        return figures, views
+
+    def _forest(self, df: pd.DataFrame, ctx: AnalysisContext, reference: str,
+                metadata: dict, ci_level: float, condition_label: str = ""):
+        """One interactive Elo forest plot, with a table tooltip per point."""
         from ...plotting.pairing import PairingSpec, plot_paired_rows_interactive
         from .heatmaps import count_text, p_text
 
-        df = self._attach_appearances(ratings, panel, "player_type")
+        df = df.copy()
         has_ci = "ci_lower" in df.columns and df["ci_lower"].notna().any()
         df["tip_elo"] = df["elo"].map(lambda v: f"{v:.0f}")
         if has_ci:
@@ -361,7 +404,7 @@ class RatingsAnalysis(Analysis):
         return plot_paired_rows_interactive(
             df,
             catalog=ctx.catalog,
-            spec=ctx.condition_pairing() or PairingSpec((), "base", "Identity"),
+            spec=PairingSpec((), "base", "Identity"),
             value_col="elo",
             lo_col="ci_lower" if has_ci else None,
             hi_col="ci_upper" if has_ci else None,
@@ -376,7 +419,7 @@ class RatingsAnalysis(Analysis):
                 "Elo rating (error bars: bootstrap CI)" if has_ci
                 else "Elo rating (error bars: +/-1 SE)"
             ),
-            title=f"{self.module} ratings",
+            title=f"{self.module} ratings" + (f" ({condition_label})" if condition_label else ""),
             provenance_note=self._provenance_text(metadata) or None,
         )
 

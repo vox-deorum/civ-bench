@@ -6,7 +6,7 @@ from bench.config.analysis_metadata import analysis_report_defaults
 def test_report_defaults_are_discovered_without_importing_registry():
     assert analysis_report_defaults("ratings.bradley_terry") == {
         "tables": ["strategy_ratings"],
-        "figures": ["ratings"],
+        "figures": ["ratings", "ratings_*"],
     }
     assert analysis_report_defaults("ratings.matchups") == {
         "tables": ["matchup_heatmap", "strength_winrate_heatmap", "strength_mean_heatmap"],

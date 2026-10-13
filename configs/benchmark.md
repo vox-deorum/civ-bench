@@ -113,7 +113,7 @@ top-first direction), or a specific suffix. A concrete condition falls back to
 whichever condition has a value for incomplete pairs; all-NaN identities sort
 last.
 
-The fitted-rating forests, player-type strength panels, score-ratio effects, and
+The fitted-rating forests (as condition tabs, §6.2), player-type strength panels, score-ratio effects, and
 token-cost view accept `params.condition_pairing` as either a boolean or an
 object containing `enabled`, `suffixes`, and `sort_condition`. The stage value
 overrides the global block. Matchup modules accept `params.display`. In
@@ -560,7 +560,12 @@ Two cross-cutting params apply to both fitted ratings (`bradley_terry`, `placket
 With `group_by: ["player_type"]`, fitted ratings render the `ratings` figure, an
 interactive Elo forest plot with error bars (the bootstrap CI when one exists,
 else +/-1 SE) and a hover table of Elo, the CI or SE, the p-value against the
-reference, and appearances. When `group_by` includes the `strategy` grouping,
+reference, and appearances. With condition pairing enabled (§2.2) and at least
+two conditions present, the section shows tabs: `General` ranks every player
+type together in the `ratings` figure, and each condition adds a
+`ratings_<condition>` figure (for example `ratings_base` and `ratings_per_5`)
+that ranks that condition's identities under their base names, with Vanilla and
+Null kept for reference. When `group_by` includes the `strategy` grouping,
 they write a `strategy_ratings` table and render it as an HTML heatmap (§7)
 instead of a figure: rows are player types, columns are `General` plus the
 configured strategy labels (normally Domination, Culture, Diplomatic, Science).

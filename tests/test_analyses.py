@@ -1400,6 +1400,33 @@ def test_paired_bt_forest_keeps_ratings_table_shape(env, monkeypatch):
     assert "ratings" in r.figure_paths
 
 
+def test_paired_bt_forest_adds_condition_tabs(env, monkeypatch):
+    def fake_bt(strength_df, margin=None, reference="Vanilla"):
+        out = _fake_bt(strength_df, margin, reference)
+        per5 = out[out["player_type"] == "GPT-OSS-120B"].assign(
+            player_type="GPT-OSS-120B-Per-5", elo=1650.0,
+        )
+        return pd.concat([out, per5], ignore_index=True)
+
+    monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", fake_bt)
+    env.cfg.presentation = {"condition_pairing": {"enabled": True, "suffixes": ["-Per-5"]}}
+    r = env(
+        "ratings.bradley_terry",
+        {"group_by": ["player_type"], "ref": "Vanilla"},
+        {"tables": ["strength"]},
+    )
+    views = r.metadata["views"]
+    assert list(views) == ["general", "base", "per_5"]
+    assert views["per_5"] == {"label": "Per-5", "figures": ["ratings_per_5"]}
+    assert {"ratings", "ratings_base", "ratings_per_5"} <= set(r.figure_paths)
+    general = Path(r.figure_paths["ratings"]).read_text(encoding="utf-8")
+    assert "GPT-OSS-120B-Per-5" in general and "(missing" not in general
+    per5 = Path(r.figure_paths["ratings_per_5"]).read_text(encoding="utf-8")
+    # One condition per tab, under base names, with the baselines kept.
+    assert "GPT-OSS-120B" in per5 and "Vanilla" in per5
+    assert "Kimi-K2.5" not in per5 and "GPT-OSS-120B-Per-5" not in per5
+
+
 def test_ratings_strategy_group_by(env, monkeypatch):
     monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", _fake_bt)
     r = env("ratings.bradley_terry",
@@ -1572,7 +1599,9 @@ def test_bt_forest_is_interactive_with_a_rating_tooltip(env, monkeypatch):
         def condition_pairing():
             return None
 
-    figure = analysis._forest(ratings, _Ctx(), panel, "Vanilla", {}, 0.95)
+    figures, views = analysis._forests(ratings, _Ctx(), panel, "Vanilla", {}, 0.95)
+    assert list(figures) == ["ratings"] and views == {}
+    figure = figures["ratings"]
     rows = [row["label"] for row in figure.layout.meta["table_tooltip"]["rows"]]
     assert rows == ["Elo", "SE", "p vs Vanilla", "Appearances"]
     points = [trace for trace in figure.data if trace.customdata is not None]

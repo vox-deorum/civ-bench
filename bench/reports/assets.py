@@ -54,7 +54,9 @@ FRONT_PAGE_JS = """/* Front page: pick out one model series on the cost chart.
 
 REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Escape.
    Also switches section views: the first view of each group is shown, and a
-   choice applies to every group on the page that offers the same view. And it
+   choice applies to every group on the page that offers the same view. A
+   hidden view's frames load when the view first shows, because a Plotly chart
+   drawn while hidden measures its labels as zero width and clips them. And it
    shows the text of any [data-tip] element (heatmap cells and labels) in one
    floating tooltip on hover or keyboard focus. A tip's first line is its bold
    title when there are more; "label<TAB>value<TAB>note" lines form a grid with
@@ -190,6 +192,23 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
   });
   document.addEventListener("focusout", hideTip);
   var groups = document.querySelectorAll(".view-group");
+  function syncFrames(panel) {
+    panel.querySelectorAll("iframe").forEach(function (frame) {
+      var deferred = frame.getAttribute("data-src");
+      if (panel.hidden) {
+        if (!deferred && !frame.hasAttribute("data-shown")) {
+          frame.setAttribute("data-src", frame.getAttribute("src"));
+          frame.src = "about:blank";
+        }
+        return;
+      }
+      if (deferred) {
+        frame.src = deferred;
+        frame.removeAttribute("data-src");
+      }
+      frame.setAttribute("data-shown", "");
+    });
+  }
   function showView(group, name) {
     var panels = group.querySelectorAll(".view-panel");
     var known = Array.prototype.some.call(panels, function (panel) {
@@ -198,6 +217,7 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
     if (!known) { return; }
     panels.forEach(function (panel) {
       panel.hidden = panel.getAttribute("data-view") !== name;
+      syncFrames(panel);
     });
     group.querySelectorAll(".view-button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.getAttribute("data-view") === name));

@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+from fnmatch import fnmatchcase
 from glob import escape as glob_escape
 import shutil
 import tempfile
@@ -426,24 +427,25 @@ def _inline_artifact_names(
     override: Optional[dict],
     warnings: list[str],
 ) -> set[str]:
-    """Resolve inline artifact names from a stage override or module defaults."""
-    explicit = override is not None and kind in override
-    defaults = analysis_report_defaults(module)
-    if explicit:
-        requested = list(override[kind])
-    elif defaults is None or kind not in defaults:
-        return set(available)
-    else:
-        requested = list(defaults[kind])
+    """Resolve inline artifact names from a stage override or module defaults.
 
-    if explicit:
-        missing = [name for name in requested if name not in available]
-        for name in missing:
-            warnings.append(
-                f"section '{stage_id}': report.section_overrides requested {kind[:-1]} "
-                f"'{name}', but it was not emitted; skipped."
-            )
-    return set(requested) & set(available)
+    Module defaults may hold ``fnmatch`` patterns (``ratings_*``) for artifacts
+    whose names depend on the config; override names must match exactly.
+    """
+    if override is not None and kind in override:
+        requested = list(override[kind])
+        for name in requested:
+            if name not in available:
+                warnings.append(
+                    f"section '{stage_id}': report.section_overrides requested {kind[:-1]} "
+                    f"'{name}', but it was not emitted; skipped."
+                )
+        return set(requested) & set(available)
+    defaults = analysis_report_defaults(module)
+    if defaults is None or kind not in defaults:
+        return set(available)
+    requested = list(defaults[kind])
+    return {name for name in available if any(fnmatchcase(name, p) for p in requested)}
 
 
 def _caption(stage_id: str, name: str) -> str:
