@@ -179,7 +179,7 @@ class BehaviorAnalysis(Analysis):
             if not view_metrics:
                 continue
             summary = C.summarize(ctx, frame, view_metrics, self.by, view,
-                                  self.bootstrap_n, self.ci_level)
+                                  self.bootstrap_n, self.ci_level, views.per_game)
             if summary.empty:
                 continue
             summary.insert(summary.columns.get_loc("metric") + 1, "metric_group",
@@ -191,10 +191,10 @@ class BehaviorAnalysis(Analysis):
             if view_ranges:
                 summary = _attach_means(summary, frame, self.by, {
                     m: {"mean_min": low, "mean_max": high} for m, (low, high) in view_ranges.items()
-                })
+                }, views.per_game)
             view_companions = (companions or {}).get(view) or {}
             if view_companions:
-                summary = _attach_means(summary, frame, self.by, view_companions)
+                summary = _attach_means(summary, frame, self.by, view_companions, views.per_game)
             summary["color_position"] = C.color_positions(summary, view, views, fixed)
             table, order = C.heatmap_rows(ctx, summary, self.by)
             table.insert(0, "row_kind", "group")
@@ -337,18 +337,21 @@ class BehaviorAnalysis(Analysis):
                            companions):
         """One long absolute table per ``keys`` cell, the baseline row first."""
         by = self.by
-        difference = views.relative.groupby(keys + [by])[metrics].mean()
+        cell_keys = keys + [by]
+        difference = {m: C.one_per_game(views.relative, m, views.per_game, cell_keys)
+                      .groupby(cell_keys)[m].mean() for m in metrics}
         records = []
-        for values, grp in rows.groupby(keys + [by], sort=True):
+        for values, grp in rows.groupby(cell_keys, sort=True):
             cell, group = tuple(values[:-1]), values[-1]
             for metric in metrics:
-                col = grp[["game_id", metric]].dropna()
+                own = C.one_per_game(grp, metric, views.per_game)
+                col = own[["game_id", metric]].dropna()
                 if col.empty:
                     continue
                 diff = difference[metric].get(tuple(values), float("nan"))
                 records.append({**dict(zip(keys, cell)), by: group, "metric": metric,
                                 "mean": float(col[metric].mean()), "difference": float(diff),
-                                **_companion_means(grp, companions.get(metric)),
+                                **_companion_means(own, companions.get(metric)),
                                 "n_players": int(len(col)), "n_games": int(col["game_id"].nunique())})
         if not records:
             return pd.DataFrame(), []
@@ -484,18 +487,20 @@ def _cell_texts(table: pd.DataFrame, view: str, column_units: dict | None,
     return texts
 
 
-def _attach_means(summary: pd.DataFrame, rows: pd.DataFrame, by: str, companions: dict) -> pd.DataFrame:
+def _attach_means(summary: pd.DataFrame, rows: pd.DataFrame, by: str, companions: dict,
+                  per_game=frozenset()) -> pd.DataFrame:
     """Per-group means of other per-player columns, keyed ``{metric: {out: source}}``.
 
-    Each metric's cells get its ``out`` columns; other cells read NaN there.
+    Each metric's cells get its ``out`` columns; other cells read NaN there. A
+    metric in ``per_game`` averages each game of a group once.
     """
     columns = sorted({column for pairs in companions.values() for column in pairs})
-    groups = rows[by].astype(str)
     means = {}
     for metric, pairs in companions.items():
         sources = sorted({src for src in pairs.values() if src in rows.columns})
         if sources:
-            means[metric] = rows.groupby(groups)[sources].mean()
+            own = C.one_per_game(rows, metric, per_game, [by])
+            means[metric] = own.groupby(own[by].astype(str))[sources].mean()
     values = {column: [] for column in columns}
     for rec in summary.itertuples(index=False):
         frame = means.get(rec.metric)

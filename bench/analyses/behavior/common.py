@@ -392,6 +392,17 @@ def build_views(
     return views
 
 
+def one_per_game(frame: pd.DataFrame, metric: str, per_game, keys=()) -> pd.DataFrame:
+    """``frame`` with one row per game within ``keys`` when ``metric`` is in ``per_game``.
+
+    A per-game value is copied onto each of a game's players, so a group
+    holding two of them would otherwise count the game twice.
+    """
+    if metric not in per_game:
+        return frame
+    return frame.drop_duplicates([*keys, "game_id"])
+
+
 def summarize(
     ctx: AnalysisContext,
     df: pd.DataFrame,
@@ -400,12 +411,16 @@ def summarize(
     view: str,
     bootstrap_n: int,
     ci_level: float,
+    per_game=frozenset(),
 ) -> pd.DataFrame:
-    """Long table: one row per ``(by, metric)`` with mean, median, and a game-level bootstrap CI."""
+    """Long table: one row per ``(by, metric)`` with mean, median, and a game-level bootstrap CI.
+
+    A metric in ``per_game`` counts each game of a group once.
+    """
     records = []
     for group, grp in df.groupby(by, sort=False):
         for metric in metrics:
-            values = grp[["game_id", metric]].dropna()
+            values = one_per_game(grp, metric, per_game)[["game_id", metric]].dropna()
             if values.empty:
                 continue
             lo, hi = _game_bootstrap(

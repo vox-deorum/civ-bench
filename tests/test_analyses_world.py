@@ -370,3 +370,24 @@ def test_world_columns_match_the_completed_pool_by_map_not_by_seat():
     assert views.baseline_summary["w__wars"]["mean"] == 20.0
     assert views.baseline_summary["w__wars"]["n_games"] == 2
     assert views.baseline_summary["w__wars"]["n_players"] == 2
+
+
+def test_world_cells_count_each_game_once_per_row():
+    """Two strategist seats in G1 share its World value; G2 has one seat.
+
+    The Player column counts all three seats. The World column counts G1 once,
+    so its mean is mean(10, 40), not mean(10, 10, 40).
+    """
+    from types import SimpleNamespace
+
+    from bench.analyses.behavior import common as C
+
+    rows = pd.DataFrame({"game_id": ["G1", "G1", "G2"], "player_type": [LLM] * 3,
+                         "p__wars": [1.0, 2.0, 3.0], "w__wars": [10.0, 10.0, 40.0]})
+    ctx = SimpleNamespace(config=SimpleNamespace(seed=0), stage_id="w")
+    summary = C.summarize(ctx, rows, ["p__wars", "w__wars"], "player_type", C.RELATIVE,
+                          bootstrap_n=20, ci_level=0.95, per_game={"w__wars"})
+    player, world = (summary[summary["metric"] == m].iloc[0] for m in ("p__wars", "w__wars"))
+    assert (player["n_players"], player["n_games"]) == (3, 2)
+    assert (world["n_players"], world["n_games"]) == (2, 2)
+    assert world["mean"] == pytest.approx(25.0)

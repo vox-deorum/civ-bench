@@ -1082,7 +1082,7 @@ The `world.*` family reports what happened in each game: `world.conflict` counts
 { "id": "wld_progress", "module": "world.progress", "enabled": true, "params": { "checkpoints": [100, 200, 300] } }
 ```
 
-Rows cover every non-Vanilla player type. Against the in-game AI baseline the Vanilla rows are left out because the pinned top row (`AI-only world`) stands for them; the Null strategist stays. The pinned row shows the baseline in absolute values. A World value includes the strategist's own civ, and in a game with two strategists it counts for both. The bootstrap resamples whole games.
+Rows cover every non-Vanilla player type. Against the in-game AI baseline the Vanilla rows are left out because the pinned top row (`AI-only world`) stands for them; the Null strategist stays. The pinned row shows the baseline in absolute values. A World value includes the strategist's own civ. Within one row, a World cell counts each game once, however many of the row's players the game held, so its player count equals its game count; a game with two different strategists counts once for each of their rows. The bootstrap resamples whole games.
 
 Relative cells read per the metric's unit: counts as a difference (`+2.1`), shares as percentage points (`+3 pts`), and sizes and yields as a percent change (`+6%`; blank when the matched baseline value is 0). Cells show their unit, and the tooltip shows the value, the matched baseline value, and the game count.
 
