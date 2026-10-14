@@ -649,9 +649,14 @@ def test_config_tabs_must_offer_a_matched_maps_tab(tmp_path, write_spec, dev_spe
                              "params": {}})
     spec["analyses"].append({"id": "policies", "module": "behavior.policies", "enabled": True,
                              "params": {}})
+    spec["analyses"].append({"id": "conflict", "module": "world.conflict", "enabled": True,
+                             "params": {}})
+    spec["analyses"].append({"id": "progress", "module": "world.progress", "enabled": True,
+                             "params": {}})
+    spec["data"]["tables"]["world"] = str(tmp_path / "world.csv")
     spec["analyses"].append({"id": "coverage", "module": "performance.experiment_completeness",
                              "enabled": True, "uses": {"tables": ["strength"]}, "params": {}})
-    tabs = ["flavors", "diplomacy", "commitment", "policies"]
+    tabs = ["flavors", "diplomacy", "commitment", "policies", "conflict", "progress"]
     spec["analyses"][0]["uses"]["analyses"] = tabs
     cfg = load_config(write_spec(spec))
     assert cfg.analyses[0].uses_analyses == tabs

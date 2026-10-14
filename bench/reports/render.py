@@ -703,6 +703,10 @@ _CARD_ICONS = {
     "hand": '<path d="M2 12l5-5 4 2 4-2 7 5-6 6-3-2-2 2-4-3z"/>',
     "target": '<circle cx="12" cy="12" r="9"/><circle class="cut" cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="2"/>',
     "scroll": '<path d="M6 3h12v15a3 3 0 01-3 3H6a3 3 0 01-3-3v-2h3z"/><path class="cut" d="M9 8h6M9 12h6"/>',
+    "sword": ('<path d="M19 3h2v2L10 16l-2-2z"/>'
+              '<path d="M5 13l6 6-1.5 1.5-2-2L4 22l-2-2 3.5-3.5-2-2z"/>'),
+    "sprout": ('<path d="M11 12h2v9h-2z"/><path d="M11 13C6 13 3 10 3 5c5 0 8 3 8 8z"/>'
+               '<path d="M13 15c0-4 3-7 8-7 0 4-3 7-8 7z"/>'),
     "dot": '<circle cx="12" cy="12" r="6"/>',
 }
 

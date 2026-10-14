@@ -55,7 +55,7 @@ EXTRACT_KEYS = {
     "issues_path",
     "behavior",
 }
-TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior")
+TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior", "world")
 
 # ── data.extract.behavior (§3.0) ───────────────────────────────────────────
 # Game-DB column names each behavior family may summarize. The extract layer
@@ -164,7 +164,11 @@ PERSONA_INFO = {
     'DeceptiveBias': ('Dec', 'Personality', 'Tendency to be deceptively friendly.'),
 }
 PERSONA_RANGE = (1.0, 10.0)
-BEHAVIOR_EVENTS = ("wars_declared", "wars_received", "cities_nuked", "cities_razed")
+BEHAVIOR_EVENTS = (
+    "wars_declared", "wars_received", "cities_nuked", "cities_razed",
+    "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
+    "capitals_captured", "city_state_cities_captured", "nukes_detonated",
+)
 BEHAVIOR_POLICIES = (
     "policy_changes",
     "tradition", "authority", "progress",
@@ -367,6 +371,9 @@ ANALYSIS_MODULES = {
     "behavior.diplomacy",
     "behavior.commitment",
     "behavior.policies",
+    # world.*
+    "world.conflict",
+    "world.progress",
     # exploratory.*
     "exploratory.panel",
     "exploratory.turn",
@@ -390,6 +397,7 @@ SINGLE_STRENGTH_TABLE_MODULES = {
 # tab to the Matched Maps overview and seat pages (§7.1).
 MATCHED_MAPS_TAB_MODULES = {
     "behavior.flavors", "behavior.diplomacy", "behavior.commitment", "behavior.policies",
+    "world.conflict", "world.progress",
 }
 
 # Params every behavior.* module accepts (§6.2). `baseline` is "completed", one
@@ -397,6 +405,107 @@ MATCHED_MAPS_TAB_MODULES = {
 BEHAVIOR_COMMON_PARAMS = {"baseline", "rate", "by", "bootstrap_n", "ci_level", "condition_pairing"}
 BEHAVIOR_BASELINE_COMPLETED = "completed"
 BEHAVIOR_RATES = ("per_100_turns", "per_game")
+
+# ── world.* (§6.2) ────────────────────────────────────────────────────────────
+# Every world metric has a Player column (the strategist's own civ, matched to
+# the baseline in the same seat on the same map) and a World column (the whole
+# game, matched to the baseline's games on the same map). Each entry is
+# (name, short header, player tip, world tip, player unit, world unit), where a
+# unit is how the relative view compares: "diff" (a difference), "pts" (a
+# difference of percents, in percentage points), or "pct" (a percent change).
+WORLD_CONFLICT_METRICS = {
+    "wars_declared": ("Wars declared", "Wars",
+                      "Wars the civ declared on other civs.",
+                      "Wars declared between civs.", "diff", "diff"),
+    "wars_on_city_states": ("Wars on city-states", "On city-states",
+                            "Wars the civ declared on city-states.",
+                            "Wars declared on city-states by any civ.", "diff", "diff"),
+    "peace_deals": ("Peace deals", "Peace",
+                    "Peace deals the civ signed with other civs.",
+                    "Peace deals between civs.", "diff", "diff"),
+    "peak_wars": ("Peak wars", "Peak wars",
+                  "The most wars the civ was in at once, city-states included.",
+                  "The most wars between civs open at once.", "diff", "diff"),
+    "at_war_share": ("At war", "At war",
+                     "Share of the civ's turns alive spent at war with anyone.",
+                     "Share of all civ-turns alive spent at war with anyone.", "pts", "pts"),
+    "units_lost": ("Units lost", "Units lost",
+                   "The civ's units killed in combat.",
+                   "Civ units killed in combat, on every side.", "diff", "diff"),
+    "cities_captured": ("Cities captured", "Captured",
+                        "Civ cities the civ conquered.",
+                        "Civ cities conquered by any civ.", "diff", "diff"),
+    "capitals_captured": ("Capitals captured", "Capitals",
+                          "Capitals the civ conquered (the capital at the time of capture).",
+                          "Capitals conquered by any civ.", "diff", "diff"),
+    "city_state_cities_captured": ("City-state cities captured", "City-states",
+                                   "City-state cities the civ conquered.",
+                                   "City-state cities conquered by any civ.", "diff", "diff"),
+    "eliminated": ("Eliminated", "Eliminated",
+                   "Share of the civ's games in which it was eliminated.",
+                   "Civs eliminated per game.", "pts", "diff"),
+    "cities_razed": ("Cities razed", "Razed",
+                     "Cities the civ razed.",
+                     "Cities razed by any civ.", "diff", "diff"),
+    "nukes_detonated": ("Nukes", "Nukes",
+                        "Nuclear weapons the civ detonated.",
+                        "Nuclear weapons detonated by any civ.", "diff", "diff"),
+    "cities_nuked": ("Cities nuked", "Cities nuked",
+                     "The civ's detonations that hit a city.",
+                     "Detonations that hit a city.", "diff", "diff"),
+    "turns": ("Turns", "Turns",
+              "Turns the civ survived (its last turn with a positive score).",
+              "Game length in turns.", "diff", "diff"),
+}
+# Behavior event columns behind the Player side of world.conflict.
+WORLD_CONFLICT_EVENTS = (
+    "wars_declared", "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
+    "capitals_captured", "city_state_cities_captured", "cities_razed", "nukes_detonated",
+    "cities_nuked",
+)
+# Read at each checkpoint turn from the turns table. World values are sums over
+# civs, except techs (the average over surviving civs) and civs alive (a count).
+WORLD_PROGRESS_METRICS = {
+    "population": ("Population", "Pop", "The civ's population.",
+                   "Population summed over all civs.", "pct", "pct"),
+    "cities": ("Cities", "Cities", "Cities the civ owns.",
+               "Cities summed over all civs.", "pct", "pct"),
+    "territory": ("Territory", "Land", "Plots the civ owns.",
+                  "Plots owned, summed over all civs.", "pct", "pct"),
+    "technologies": ("Technologies", "Techs", "Technologies the civ knows.",
+                     "Technologies known, averaged over surviving civs.", "pct", "pct"),
+    "science_per_turn": ("Science per turn", "Science", "The civ's science per turn.",
+                         "Science per turn summed over all civs.", "pct", "pct"),
+    "production_per_turn": ("Production per turn", "Prod", "The civ's production per turn.",
+                            "Production per turn summed over all civs.", "pct", "pct"),
+    "food_per_turn": ("Food per turn", "Food", "The civ's food per turn.",
+                      "Food per turn summed over all civs.", "pct", "pct"),
+    "culture_per_turn": ("Culture per turn", "Culture", "The civ's culture per turn.",
+                         "Culture per turn summed over all civs.", "pct", "pct"),
+    "gold_per_turn": ("Gold per turn", "Gold", "The civ's gold per turn.",
+                      "Gold per turn summed over all civs.", "pct", "pct"),
+    "faith_per_turn": ("Faith per turn", "Faith", "The civ's faith per turn.",
+                       "Faith per turn summed over all civs.", "pct", "pct"),
+    "tourism_per_turn": ("Tourism per turn", "Tourism", "The civ's tourism per turn.",
+                         "Tourism per turn summed over all civs.", "pct", "pct"),
+    "military_units": ("Military units", "Units", "The civ's military units.",
+                       "Military units summed over all civs.", "pct", "pct"),
+    "civs_alive": ("Civs alive", "Alive", "Share of the civ's games in which it is still alive.",
+                   "Civs still alive.", "pts", "diff"),
+}
+# Victory type (as the panel records it) → (name, short header), in column order.
+# Types not listed still show, after these.
+WORLD_ENDINGS = {
+    "Domination": ("Domination", "Dom"),
+    "Science": ("Science", "Sci"),
+    "Cultural": ("Culture", "Cult"),
+    "Diplomatic": ("Diplomatic", "Dipl"),
+    "Time": ("Time", "Time"),
+    "Survival": ("Survival", "Surv"),
+}
+WORLD_DEFAULT_CHECKPOINTS = (100, 200, 300)
+WORLD_DEFAULT_OVERVIEW = ("population", "technologies", "science_per_turn")
+WORLD_COMMON_PARAMS = {"metrics", "baseline", "by", "bootstrap_n", "ci_level", "condition_pairing"}
 
 # ── per-module analysis param schemas (§6, validated in loader._validate_analysis) ──
 # Allowed param keys per core module. Cross-cutting `group_by`/`bootstrap` (ratings)
@@ -428,6 +537,8 @@ ANALYSIS_PARAM_KEYS = {
     "behavior.diplomacy": {"traits", *BEHAVIOR_COMMON_PARAMS},
     "behavior.commitment": set(BEHAVIOR_COMMON_PARAMS),
     "behavior.policies": {"branches", *(BEHAVIOR_COMMON_PARAMS - {"rate"})},
+    "world.conflict": set(WORLD_COMMON_PARAMS),
+    "world.progress": {"checkpoints", "overview_metrics", *WORLD_COMMON_PARAMS},
 }
 # Enum domains for select analysis params.
 PREDICTION_METRICS = {"roc_auc", "brier_score", "log_loss", "balanced_accuracy", "accuracy"}

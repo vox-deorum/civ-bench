@@ -484,7 +484,10 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
     _check_keys(params, allowed, f"{where}.params")
     # Enum / type checks for the params with a constrained domain.
     if module.startswith("behavior."):
-        _validate_behavior_param_types(params, where)
+        _validate_view_param_types(params, where)
+    elif module.startswith("world."):
+        _validate_view_param_types(params, where)
+        _validate_world_param_types(module, params, where)
     elif "metrics" in params:
         metrics = _check_string_list(params["metrics"], f"{where}.params.metrics")
         bad = [m for m in metrics if m not in S.PREDICTION_METRICS]
@@ -534,8 +537,8 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
             params[key] = coerce_bool(params[key], f"{where}.params.{key}")
 
 
-def _validate_behavior_param_types(params: dict, where: str) -> None:
-    """Types of the shared ``behavior.*`` params; columns are checked in a later pass."""
+def _validate_view_param_types(params: dict, where: str) -> None:
+    """Types of the params ``behavior.*`` and ``world.*`` share; columns are checked later."""
     for key in ("flavors", "traits", "branches"):
         if key in params:
             _check_string_list(params[key], f"{where}.params.{key}", allow_empty=False)
@@ -551,6 +554,68 @@ def _validate_behavior_param_types(params: dict, where: str) -> None:
             f"{where}.params.baseline: must be \"{S.BEHAVIOR_BASELINE_COMPLETED}\", an "
             "experiment id, or a non-empty list of experiment ids."
         )
+
+
+def _validate_world_param_types(module: str, params: dict, where: str) -> None:
+    """``world.*`` metrics, overview metrics, and checkpoint turns."""
+    catalog = S.WORLD_CONFLICT_METRICS if module == "world.conflict" else S.WORLD_PROGRESS_METRICS
+    metrics = list(catalog)
+    if "metrics" in params:
+        metrics = _check_string_list(params["metrics"], f"{where}.params.metrics",
+                                     allow_empty=False)
+        bad = [m for m in metrics if m not in catalog]
+        if bad:
+            raise ConfigError(
+                f"{where}.params.metrics: unknown metric(s) {bad}. Allowed: {list(catalog)}."
+            )
+    if "overview_metrics" in params:
+        overview = _check_string_list(params["overview_metrics"],
+                                      f"{where}.params.overview_metrics")
+        bad = [m for m in overview if m not in metrics]
+        if bad:
+            raise ConfigError(
+                f"{where}.params.overview_metrics: {bad} are not in params.metrics "
+                f"(the selected metrics are {metrics})."
+            )
+    if "checkpoints" in params:
+        turns = params["checkpoints"]
+        if (not isinstance(turns, list) or not turns
+                or any(isinstance(t, bool) or not isinstance(t, int) or t < 1 for t in turns)
+                or any(a >= b for a, b in zip(turns, turns[1:]))):
+            raise ConfigError(
+                f"{where}.params.checkpoints: must be a non-empty list of turns (integers "
+                f">= 1) in increasing order, for example [100, 200, 300]; got {turns!r}."
+            )
+
+
+def _validate_world_tables(analyses: list[Stage], data: dict) -> None:
+    """``world.conflict`` needs the world table and the behavior event columns it reads."""
+    stages = [s for s in analyses if s.enabled and s.raw.get("module") == "world.conflict"]
+    if not stages:
+        return
+    extract = data.get("extract") or {}
+    tables = data.get("tables") or {}
+    # Outputs matter only when this run extracts.
+    outputs = extract.get("outputs") if extract.get("enabled", True) else None
+    kinds = behavior_columns(extract.get("behavior"))
+    for stage in stages:
+        where = f"analyses (id={stage.id!r})"
+        if "world" not in tables or (outputs is not None and "world" not in outputs):
+            raise ConfigError(
+                f"{where}: world.conflict reads the world table; add \"world\" to "
+                "data.extract.outputs and set data.tables.world (for example "
+                "\"runs/world_data.csv\")."
+            )
+        metrics = (stage.raw.get("params") or {}).get("metrics") or list(S.WORLD_CONFLICT_METRICS)
+        needed = [m for m in S.WORLD_CONFLICT_EVENTS if m in metrics]
+        if "wars_declared" in needed and "wars_on_city_states" not in needed:
+            needed.append("wars_on_city_states")
+        missing = [m for m in needed if m not in kinds]
+        if missing:
+            raise ConfigError(
+                f"{where}: the Player columns need behavior events {missing}; select them in "
+                "data.extract.behavior.events."
+            )
 
 
 def _validate_behavior_columns(analyses: list[Stage], data: dict) -> None:
@@ -1006,6 +1071,7 @@ def load_config(path: str | Path) -> RunConfig:
         for i, a in enumerate(analyses_raw)
     ]
     _validate_behavior_columns(cfg.analyses, cfg.data)
+    _validate_world_tables(cfg.analyses, cfg.data)
     _validate_intro_charts(cfg.report, cfg.analyses)
 
     cfg._resolved_graph = resolve_stage_graph(cfg)

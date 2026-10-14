@@ -9,7 +9,10 @@ from ...config import schema as S
 from ...config.behavior import snake_case
 from ..utilities import is_schema_mismatch
 
-__all__ = ["GameContext", "build_game_context", "snake_case"]
+__all__ = ["BARBARIAN_PLAYER", "GameContext", "build_game_context", "snake_case"]
+
+# Civilization V's fixed barbarian slot; it is neither a civ nor a city-state.
+BARBARIAN_PLAYER = 63
 
 
 @dataclass
@@ -23,6 +26,13 @@ class GameContext:
     # with no entry for a player (or a DB without the gate's column) is blank.
     flavor_gates: dict = field(default_factory=dict)
     flavor_access: dict = field(default_factory=dict)
+    # Every player → "major", "minor" (a city-state), or "barbarian", and every
+    # team → the kind of its players. Event counters use these to tell wars and
+    # captures against civs from those against city-states.
+    player_kind: dict = field(default_factory=dict)
+    team_kind: dict = field(default_factory=dict)
+    # Every player → team id, for players that are not majors too.
+    team_of: dict = field(default_factory=dict)
 
     def players_on_team(self, team_id) -> list:
         return [pid for pid in self.major_players if self.team_by_player.get(pid) == team_id]
@@ -31,19 +41,8 @@ class GameContext:
 def build_game_context(cursor, major_players, flavor_gates=None) -> GameContext:
     placeholders = ",".join(["?"] * len(major_players))
 
-    try:
-        cursor.execute(
-            f"SELECT Key, TeamID FROM PlayerInformations WHERE Key IN ({placeholders})",
-            major_players,
-        )
-        team_by_player = {pid: team for pid, team in cursor.fetchall() if team is not None}
-    except sqlite3.DatabaseError as exc:
-        # Older DBs may lack TeamID; without teams, each player is its own team.
-        if not is_schema_mismatch(exc):
-            raise
-        team_by_player = {}
-    for pid in major_players:
-        team_by_player.setdefault(pid, pid)
+    player_kind, team_kind, team_of = _player_kinds(cursor, major_players)
+    team_by_player = {pid: team_of.get(pid, pid) for pid in major_players}
 
     cursor.execute(
         f"SELECT Key, MAX(Turn) FROM PlayerSummaries WHERE Key IN ({placeholders}) GROUP BY Key",
@@ -53,7 +52,35 @@ def build_game_context(cursor, major_players, flavor_gates=None) -> GameContext:
 
     gates = dict(flavor_gates or {})
     access = _flavor_access(cursor, major_players, gates) if gates else {}
-    return GameContext(list(major_players), team_by_player, survival_turn, gates, access)
+    return GameContext(list(major_players), team_by_player, survival_turn, gates, access,
+                       player_kind, team_kind, team_of)
+
+
+def _player_kinds(cursor, major_players) -> tuple[dict, dict, dict]:
+    """``(player_kind, team_kind, team_of)`` over every player in the game."""
+    try:
+        cursor.execute("SELECT Key, TeamID, IsMajor FROM PlayerInformations")
+        rows = cursor.fetchall()
+    except sqlite3.DatabaseError as exc:
+        # Older DBs may lack TeamID; without teams, each player is its own team.
+        if not is_schema_mismatch(exc):
+            raise
+        cursor.execute("SELECT Key, IsMajor FROM PlayerInformations")
+        rows = [(pid, None, is_major) for pid, is_major in cursor.fetchall()]
+    player_kind, team_kind, team_of = {}, {}, {}
+    majors = set(major_players)
+    for pid, team, is_major in rows:
+        if is_major or pid in majors:
+            kind = "major"
+        else:
+            kind = "barbarian" if pid == BARBARIAN_PLAYER else "minor"
+        team = pid if team is None else team
+        player_kind[pid] = kind
+        team_of[pid] = team
+        # A team holding any major counts as a major team.
+        if team_kind.get(team) != "major":
+            team_kind[team] = kind
+    return player_kind, team_kind, team_of
 
 
 def _flavor_access(cursor, major_players, gates: dict) -> dict:

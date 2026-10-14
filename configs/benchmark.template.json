@@ -49,7 +49,8 @@
         "panel",
         "games",
         "tokens",
-        "behavior"
+        "behavior",
+        "world"
       ],
       "max_dbs": null,
       "prune_missing": false,
@@ -61,7 +62,8 @@
       "panel": "runs/panel_data.csv",
       "games": "runs/game_data.csv",
       "tokens": "runs/model_token_usage.csv",
-      "behavior": "runs/behavior_data.csv"
+      "behavior": "runs/behavior_data.csv",
+      "world": "runs/world_data.csv"
     },
     "filter": "staff_recent"
   },

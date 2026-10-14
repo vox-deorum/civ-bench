@@ -266,6 +266,7 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 | `prediction` | Evaluate predictors | `evaluate`, `compare` |
 | `calibration` | Check prediction reliability and adjustment effects | `reliability`, `loss_by_progress`, `civ_effects`, `cell_baseline` |
 | `performance` | Compare strength, coverage, progress, cost, and games | `score_ratio`, `strength_panel`, `experiment_completeness`, `turn_predicted`, `controlled_seed_report`, `game_log`, `usage_efficiency` |
+| `world` | Report what happened in each game | `conflict`, `progress` |
 
 - `prediction` analyses use all enabled estimators by default; `uses.estimators` narrows the selection.
 - `name` and `description` override a module's display text for that stage.
@@ -273,6 +274,8 @@ A list of analysis stages. Every entry shares one envelope; the `params` block i
 - The [report section reference](#report-section-reference) maps stage IDs to display names.
 - The [full template](../configs/benchmark.full.template.json) includes disabled optional stages. Reserved modules fail with a "reserved but not implemented" error if enabled.
 - See [schema sections 6.2 and 6.3](../configs/benchmark.md) for parameters and display descriptions.
+
+The `world` family reports what happened in each game. `world.conflict` (Wars and conquest) counts wars, peace deals, combat losses, conquests, razed and nuked cities, and eliminations per game; `world.progress` (World growth) reads population, cities, land, techs, yields, and armies at fixed turns, plus how games ended. `world.conflict` reads the canonical `world` table (one row per game, default `runs/world_data.csv`) along with the behavior event columns and the turns table; `world.progress` reads the turns table and the panel. Every metric shows two scopes: **Player** for the strategist's own civ against the baseline in the same seat on the same map, and **World** for the whole game against the baseline's games on the same map. `world.progress` takes `checkpoints` (the turn numbers to sample, default `[100, 200, 300]`) and `overview_metrics` (the metrics its Overview tab shows). See [configs/benchmark.md](../configs/benchmark.md), sections 3.0 and 6.2, for the `world` table and the full parameter catalog.
 
 ### Two cross-cutting rating params
 

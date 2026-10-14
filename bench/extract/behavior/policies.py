@@ -8,7 +8,7 @@ import sqlite3
 from ..change_counts import count_real_change_rows
 from ..utilities import is_schema_mismatch
 from .context import GameContext
-from .events import _fetch_events
+from ..game_events import fetch_events
 
 _POLICY_CHANGE_COUNT = "policy_changes"
 _ADOPTION_EVENTS = ("PlayerAdoptPolicyBranch", "IdeologyAdopted")
@@ -41,7 +41,7 @@ class PolicyFamily:
 
         selected = set(adoption_branches)
         adopted = set()
-        events = sorted(_fetch_events(cursor, _ADOPTION_EVENTS), key=lambda event: event[1])
+        events = sorted(fetch_events(cursor, _ADOPTION_EVENTS), key=lambda event: event[1])
         for _event_type, turn, payload_json in events:
             try:
                 payload = json.loads(payload_json)

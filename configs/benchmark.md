@@ -148,7 +148,7 @@ existed.
   "extract": {
     "enabled": true,                     // false → reuse existing CSVs, never touch runs/ DBs
     "runs_dir": "runs/",                 // root searched for *.db game DBs
-    "outputs": ["turns", "panel", "games", "tokens", "behavior"],  // which canonical CSVs to (re)build
+    "outputs": ["turns", "panel", "games", "tokens", "behavior", "world"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract (CLI: --prune-missing)
     "force_rebuild": false,              // true → rebuild even if outputs exist & are newer
@@ -164,7 +164,7 @@ existed.
         "AirCarrier": {"era": "Modern"}, "Airlift": {"era": "Modern"}
       },
       "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness", "DiplomaticBalance", "Friendliness", "WorkWithWillingness", "WorkAgainstWillingness", "Loyalty", "Neediness", "Chattiness"],
-      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed"],
+      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed", "wars_on_city_states", "peace_deals", "units_lost", "cities_captured", "capitals_captured", "city_state_cities_captured", "nukes_detonated"],
       "policies": ["policy_changes", "tradition", "authority", "progress", "fealty", "statecraft", "artistry", "industry", "imperialism", "rationalism", "freedom", "autocracy", "order"],
       "relationships": ["relationship_changes", "relationship_targets", "stance_public_avg", "stance_private_avg", "stance_net_avg", "stance_masked_hostility_share", "stance_masked_goodwill_share"]
     }
@@ -175,7 +175,8 @@ existed.
     "panel":      "runs/panel_data.csv",         // per-player per-game outcomes/strategy summaries (+ player_type/model/strategist/config_slot)
     "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
     "tokens":     "runs/model_token_usage.csv",  // token use plus failed strategist turns per player trace
-    "behavior":   "runs/behavior_data.csv"     // per-player per-game behavior and policy summaries
+    "behavior":   "runs/behavior_data.csv",      // per-player per-game behavior and policy summaries
+    "world":      "runs/world_data.csv"          // per-game world totals
   },
 
   "filter": "llm_only"                   // GLOBAL selector: inline object OR a preset name (§3.1)
@@ -199,7 +200,7 @@ The `behavior` table has one row per major player per game. Its key columns are 
 | `flavor` | any `FlavorChanges` column (for example `Offense`, `UseNuke`) | `flavor_<snake_name>_<stat>`, for example `flavor_use_nuke_max` |
 | `flavor_gates` | per-flavor access gate: exactly one of `{"techs": [names]}` or `{"era": name}` | none directly; decides which turns a gated `flavor` column summarizes |
 | `persona` | any `PersonaChanges` personality column (for example `Boldness`, `WarBias`) | `persona_<snake_name>_<stat>`, for example `persona_war_bias_avg` |
-| `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed` | one count column per name |
+| `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed`, `wars_on_city_states`, `peace_deals`, `units_lost`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `nukes_detonated` | one count column per name |
 | `policies` | `policy_changes`, `tradition`, `authority`, `progress`, `fealty`, `statecraft`, `artistry`, `industry`, `imperialism`, `rationalism`, `freedom`, `autocracy`, `order` | real policy-change count plus first-adoption turn for each selected branch |
 | `relationships` | `relationship_changes`, `relationship_targets`, `stance_public_avg`, `stance_private_avg`, `stance_net_avg`, `stance_masked_hostility_share`, `stance_masked_goodwill_share` | one column per name |
 
@@ -214,6 +215,14 @@ The `behavior` table has one row per major player per game. Its key columns are 
   - `wars_received`: every `DeclareWar` event whose target team is the player's team, from any originator.
   - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
   - `cities_razed`: `CityRazed` events by the player.
+  - `wars_on_city_states`: `DeclareWar` events the player originated as aggressor on a city-state team. They are also included in `wars_declared`.
+  - `peace_deals`: `MakePeace` events between the player's team and another civ's team, from either side, counted once per team pair per turn (both sides may log the same deal).
+  - `units_lost`: `UnitKilledInCombat` events where the player's unit was killed.
+  - `cities_captured`: `CityCaptureComplete` events with `IsConquest` where the player is the new owner and the old owner is a civ (major).
+  - `capitals_captured`: as `cities_captured`, and the city was the old owner's capital at the time (`IsCapital`, so possibly a relocated capital).
+  - `city_state_cities_captured`: as `cities_captured`, but the old owner is a city-state.
+  - `nukes_detonated`: every `NuclearDetonation` by the player (`cities_nuked` counts the subset whose plot held a city).
+  - Each selected event gets its own count column, so a selection that includes events the existing table lacks changes the behavior CSV header, and the next extract rebuilds that table once.
 - `policy_changes` counts `PolicyChanges` rows containing a real field mutation, excluding rationale-only and empty rows. Each branch column records its first adoption turn from `PlayerAdoptPolicyBranch` or `IdeologyAdopted`; branches the player never adopted contain `N/A`.
 - Relationship columns come from the `RelationshipChanges` table. State is tracked per `(player, target)` pair: only major-civ targets, never self; the last row of a turn wins and carries forward.
   - `relationship_changes` counts rows that change the pair's public or private value (the starting state is 0 and 0; re-setting the same values does not count). `relationship_targets` counts distinct major targets ever set.
@@ -222,6 +231,8 @@ The `behavior` table has one row per major player per game. Its key columns are 
   - When the table exists, the two counts are 0 for players who set nothing and the averages and shares are blank; when the table is missing, every cell is blank. The documented range of the values is -100 to 100 but it is not enforced; values are kept raw.
 - Every behavior column has a kind the analyses use: `count` (events, `policy_changes`, `relationship_changes`; scaled by turns alive), `level` (flavor and persona stats, `relationship_targets`, stance averages), `share` (stance shares), and `turn` (policy branch first-adoption turns).
 - Changing the selection changes the CSV header, so the next extract rebuilds the whole table. `flavor_gates` is the exception: the columns stay the same, so a changed gate map does not trigger a rebuild by itself. After editing it, refresh the table with `civ-bench extract --force-rebuild`.
+
+**The `world` table.** The canonical `world` table (`data.tables.world`, default `runs/world_data.csv`) has one row per game: `experiment`, `game_id`, `final_turn` (the game's last `PlayerSummaries` turn), `n_civs` (the major players), and the whole-game totals `wars_declared`, `wars_on_city_states`, `peace_deals`, `peak_wars`, `units_lost`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `civs_eliminated`, `cities_razed`, `nukes_detonated`, and `cities_nuked`. The counts follow the event rules above, with each event counted once for the game (a war or a peace deal between two civs counts once, not once per side). Three counters differ from their behavior namesakes: `wars_declared` here counts only aggressor declarations between civs (the target team is a major civ), `wars_on_city_states` counts aggressor declarations on city-states, and `peace_deals` counts peace between two civ teams, once per team pair per turn. `peak_wars` is the most wars between civ teams open at once: it replays the game's declarations and peace deals between civ teams in turn order, and a war ends at a peace deal or once every civ on one side is gone (past its last turn with a positive score). `civs_eliminated` counts the majors without a positive score on the final turn. Both read only the latest `PlayerSummaries` row (the highest `ID`) of each player and turn, as the turns table does, so a replayed turn's score of 0 overrides an earlier positive one. A run spec whose `data.extract.outputs` omits a key extracts every table, `world` included; the first extract after adding `world` reads every DB once for this table.
 
 ### 3.1 `filters`: named, reusable filter presets
 
@@ -882,11 +893,12 @@ exactly one estimator (per-turn `predicted_win_probability`). Key rules:
 - **Extra Matched Maps tabs.** An optional `uses.analyses` list adds one tab to
   the Matched Maps chapter per entry (§7.1), rendered in list order after
   Strength and Focus. Only modules in `MATCHED_MAPS_TAB_MODULES` (currently
-  `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`, and
-  `behavior.policies`) may be listed; any other module is a config validation
-  error. A module may offer more than one tab (`behavior.commitment` offers
-  Commitment and Grand strategy). The stage records the list as `metadata.tabs` so the report renders
-  the tabs without reading the config.
+  `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`,
+  `behavior.policies`, `world.conflict`, and `world.progress`) may be listed;
+  any other module is a config validation error. A module may offer more than
+  one tab (`behavior.commitment` offers Commitment and Grand strategy). The
+  stage records the list as `metadata.tabs` so the report renders the tabs
+  without reading the config.
 
 The emitted tables carry ordering and color metadata in the result manifest
 (catalog strategist order, configured condition order, `configs/models.json`
@@ -1061,6 +1073,52 @@ Per-module params:
 
 **The policies page.** Columns are the extracted policy branches grouped by the tier in which they open (`POLICY_INFO`, from Vox Populi's `PolicyTreeChanges.sql`): Ancient (Tradition, Authority, Progress), Medieval (Fealty, Statecraft, Artistry; the Medieval era after 6 policies), Industrial (Industry, Imperialism, Rationalism; the Industrial era after 12 policies), and Ideology (Freedom, Autocracy, Order), with short headers such as Trad. The relative baseline defaults to the matched in-game AI, pinned as the top row, and Vanilla players leave the tables when it is. Each view has two heatmaps. `adoption_relative` / `adoption_absolute` (`Branch adoption`) show the percent of players who adopted the branch, on a fixed 0 to 100% scale in the absolute view and in percentage points in the relative view; the absolute tooltip adds the average first-adoption turn and the share of players whose first pick in that tier was this branch (for Ancient, the opening branch; for Ideology, the first ideology). `adoption_turn_relative` / `adoption_turn_absolute` (`First-adoption turn`) show the first-adoption turn among adopters, as z-scores within each branch in the absolute view (red earlier, blue later) and as turns earlier or later than the baseline in the relative view; the absolute tooltip adds the share of players who adopted it. In controlled runs with a baseline the module writes `policies_by_seed` and `policies_by_seat` for the Matched Maps Policies tab: adoption percents on the fixed scale, with the difference from the baseline, the first-adoption turn, and the first-pick share in the tooltip. `policy_changes` is not shown.
 
+#### `world.*`: game outcomes for the civ and the world
+
+The `world.*` family reports what happened in each game: `world.conflict` counts wars, peace, combat losses, conquest, and destruction, and `world.progress` follows growth at fixed turns and how games ended. Every metric has two sub-columns: **Player** (the strategist's own civ, compared with the baseline in the same seat on the same map) and **World** (the whole game, compared with the average over the baseline's games on the same map, each game counted once whichever seats the baseline's players held; for the in-game AI baseline, the AI-only games). Each metric is one column group with a Player and a World sub-column. All params are optional and unknown keys are config errors.
+
+```jsonc
+{ "id": "wld_conflict", "module": "world.conflict", "enabled": true, "params": {} }
+{ "id": "wld_progress", "module": "world.progress", "enabled": true, "params": { "checkpoints": [100, 200, 300] } }
+```
+
+Rows cover every non-Vanilla player type. Against the in-game AI baseline the Vanilla rows are left out because the pinned top row (`AI-only world`) stands for them; the Null strategist stays. The pinned row shows the baseline in absolute values. A World value includes the strategist's own civ, and in a game with two strategists it counts for both. The bootstrap resamples whole games.
+
+Relative cells read per the metric's unit: counts as a difference (`+2.1`), shares as percentage points (`+3 pts`), and sizes and yields as a percent change (`+6%`; blank when the matched baseline value is 0). Cells show their unit, and the tooltip shows the value, the matched baseline value, and the game count.
+
+Params shared by both modules:
+
+- **`metrics`**: a non-empty list of ids from the module's catalog (below); the default is every metric.
+- **`baseline`**: the same meaning as for `behavior.*` (above): `"completed"`, one experiment id, or a non-empty list of experiment ids. When omitted, it is the first enabled strength stage's `baseline_experiment` (the in-game AI, §5.1).
+- **`by`**: the grouping column; default `"player_type"`.
+- **`bootstrap_n`** (integer >= 1, default 1000) and **`ci_level`** (default 0.95): the bootstrap confidence intervals.
+- **`condition_pairing`**: the same override shape as other modules (§2.2).
+
+There is no `rate`: world counts are per game.
+
+**`world.conflict` ("Wars and conquest").** The page has **Relative** and **Absolute** tabs (only Absolute without a controlled baseline) over the tables `world_conflict_relative` and `world_conflict_absolute`; in controlled runs it also writes `world_conflict_by_seed` and `world_conflict_by_seat` for the Matched Maps World: conflict tab (§7.1). The module needs the canonical `world` table (§3.0) and the behavior event columns its Player side reads. Event metrics take the Player value from the behavior table (its `wars_declared` includes wars on city-states, so the Player column subtracts `wars_on_city_states` to count declarations on other civs) and the World value from the world table; `peak_wars`, `at_war_share`, `eliminated`, and `turns` take the Player value from the turns table and the World value from the world table (the World `at_war_share` is the mean over the game's civ-turns alive). The metric catalog:
+
+| Metric id | Player | World | Relative unit |
+| --- | --- | --- | --- |
+| `wars_declared` | Wars the civ declared on other civs | Wars declared between civs | difference |
+| `wars_on_city_states` | Wars the civ declared on city-states | Wars declared on city-states by any civ | difference |
+| `peace_deals` | Peace deals the civ signed with other civs | Peace deals between civs | difference |
+| `peak_wars` | The most wars the civ was in at once, city-states included (from `turns.active_wars`) | The most wars between civs open at once (the `world` table's `peak_wars`) | difference |
+| `at_war_share` | Share of the civ's turns alive spent at war with anyone | Share of all civ-turns alive spent at war with anyone | points |
+| `units_lost` | The civ's units killed in combat | Civ units killed in combat, on every side | difference |
+| `cities_captured` | Civ cities the civ conquered | Civ cities conquered by any civ | difference |
+| `capitals_captured` | Capitals the civ conquered (the capital at the time of capture) | Capitals conquered by any civ | difference |
+| `city_state_cities_captured` | City-state cities the civ conquered | City-state cities conquered by any civ | difference |
+| `eliminated` | Share of the civ's games in which it was eliminated | Civs eliminated per game | points (Player), difference (World) |
+| `cities_razed` | Cities the civ razed | Cities razed by any civ | difference |
+| `nukes_detonated` | Nuclear weapons the civ detonated | Nuclear weapons detonated by any civ | difference |
+| `cities_nuked` | The civ's detonations that hit a city | Detonations that hit a city | difference |
+| `turns` | Turns the civ survived (its last turn with a positive score) | Game length in turns | difference |
+
+**`world.progress` ("World growth").** Extra params: **`checkpoints`**, a non-empty increasing list of turn numbers (default `[100, 200, 300]`), and **`overview_metrics`**, a subset of the selected `metrics` shown on the Overview tab (default `population`, `technologies`, and `science_per_turn`; an empty list drops the tab). In a controlled run the tabs are **Overview** (the overview metrics at every checkpoint, relative), one **Turn N** tab per checkpoint, **Endings**, and **Absolute** (the absolute tables of the Turn and Endings tabs, stacked). Without a controlled baseline each tab shows absolute values and there is no Absolute tab. The tables are `world_progress_overview_relative`, `world_progress_t<N>_relative` and `world_progress_t<N>_absolute`, and `world_endings_relative` and `world_endings_absolute`; in controlled runs the module also writes `world_progress_by_seed` and `world_progress_by_seat` for the Matched Maps World: progress tab (the overview metrics at the last checkpoint).
+
+Each checkpoint reads the turns table for every civ: `population`, `cities`, `territory` (plots owned), `technologies`, `science_per_turn`, `production_per_turn`, `food_per_turn`, `culture_per_turn`, `gold_per_turn`, `faith_per_turn`, `tourism_per_turn`, and `military_units` (a percent change in the relative view, for both scopes), plus `civs_alive` (Player: the share of the civ's games in which it is still alive, in points; World: the count of civs alive, a difference). World values are sums over the game's civs, except `technologies` (the average over surviving civs) and `civs_alive` (a count). A civ eliminated by the checkpoint counts as 0 there; a game with no turn at the checkpoint (it ended earlier) is left out of that checkpoint. The Endings tab reads the panel: for each victory type present in the data, the Player column is the share of the civ's games it won that way and the World column the share of games that ended that way, both in percentage points. Column order follows `WORLD_ENDINGS`: Domination, Science, Culture (the panel records it as "Cultural"), Diplomatic, Time, then Survival, with types seen only in the data after these. `No winner` appears on the World side only. Game length reads turns survived (Player) against game length in turns (World).
+
 ### 6.3 Module friendly names and descriptions
 
 Every implemented analysis module ships a coded friendly name and one-line
@@ -1095,6 +1153,8 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `behavior.diplomacy` | Diplomatic behavior | Describes diplomatic persona traits and the public and private stances strategists set toward rivals, including how often the two conflict. |
 | `behavior.commitment` | Strategic commitment | Shows how often strategists act and revise their settings, how large and how lasting their changes are, and which grand strategy they hold. |
 | `behavior.policies` | Policy paths | Shows which policy branches and ideologies each player type adopts, which it picks first in each tier, and how early, against the in-game AI on the same map and seat. |
+| `world.conflict` | Wars and conquest | Counts wars, peace deals, combat losses, conquests, razed and nuked cities, and eliminations per game, for the strategist's own civ and for the whole world. |
+| `world.progress` | World growth | Reads population, cities, land, techs, yields, and armies at fixed turns, and how games ended, for the strategist's own civ and for the whole world. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded
 identity; they cannot run, so they never appear on a report.
@@ -1151,7 +1211,7 @@ overview page.
 
 `model_tips` is optional. It lists ordered rules, each with a required single-line `tip` and an optional `models` list of glob patterns; the first matching rule wins. Patterns match catalog strategist model ids case-sensitively, and a pattern that matches no model adds a report warning. At most one rule may omit `models`; it must be last and covers every other LLM strategist. Vanilla and Null never get a tip. In HTML only, the tip shows as a hover tooltip on "Strategist | Condition" labels: heatmap row labels (the ratings, behavior, and Matched Maps pages) and that cell in both Game Log tables. Column headers, other cells, curve charts, plain tables, and Markdown are unchanged.
 
-The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears in canonical family order (ratings / prediction / calibration / performance / behavior / exploratory), with members in config order. An ordered `id` list puts those sections first, then automatically appends every remaining enabled analysis in the default order. Duplicate ids appear only once; unknown ids stop rendering. Automatic fill excludes disabled analyses, while explicitly listed disabled ids follow `include_disabled`. Chapters follow their first section's position in the resolved list, including Matched Maps. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes all other enabled analyses. Disable an analysis to exclude it from the default report. Each family page opens with a sentence explaining what its analyses help readers assess; result summaries appear with the individual analyses.
+The report walks each produced `AnalysisResult` (tables + figures + summary) and renders one section per analysis. With `sections: null` or `sections: []`, every enabled analysis appears in canonical family order (ratings / prediction / calibration / performance / behavior / world / exploratory), with members in config order. An ordered `id` list puts those sections first, then automatically appends every remaining enabled analysis in the default order. Duplicate ids appear only once; unknown ids stop rendering. Automatic fill excludes disabled analyses, while explicitly listed disabled ids follow `include_disabled`. Chapters follow their first section's position in the resolved list, including Matched Maps. For example, `"sections": ["controlled_seed"]` puts Matched Maps first and includes all other enabled analyses. Disable an analysis to exclude it from the default report. Each family page opens with a sentence explaining what its analyses help readers assess; result summaries appear with the individual analyses.
 
 Each section is headed by the module instance's **resolved friendly name** (§6.3), overridden by that stage's optional `name` when given. A question-mark tooltip after the heading contains its description, registry module, and metadata. Tooltips open on hover, keyboard focus, or click/tap, and Escape dismisses them. The stage `id` supplies its stable anchor for report links and curation (TOC, overview, sidebar). The page title is `report.title`, else the config's `friendly_name`, else its `name`. The config's `description` renders under the title on the main overview and `report.md`; other HTML pages carry it in the page heading's tooltip. Markdown sections collect technical details in a collapsible disclosure. Result summaries keep key numbers bold and use VPAI for the baseline, with its configured experiment identifier in the technical details. Headings fall back to stage ids when no friendly identity is configured.
 
@@ -1163,7 +1223,7 @@ Each section is headed by the module instance's **resolved friendly name** (§6.
 
 **Sorting.** Every HTML report table under `.table-scroll` can be sorted by a numeric column. Clicking a numeric column heading sorts descending, then ascending, then back to the original order. A column counts as numeric when at least two cells hold numbers and no non-empty cell is text; heatmap cells sort by `data-value`, other cells by their text (percent signs, commas, a leading plus, and the unicode minus are handled). Blank cells sort last, pinned reference rows (VPAI, the baseline row) never move, and each table body sorts on its own. The Game Log keeps its own sorting (`no-auto-sort`). Sorting happens in the browser, so the generated HTML is unchanged.
 
-**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Interactive figures in that tree load the Plotly runtime from one shared `assets/plotly.min.js` instead of embedding their own copy; the analysis folder keeps the standalone versions. Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. When publishing (§7.3) has run, the directory also holds `.git/` and `.github/`, and a re-render keeps both. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
+**Output layout.** The run writes `<root><suffix>/<name>/` containing `report.md`, the HTML overview `index.html`, one HTML page per represented family (`ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, `behavior.html`, `world.html`, `exploratory.html`), `assets/report.css`, and a self-contained `assets/<id>/` tree (figures + the full table CSVs the inline tables link to). Interactive figures in that tree load the Plotly runtime from one shared `assets/plotly.min.js` instead of embedding their own copy; the analysis folder keeps the standalone versions. Only families represented by the resolved report sections get a page. When the resolved sections carry an enabled, non-empty `performance.controlled_seed_report` analysis, its section leaves the performance family and becomes the controlled-seed chapter (§7.1): a `controlled-seed/` directory beside the family pages. When replay is enabled, the report also contains `games.html`, `assets/game-log.js`, and copied saves under `saves/<experiment>/<game_id>.Civ5Save`. When publishing (§7.3) has run, the directory also holds `.git/` and `.github/`, and a re-render keeps both. Inline tables are capped (the full data is the linked CSV). Rendering is **deterministic**: dates come from saved artifacts, so `civ-bench report --config …` re-renders the same document **byte-identically** from existing artifacts.
 
 The overview shows a compact announcement for the most recently completed rated condition, using the first overall Bradley-Terry or Plackett-Luce section in report order. A second announcement lists incomplete conditions as `Model (20/24)` when the global `min_condition_completeness` filter is configured. It disappears when all conditions are complete. Both use the coverage analysis's saved `condition_progress` table; rerun that analysis to add announcements to older artifacts. Completion dates use game timestamps in UTC, taking the earliest accepted game in each required slot and then the latest slot date. Missing dates or ratings omit the score announcement; missing coverage artifacts omit both announcements.
 
@@ -1199,8 +1259,9 @@ The chapter lives in its own directory beside the family pages:
   victory focus, name and percentage, a stable categorical color per strategy
   with intensity by share), then one tab per `uses.analyses` entry (§6.2),
   Strategy for `behavior.flavors`, Diplomacy for `behavior.diplomacy`, Commitment
-  and Grand strategy for `behavior.commitment`, and Policies for
-  `behavior.policies`. Tab labels are short and the long wording
+  and Grand strategy for `behavior.commitment`, Policies for `behavior.policies`,
+  World: conflict for `world.conflict`, and World: progress for `world.progress`.
+  Tab labels are short and the long wording
   rides on the tab button's tooltip; choosing a tab switches every seed on
   the page. All chapter tables render through the shared heatmap renderer
   (§7), so they carry the same markup, the pinned VPAI body, tooltips, and
@@ -1421,6 +1482,7 @@ Only the headline is required. A minimal block is `"intro": {"headline": "Which 
 14. **Extract invariants** (§3, §3.3): Vox Deorum can record distinct sync/map seeds, but civ-bench's controlled-design benchmark requires matched starts. Therefore, for a controlled game, a configured `configuredSyncRandSeed` must equal `configuredMapRandSeed`: a mismatch **aborts extraction** with a policy error. The `games` table stores one `seed` (the controlled value, else `-1`) and `seating_rotation` (else `-1`); `-1` is the uncontrolled sentinel (controlled seeds are `≥ 1`; `0` is Civ's "pick random" and rejected for controlled runs; and rotations are `≥ 0`). Per-player `config_slot` lives in `panel_data` and is joined by `(game_id, player_id)` where needed. A `player_type_labels` value is read as a **suffix** when it begins with `-`, else as a full **override**.
 15. **Presentation** (§2.2): only `condition_pairing` and `matchup_display` are accepted. Pairing `suffixes` is null or a non-empty list of `-`-prefixed strings; `sort_condition` is `"base"`, `"best"`, or a `-`-prefixed suffix and, with an explicit list, a suffix must be a member (`"base"` and `"best"` need no membership). `matchup_display` and per-matchup `display` are `matrix|vs_reference`. An enabled derived suffix set and its sort membership are checked lazily against the experiment catalog at analysis runtime.
 16. **Report identity** (§2, §6.1, §7): top-level `friendly_name` is null or a string; optional `analyses[].name`/`description` are null or strings. Neither affects the DAG, a stage's fit, or `result.json` artifacts beyond the friendly-name manifest fields; they are pure presentation overrides resolved at render time.
-17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. Each `uses.analyses` entry must name an analysis whose module offers a Matched Maps tab (`MATCHED_MAPS_TAB_MODULES`, currently `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`, and `behavior.policies`); any other module is an error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).
+17. **Controlled-seed report wiring** (§6.2, §7.1): a `performance.controlled_seed_report` stage must declare exactly one estimator in `uses.estimators` and exactly one strength-table reference (an enabled strength-module adjust stage id) in `uses.tables`; at most one such stage may be enabled per run. Each `uses.analyses` entry must name an analysis whose module offers a Matched Maps tab (`MATCHED_MAPS_TAB_MODULES`, currently `behavior.flavors`, `behavior.diplomacy`, `behavior.commitment`, `behavior.policies`, `world.conflict`, and `world.progress`); any other module is an error. At run time the module additionally requires enabled condition pairing (§2.2) and a configured strength-stage `baseline_experiment` (§5.1), and it rejects uncontrolled-only inputs, duplicate per-`(game_id, player_id)` panel/strength records, and conflicting duplicate prediction points. The controlled-seed chapter renders from its section automatically when `html` is among `report.formats` (§7.1).
 18. **Token estimates and cache pricing** (§2.3, §6.2): `token_estimates`, when present, accepts only `reasoning` and `cached_input`, each a boolean or the string `"true"`/`"false"`, defaulting to true; unknown keys fail. In `configs/models.json`, `cache_pricing`, when present, requires a numeric `default_read_ratio` in `[0, 1]` and a `families` object whose entries accept only `models`, `read_ratio`, and `estimate`: `models` is a non-empty list of `strategist_models` ids (unknown ids, non-strings, and membership in two families are errors), `read_ratio` is a number in `[0, 1]`, and `estimate` is a boolean.
 19. **Front page** (§7.4): `report.intro`, when present, requires a single-line `headline` and accepts only the keys listed in §7.4. Text fields must be non-empty, and labels and tips must be single-line. Fact `value`s and tip placeholders must come from the documented sets. Project and link URLs must be absolute http(s) URLs. Each `charts` entry must name an existing analysis stage whose module fits the chart kind.
+20. **World params and tables** (§3.0, §6.2): in a `world.*` stage, unknown `params` keys are errors (`rate` among them, since world counts are per game); `metrics` must be a non-empty list of ids from that module's catalog; `overview_metrics` must be a subset of the selected `metrics`; `checkpoints` must be a non-empty, strictly increasing list of integers >= 1. An enabled `world.conflict` stage requires `data.tables.world` and, when the run extracts and sets `data.extract.outputs`, `"world"` in that list; the behavior event columns behind its selected Player metrics must be selected in `data.extract.behavior.events` (selecting `wars_declared` also requires `wars_on_city_states`).

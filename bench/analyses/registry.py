@@ -43,6 +43,7 @@ from .ratings import (
     RatingsOutcomeMatchups,
     RatingsPlackettLuce,
 )
+from .world import WorldConflict, WorldProgress
 
 ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     # ratings.*
@@ -71,6 +72,9 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "behavior.diplomacy": BehaviorDiplomacy,
     "behavior.commitment": BehaviorCommitment,
     "behavior.policies": BehaviorPolicies,
+    # world.*
+    "world.conflict": WorldConflict,
+    "world.progress": WorldProgress,
 }
 
 

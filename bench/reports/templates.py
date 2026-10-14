@@ -43,6 +43,7 @@ _FAMILY_TITLES = {
     "performance": "Performance",
     "controlled_seed": CONTROLLED_SEED_TITLE,
     "behavior": "Behavior",
+    "world": "World",
     "exploratory": "Exploratory",
 }
 
@@ -71,6 +72,11 @@ _FAMILY_PURPOSES = {
         "policy choices), against the in-game AI on the same map and seat and "
         "in absolute terms."
     ),
+    "world": (
+        "Describe what happened in each game, for the strategist's own civ and for "
+        "the whole world, against the in-game AI in the same seat and the AI-only "
+        "games on the same maps."
+    ),
     "exploratory": (
         "Explore game patterns and strategy profiles across the dataset."
     ),
@@ -80,7 +86,7 @@ _FAMILY_PURPOSES = {
 # order they first appear among the sections.
 _FAMILY_ORDER = [
     "ratings", "performance", "controlled_seed",
-    "behavior", "exploratory", "prediction", "calibration"
+    "behavior", "world", "exploratory", "prediction", "calibration"
 ]
 
 

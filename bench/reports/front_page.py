@@ -47,6 +47,8 @@ CARD_STYLES = {
     "behavior.diplomacy": ("Diplomacy", "hand"),
     "behavior.flavors": ("Changed habits", "dial"),
     "behavior.policies": ("Politics", "scroll"),
+    "world.conflict": ("Wars and conquest", "sword"),
+    "world.progress": ("World growth", "sprout"),
     "prediction.evaluate": ("How reliable is this?", "eye"),
 }
 

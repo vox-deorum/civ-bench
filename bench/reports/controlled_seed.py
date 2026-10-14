@@ -15,8 +15,9 @@ condition row's runs), Focus (the dominant victory focus with a stable
 categorical color per strategy), then the tabs of each analysis the stage lists
 in ``uses.analyses`` (:class:`~bench.reports.model.MatchedMapTab`: Strategy from
 ``behavior.flavors``, Diplomacy from ``behavior.diplomacy``, Commitment and the
-Focus-style Grand strategy from ``behavior.commitment``, and Policies from
-``behavior.policies``). Each ``(seed, player_id)`` detail page
+Focus-style Grand strategy from ``behavior.commitment``, Policies from
+``behavior.policies``, World: conflict from ``world.conflict``, and World:
+progress from ``world.progress``). Each ``(seed, player_id)`` detail page
 repeats the same tabs for its seat under the probability-curve chart. Every
 table renders through the shared :func:`~bench.reports.heatmap.render_heatmap_html`,
 so tooltips, the pinned VPAI row, and click-to-sort match the rest of the report.

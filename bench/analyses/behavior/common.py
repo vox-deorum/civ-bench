@@ -5,8 +5,9 @@ set of metric columns, then hands the rows to :func:`build_views`, which returns
 two views of the same metrics:
 
 * **relative** (the default): controlled rows only, each metric minus the mean
-  of the baseline pool at the same ``(seed, player_id)`` cell. Metrics the pool
-  never populates are dropped.
+  of the baseline pool at the same ``(seed, player_id)`` cell (for a per-game
+  metric, at the same seed over distinct games). Metrics the pool never
+  populates are dropped.
 * **absolute**: every filtered row, as measured.
 
 The pool comes from ``params.baseline`` (:func:`resolve_baseline`): one
@@ -92,6 +93,14 @@ class BehaviorViews:
     relative_metrics: list[str] = field(default_factory=list)
     baseline: Optional[Baseline] = None
     baseline_sd: dict = field(default_factory=dict)
+    # metric → the SD a relative cell's color is scaled by: ``baseline_sd``,
+    # except for percent-change metrics, where it is the pool's SD of its own
+    # percent deviations from the cell means.
+    color_sd: dict = field(default_factory=dict)
+    # Metrics whose relative value is a percent change, not a difference.
+    percent: frozenset = frozenset()
+    # Metrics holding one value per game, matched by seed over distinct games.
+    per_game: frozenset = frozenset()
     # metric → {mean, sd, n_players, n_games} of the pool on controlled games,
     # in absolute terms (the pinned baseline row of the HTML heatmaps).
     baseline_summary: dict = field(default_factory=dict)
@@ -255,6 +264,9 @@ def build_views(
     cells: Optional[pd.DataFrame],
     baseline: Optional[Baseline],
     companions: Optional[dict] = None,
+    percent=frozenset(),
+    keep_baseline: bool = False,
+    per_game=frozenset(),
 ) -> BehaviorViews:
     """Build the absolute rows and, when the design allows, the relative rows.
 
@@ -265,10 +277,24 @@ def build_views(
     ``companions`` maps a metric to more columns of the same unit (such as its
     per-player min and max); relative rows shift them by the metric's baseline
     cell mean too, so a range reads as a difference from the baseline.
+
+    A metric in ``percent`` reads as a percent change from its baseline cell
+    mean, ``100 * (x - base) / base``, blank where that mean is not positive.
+    With ``keep_baseline``, each relative row also keeps ``<metric>__value``
+    (as measured) and ``<metric>__baseline`` (the matched cell mean) for
+    tooltips.
+
+    A metric in ``per_game`` holds one value per game, copied onto each of its
+    players (such as a whole-game total). It is matched against the mean over
+    the pool's distinct games at the same seed, whichever seats the pool
+    covers, and its SD and summary count each game once.
     """
     rows = rows[rows[metrics].notna().any(axis=1)] if metrics else rows
+    percent = frozenset(percent)
+    per_game = frozenset(per_game)
     views = BehaviorViews(absolute=rows.reset_index(drop=True), relative=None,
-                          metrics=list(metrics), baseline=baseline)
+                          metrics=list(metrics), baseline=baseline, percent=percent,
+                          per_game=per_game)
     if baseline is None:
         views.relative_note = "no baseline is configured"
         return views
@@ -288,10 +314,33 @@ def build_views(
     if not usable:
         views.relative_note = f"the {baseline.label} populates none of the metrics"
         return views
-    means = pool.groupby(["seed", "player_id"])[usable].mean()
-    views.baseline_sd = {m: float(pool[m].std(ddof=1)) for m in usable}
+    seat_metrics = [m for m in usable if m not in per_game]
+    game_metrics = [m for m in usable if m in per_game]
+    seat_means = pool.groupby(["seed", "player_id"])[seat_metrics].mean()
+    games = pool.drop_duplicates("game_id")
+    game_means = games.groupby("seed")[game_metrics].mean()
+
+    def with_cells(frame: pd.DataFrame, suffix: str) -> pd.DataFrame:
+        """``frame`` with each metric's baseline cell mean as ``<metric><suffix>``."""
+        if seat_metrics:
+            frame = frame.join(seat_means, on=["seed", "player_id"], rsuffix=suffix, how="left")
+        if game_metrics:
+            frame = frame.join(game_means, on="seed", rsuffix=suffix, how="left")
+        return frame
+
+    def source(metric: str) -> pd.DataFrame:
+        return games if metric in per_game else pool
+
+    views.baseline_sd = {m: float(source(m)[m].std(ddof=1)) for m in usable}
+    views.color_sd = dict(views.baseline_sd)
     for metric in usable:
-        values = pool[["game_id", metric]].dropna()
+        if metric in percent:
+            own = with_cells(source(metric), "__cell")
+            cell = own[f"{metric}__cell"]
+            change = (100.0 * (own[metric] - cell) / cell).where(cell > 0)
+            views.color_sd[metric] = float(change.std(ddof=1))
+    for metric in usable:
+        values = source(metric)[["game_id", metric]].dropna()
         views.baseline_summary[metric] = {
             "mean": float(values[metric].mean()),
             "sd": views.baseline_sd[metric],
@@ -305,17 +354,34 @@ def build_views(
     in_baseline = rows["experiment"].isin(baseline.experiments)
     candidates = rows if baseline.self_included else rows[~in_baseline]
     candidates = candidates.merge(cells, on="game_id", how="inner")
-    matched = candidates.join(means, on=["seed", "player_id"], rsuffix="__baseline", how="left")
+    matched = with_cells(candidates, "__baseline")
     has_cell = matched[[f"{m}__baseline" for m in usable]].notna().any(axis=1)
     views.n_unmatched = int((~has_cell).sum())
     matched = matched[has_cell].copy()
+    bases = matched[[f"{m}__baseline" for m in usable]]
+    matched = matched.drop(columns=list(bases.columns))
+    # Collect the new columns and add them at once (one column at a time
+    # fragments a wide frame).
+    shifted, kept = {}, {}
     for metric in usable:
-        base = matched.pop(f"{metric}__baseline")
-        matched[metric] = matched[metric] - base
+        base = bases[f"{metric}__baseline"]
+        if metric in percent:
+            def shift(values, base=base):
+                return (100.0 * (values - base) / base).where(base > 0)
+        else:
+            def shift(values, base=base):
+                return values - base
+        if keep_baseline:
+            kept[f"{metric}__value"] = matched[metric]
+            kept[f"{metric}__baseline"] = base
+        shifted[metric] = shift(matched[metric])
         for column in (companions or {}).get(metric, ()):
             if column in matched.columns:
-                matched[column] = matched[column] - base
+                shifted[column] = shift(matched[column])
                 views.shifted.add(column)
+    matched = matched.assign(**shifted)
+    if kept:
+        matched = pd.concat([matched, pd.DataFrame(kept, index=matched.index)], axis=1)
     for metric in views.dropped_metrics:
         matched = matched.drop(columns=metric)
     if matched.empty:
@@ -425,8 +491,8 @@ def color_positions(
 ) -> pd.Series:
     """Each cell's place on the report's 0 to 1 color scale (0.5 is neutral).
 
-    * relative: the mean difference in pool SDs, full color at
-      ±``RELATIVE_COLOR_SD``;
+    * relative: the mean difference in pool SDs (``views.color_sd``), full
+      color at ±``RELATIVE_COLOR_SD``;
     * absolute: the metric's ``fixed[metric] = (low, high)`` range when given,
       else a z-score across every absolute player, full color at
       ±``ABSOLUTE_COLOR_Z``.
@@ -436,7 +502,7 @@ def color_positions(
     for rec in summary.itertuples(index=False):
         mean = float(rec.mean)
         if view == RELATIVE:
-            sd = views.baseline_sd.get(rec.metric, float("nan"))
+            sd = views.color_sd.get(rec.metric, float("nan"))
             score = mean / sd / RELATIVE_COLOR_SD if sd and np.isfinite(sd) else 0.0
             position = 0.5 + 0.5 * float(np.clip(score, -1.0, 1.0))
         elif rec.metric in fixed:
@@ -475,13 +541,15 @@ def heatmap_spec(
     column_units: Optional[dict] = None,
     tip_rows: Optional[list] = None,
     baseline_units: Optional[dict] = None,
+    text_column: Optional[str] = None,
 ) -> dict:
     """The ``metadata["heatmaps"]`` entry for one view's table (layout only).
 
     ``column_decimals`` and ``column_units`` override the number format and add
     a tooltip unit per column (``baseline_units`` for the pinned baseline rows,
     which stay absolute); ``tip_rows`` lists extra tooltip lines
-    (:mod:`bench.reports.heatmap`).
+    (:mod:`bench.reports.heatmap`); ``text_column`` names the column holding
+    each cell's text.
     """
     spec = {
         "view": view,
@@ -521,5 +589,23 @@ def heatmap_spec(
         spec["baseline_units"] = {m: str(v) for m, v in baseline_units.items() if m in column_order}
     if tip_rows:
         spec["tip_rows"] = [dict(row) for row in tip_rows]
+    if text_column:
+        spec["text_column"] = text_column
     return spec
+
+
+def format_cell(value, decimals: int, unit: str = "", signed: bool = False) -> str:
+    """A cell's text with its unit, as the report formats numbers ("+6%", "+3 pts")."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if not np.isfinite(value):
+        return ""
+    text = f"{value:+.{decimals}f}" if signed else f"{value:.{decimals}f}"
+    if float(text) == 0:
+        text = f"{0:.{decimals}f}"
+    if not unit:
+        return text
+    return f"{text}{unit}" if unit == "%" else f"{text} {unit}"
 

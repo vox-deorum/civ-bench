@@ -128,6 +128,9 @@ class BehaviorAnalysis(Analysis):
         column_units: dict | None = None,
         companions: dict | None = None,
         tip_rows: dict | None = None,
+        emit: set | None = None,
+        cell_text: bool = False,
+        pinned_label: str = "",
     ) -> None:
         """Write ``<slug>_relative`` / ``<slug>_absolute`` and their heatmap specs.
 
@@ -153,16 +156,23 @@ class BehaviorAnalysis(Analysis):
         unit, ``{metric: {out_column: source_column}}`` group means of other
         per-player columns (the pinned row takes the pool's), and the tooltip
         lines that show them.
+
+        ``emit`` limits which of the two views this call writes (default both).
+        ``cell_text`` writes each cell's text with its unit to a ``cell_text``
+        column ("+6%", "+3 pts"; the pinned row in absolute units).
+        ``pinned_label`` names the pinned row instead of the baseline's label.
         """
         metrics = list(names)
         per_view = [(C.ABSOLUTE, views.absolute, metrics)]
         if views.relative is not None:
             per_view.insert(0, (C.RELATIVE, views.relative,
                                 [m for m in metrics if m in views.relative_metrics]))
+        if emit is not None:
+            per_view = [entry for entry in per_view if entry[0] in emit]
         reference = [ctx.catalog.null_label, ctx.catalog.vanilla_label]
         pinned = ""
         if baseline_row and views.relative is not None and views.baseline_summary:
-            label = views.baseline.label
+            label = pinned_label or views.baseline.label
             pinned = label[:1].upper() + label[1:]
             reference.insert(0, pinned)
         for view, frame, view_metrics in per_view:
@@ -194,6 +204,8 @@ class BehaviorAnalysis(Analysis):
                 order = [pinned] + order
             leading = ["row_kind", self.by, "strategist", "condition", "row_label"]
             table = table[leading + [c for c in table.columns if c not in leading]]
+            if cell_text:
+                table["cell_text"] = _cell_texts(table, view, column_units, column_decimals, decimals)
             name = f"{slug}_{view}"
             out.add((view_names or {}).get(view, view), name, table=table)
             out.summaries[(slug, view)] = table
@@ -221,6 +233,7 @@ class BehaviorAnalysis(Analysis):
                 column_units=(column_units or {}).get(view),
                 tip_rows=(tip_rows or {}).get(view),
                 baseline_units=(column_units or {}).get(C.ABSOLUTE, {}) if column_units else None,
+                text_column="cell_text" if cell_text else None,
             )
 
     def add_matched_map_tables(
@@ -249,28 +262,36 @@ class BehaviorAnalysis(Analysis):
         tip_rows: list | None = None,
         key: str = "",
         value_label: str = "Average",
+        cell_text: bool = False,
+        pinned_label: str = "",
     ) -> dict | None:
         """Write ``<slug>_by_seed`` / ``<slug>_by_seat`` for a Matched Maps tab.
 
         Both are absolute heatmap tables over controlled games, one keyed by
         ``seed`` and one by ``seed`` and ``player_id``, each pinning the
-        baseline pool's average for that seed or seat as its top row. Vanilla
+        baseline pool's average for that seed or seat as its top row (for a
+        per-game metric, the average over that seed's games). Vanilla
         players are left out: the chapter's pinned row is the reference. A cell's
         ``difference`` is the mean relative value there (the player minus the
         baseline at its own seed and seat), shown in the tooltip. No bootstrap:
         the Matched Maps tables report plain means. ``companions`` and
         ``tip_rows`` add per-cell means of other columns to the tooltip, as in
         :meth:`add_heatmap_views`; ``key`` names the tab when a module offers
-        more than one. Returns the ``metadata["matched_maps"]`` entry, or
-        ``None`` without a relative view.
+        more than one. ``cell_text`` and ``pinned_label`` work as in
+        :meth:`add_heatmap_views`. Returns the ``metadata["matched_maps"]``
+        entry, or ``None`` without a relative view.
         """
         if views.relative is None or cells is None or cells.empty or not views.baseline_summary:
             return None
         metrics = [m for m in names if m in views.relative_metrics]
         if not metrics:
             return None
-        label_text = views.baseline.label
+        label_text = pinned_label or views.baseline.label
         pinned = label_text[:1].upper() + label_text[1:]
+        # The difference is a percent change for percent metrics; a difference
+        # of percents is in percentage points.
+        difference_units = {m: "pts" if u == "%" else u for m, u in (column_units or {}).items()}
+        difference_units.update({m: "%" for m in metrics if m in views.percent})
         rows = views.absolute[views.absolute["player_type"].astype(str) != ctx.catalog.vanilla_label]
         rows = rows.merge(cells, on="game_id", how="inner")
         base = pool.merge(cells, on="game_id", how="inner")
@@ -281,6 +302,9 @@ class BehaviorAnalysis(Analysis):
                                                    pinned, groups, fixed, companions or {})
             if table.empty:
                 return None
+            if cell_text:
+                table["cell_text"] = _cell_texts(table, C.ABSOLUTE, {C.ABSOLUTE: column_units or {}},
+                                                 column_decimals, decimals)
             out.tables[name] = table
             out.heatmaps[name] = C.heatmap_spec(
                 view=C.ABSOLUTE,
@@ -301,11 +325,10 @@ class BehaviorAnalysis(Analysis):
                 baseline_rows=[pinned],
                 column_decimals=column_decimals,
                 column_units=column_units,
-                # A difference of percents is in percentage points.
                 tip_rows=[{"column": "difference", "label": "Vs. baseline", "signed": True,
-                           "units": {m: "pts" if u == "%" else u
-                                     for m, u in (column_units or {}).items()}},
+                           "units": difference_units},
                           *(tip_rows or [])],
+                text_column="cell_text" if cell_text else None,
             )
             declared[entry] = name
         return declared
@@ -333,10 +356,15 @@ class BehaviorAnalysis(Analysis):
         summary, order = C.heatmap_rows(ctx, summary, by)
         summary.insert(0, "row_kind", "group")
         baseline = []
+        # A per-game metric's baseline is the mean over the seed's distinct
+        # games, in every seat, as build_views matches it.
+        games = base.drop_duplicates("game_id")
         for values, grp in base.groupby(keys, sort=True):
             values = values if isinstance(values, tuple) else (values,)
+            seed_games = games[games["seed"] == values[0]]
             for metric in metrics:
-                col = grp[["game_id", metric]].dropna()
+                source = seed_games if metric in views.per_game else grp
+                col = source[["game_id", metric]].dropna()
                 if col.empty:
                     continue
                 baseline.append({"row_kind": "baseline", **dict(zip(keys, values)), by: pinned,
@@ -441,6 +469,19 @@ def _with_baseline_row(table: pd.DataFrame, views: C.BehaviorViews, metrics: lis
     rows = pd.DataFrame(records)
     rows["color_position"] = C.color_positions(rows, C.ABSOLUTE, views, fixed)
     return pd.concat([rows, table], ignore_index=True)
+
+
+def _cell_texts(table: pd.DataFrame, view: str, column_units: dict | None,
+                column_decimals: dict | None, decimals: int) -> list:
+    """Each cell's text with its view's unit; pinned baseline rows read as absolute."""
+    units = column_units or {}
+    texts = []
+    for kind, metric, value in zip(table["row_kind"], table["metric"], table["mean"]):
+        absolute = view == C.ABSOLUTE or kind == "baseline"
+        unit = (units.get(C.ABSOLUTE if absolute else view) or {}).get(metric, "")
+        places = int((column_decimals or {}).get(metric, decimals))
+        texts.append(C.format_cell(value, places, unit, signed=not absolute))
+    return texts
 
 
 def _attach_means(summary: pd.DataFrame, rows: pd.DataFrame, by: str, companions: dict) -> pd.DataFrame:
