@@ -557,6 +557,7 @@ def heatmap_spec(
     tip_rows: Optional[list] = None,
     baseline_units: Optional[dict] = None,
     text_column: Optional[str] = None,
+    game_columns=(),
 ) -> dict:
     """The ``metadata["heatmaps"]`` entry for one view's table (layout only).
 
@@ -564,7 +565,8 @@ def heatmap_spec(
     a tooltip unit per column (``baseline_units`` for the pinned baseline rows,
     which stay absolute); ``tip_rows`` lists extra tooltip lines
     (:mod:`bench.reports.heatmap`); ``text_column`` names the column holding
-    each cell's text.
+    each cell's text; ``game_columns`` lists the columns holding one value per
+    game, whose tooltips count games instead of players.
     """
     spec = {
         "view": view,
@@ -606,6 +608,9 @@ def heatmap_spec(
         spec["tip_rows"] = [dict(row) for row in tip_rows]
     if text_column:
         spec["text_column"] = text_column
+    game_columns = [m for m in column_order if m in set(game_columns)]
+    if game_columns:
+        spec["game_columns"] = game_columns
     return spec
 
 

@@ -447,7 +447,7 @@ WORLD_CONFLICT_METRICS = {
     "cities_razed": ("Cities razed", "Razed",
                      "Cities the civ razed.",
                      "Cities razed by any civ.", "diff", "diff"),
-    "nukes_detonated": ("Nukes", "Nukes",
+    "nukes_detonated": ("Nukes", "Nuked",
                         "Nuclear weapons the civ detonated.",
                         "Nuclear weapons detonated by any civ.", "diff", "diff"),
     "cities_nuked": ("Cities nuked", "Cities nuked",

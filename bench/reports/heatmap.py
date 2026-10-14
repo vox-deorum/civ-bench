@@ -337,7 +337,10 @@ def _cell_tooltip(rec: dict, spec: dict, row: str, column: str) -> str:
     n_players, n_games = rec.get("n_players"), rec.get("n_games")
     if n_players is not None and n_games is not None and np.isfinite(float(n_players)):
         players, games = int(n_players), int(float(n_games))
-        lines.append(tip_row("Players", str(players), f"in {plural(games, 'game')}"))
+        if column in set(spec.get("game_columns") or []):
+            lines.append(tip_row("Games", str(games)))
+        else:
+            lines.append(tip_row("Players", str(players), f"in {plural(games, 'game')}"))
     return "\n".join(lines)
 
 

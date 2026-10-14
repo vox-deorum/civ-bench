@@ -190,6 +190,7 @@ def test_conflict_heatmap_pairs_player_and_world_columns(world_env):
     assert spec["column_labels"]["w__wars_declared"] == "World"
     assert spec["text_column"] == "cell_text"
     assert spec["baseline_rows"] == ["AI-only world"]
+    assert spec["game_columns"] == ["w__wars_declared", "w__at_war_share"]
     assert list(result.metadata["views"]) == ["relative", "absolute"]
     assert result.metadata["matched_maps"]["label"] == "World: conflict"
     assert {"world_conflict_by_seed", "world_conflict_by_seat"} <= set(result.table_paths)
@@ -391,3 +392,14 @@ def test_world_cells_count_each_game_once_per_row():
     assert (player["n_players"], player["n_games"]) == (3, 2)
     assert (world["n_players"], world["n_games"]) == (2, 2)
     assert world["mean"] == pytest.approx(25.0)
+
+
+def test_world_cell_tooltips_count_games_not_players():
+    from bench.reports.heatmap import _cell_tooltip
+
+    spec = {"game_columns": ["w__wars"], "decimals": 1}
+    rec = {"mean": 1.0, "n_players": 24, "n_games": 24}
+    world = _cell_tooltip(rec, spec, LLM, "w__wars")
+    assert "Games	24" in world and "Players" not in world
+    player = _cell_tooltip({**rec, "n_players": 48}, spec, LLM, "p__wars")
+    assert "Players	48	in 24 games" in player

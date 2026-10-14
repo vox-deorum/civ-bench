@@ -234,6 +234,7 @@ class BehaviorAnalysis(Analysis):
                 tip_rows=(tip_rows or {}).get(view),
                 baseline_units=(column_units or {}).get(C.ABSOLUTE, {}) if column_units else None,
                 text_column="cell_text" if cell_text else None,
+                game_columns=views.per_game,
             )
 
     def add_matched_map_tables(
@@ -329,6 +330,7 @@ class BehaviorAnalysis(Analysis):
                            "units": difference_units},
                           *(tip_rows or [])],
                 text_column="cell_text" if cell_text else None,
+                game_columns=views.per_game,
             )
             declared[entry] = name
         return declared
