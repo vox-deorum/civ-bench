@@ -182,13 +182,32 @@ def _condition_label(spec: PairingSpec, condition: str) -> str:
     return spec.base_label if condition == "base" else condition.lstrip("-")
 
 
-def _condition_offset(spec: PairingSpec, condition: str) -> float:
-    if condition == "base":
-        return 0.16
-    if len(spec.suffixes) == 1:
-        return -0.16
-    idx = list(spec.suffixes).index(condition)
-    return -0.08 - idx * 0.14
+def _condition_slots(spec: PairingSpec, work: pd.DataFrame) -> list[str]:
+    """The conditions that get a sub-row: ``base`` then suffixes, as observed.
+
+    Only non-baseline rows count, so a configured suffix with no data takes no
+    space and is not reported missing.
+    """
+    observed = set(work.loc[~work["is_baseline"], "condition"].astype(str))
+    return [condition for condition in ("base", *spec.suffixes) if condition in observed]
+
+
+def _condition_offset(slots: list[str], condition: str) -> float:
+    """Spread the slots evenly around the row center, the first slot on top."""
+    if len(slots) < 2 or condition not in slots:
+        return 0.0
+    step = min(0.32, 0.6 / (len(slots) - 1))
+    return (slots.index(condition) - (len(slots) - 1) / 2) * step
+
+
+def _missing_note(spec: PairingSpec, present: set[str], slots: list[str]) -> str:
+    """``(Every-turn only)`` / ``(missing Per-5)`` for an identity lacking some slots."""
+    if len(present) == 1:
+        return f"({_condition_label(spec, next(iter(present)))} only)"
+    missing = ", ".join(
+        _condition_label(spec, condition) for condition in slots if condition not in present
+    )
+    return f"(missing {missing})"
 
 
 def plot_paired_rows(
@@ -228,6 +247,7 @@ def plot_paired_rows(
     if not row_order:
         return None
 
+    slots = _condition_slots(spec, work)
     fig, ax = plt.subplots(figsize=(10, max(3.5, 0.46 * len(row_order) + 1.8)))
     y_by_identity = {identity: idx for idx, identity in enumerate(row_order)}
     plotted_conditions: set[str] = set()
@@ -240,7 +260,7 @@ def plot_paired_rows(
             continue
         condition = str(row["condition"])
         is_baseline = bool(row["is_baseline"])
-        y = y_by_identity[identity] + (0.0 if is_baseline else _condition_offset(spec, condition))
+        y = y_by_identity[identity] + (0.0 if is_baseline else _condition_offset(slots, condition))
         color = get_player_color(catalog, identity)
         marker = condition_marker(spec, condition)
         marker_face = color if condition == "base" or is_baseline else "none"
@@ -278,27 +298,16 @@ def plot_paired_rows(
     ax.set_yticklabels(row_order)
     ax.invert_yaxis()
 
-    expected = {"base", *spec.suffixes}
     for idx, identity in enumerate(row_order):
         rows = work[work["base_identity"].astype(str) == identity]
         if rows.empty or bool(rows["is_baseline"].any()):
             continue
         present = set(rows["condition"].astype(str))
-        if present != expected:
+        if present != set(slots):
             ax.get_yticklabels()[idx].set_color("#888888")
-            if len(present) == 1:
-                only_condition = next(iter(present))
-                only = "base" if only_condition == "base" else only_condition.lstrip("-")
-                note = f"({only} only)"
-            else:
-                missing = ", ".join(
-                    _condition_label(spec, condition)
-                    for condition in ("base", *spec.suffixes)
-                    if condition not in present
-                )
-                note = f"(missing {missing})"
             ax.annotate(
-                note, xy=(1.01, idx), xycoords=("axes fraction", "data"),
+                _missing_note(spec, present, slots), xy=(1.01, idx),
+                xycoords=("axes fraction", "data"),
                 va="center", fontsize=8, color="#888888",
             )
 
@@ -334,19 +343,6 @@ def plot_paired_rows(
 _PLOTLY_SYMBOLS = {"o": "circle", "D": "diamond", "s": "square", "^": "triangle-up"}
 
 
-def _missing_note(spec: PairingSpec, present: set[str]) -> str:
-    """``(Base only)`` / ``(missing Brief)`` for an identity lacking some conditions."""
-    if len(present) == 1:
-        only = next(iter(present))
-        return f"({'base' if only == 'base' else only.lstrip('-')} only)"
-    missing = ", ".join(
-        _condition_label(spec, condition)
-        for condition in ("base", *spec.suffixes)
-        if condition not in present
-    )
-    return f"(missing {missing})"
-
-
 def plot_paired_rows_interactive(
     df: pd.DataFrame,
     *,
@@ -375,7 +371,9 @@ def plot_paired_rows_interactive(
     is its own trace so it carries its own color and error bar; hidden
     legend-only traces, one per condition, toggle that condition's points (a
     spec without suffixes, pairing off, has no condition legend or subtitle).
-    ``tooltip`` lists ``(label, column)`` pairs of pre-formatted strings shown
+    With two or more observed conditions, a faint line links each identity's
+    points (toggled by one "Condition links" legend entry) and alternate rows
+    are shaded. ``tooltip`` lists ``(label, column)`` pairs of pre-formatted strings shown
     under the identity and condition on hover (the first row in bold); without
     it the tooltip shows the value. ``percent_x`` formats the axis as percents
     of 1. Returns ``None`` when nothing can be plotted.
@@ -397,8 +395,12 @@ def plot_paired_rows_interactive(
         return None
 
     rows = list(tooltip or [(xlabel or value_col, "")])
+    slots = _condition_slots(spec, work)
+    paired = len(slots) > 1
     y_by_identity = {identity: idx for idx, identity in enumerate(row_order)}
     fig = go.Figure()
+    points = []
+    links: dict[str, list[tuple[int, float, float]]] = {}
     plotted_conditions: set[str] = set()
     for _, row in work.iterrows():
         identity = str(row["base_identity"])
@@ -411,9 +413,11 @@ def plot_paired_rows_interactive(
         condition = str(row["condition"])
         is_baseline = bool(row["is_baseline"])
         group = "base" if is_baseline else condition
-        offset = 0.0 if is_baseline or not spec.suffixes else _condition_offset(spec, condition)
+        offset = 0.0 if is_baseline else _condition_offset(slots, condition)
         y = y_by_identity[identity] + offset
         color = get_player_color(catalog, identity)
+        if paired and not is_baseline and condition in slots:
+            links.setdefault(identity, []).append((slots.index(condition), value, y))
         symbol = _PLOTLY_SYMBOLS.get(condition_marker(spec, condition), "circle")
         if not (condition == "base" or is_baseline):
             symbol += "-open"
@@ -437,13 +441,27 @@ def plot_paired_rows_interactive(
                 for _label, column in rows
             ),
         ]
-        fig.add_trace(go.Scatter(
+        points.append(go.Scatter(
             x=[value], y=[y], mode="markers", error_x=error_x,
             name=escape(str(row[identity_col])), legendgroup=group, showlegend=False,
             marker={"color": color, "symbol": symbol, "size": 10, "line": {"width": 1.5, "color": color}},
             customdata=[details], meta={"table_tooltip": True}, hoverinfo="none",
         ))
         plotted_conditions.add(group)
+
+    # A faint line through each identity's conditions shows the condition effect.
+    # Links go first so the markers draw over them.
+    linked = {identity: sorted(found) for identity, found in links.items() if len(found) > 1}
+    for identity in row_order:
+        if identity not in linked:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[x for _slot, x, _y in linked[identity]], y=[y for _slot, _x, y in linked[identity]],
+            mode="lines", name=escape(identity), legendgroup="links", showlegend=False,
+            hoverinfo="skip", opacity=0.45,
+            line={"color": get_player_color(catalog, identity), "width": 1.5},
+        ))
+    fig.add_traces(points)
 
     # Without pairing there is one condition, so no condition legend to filter by.
     for condition in ("base", *spec.suffixes) if spec.suffixes else ():
@@ -456,6 +474,11 @@ def plot_paired_rows_interactive(
             marker={"color": "#555555", "size": 10,
                     "symbol": symbol if condition == "base" else symbol + "-open"},
         ))
+    if linked:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", name="Condition links", legendgroup="links",
+            showlegend=True, hoverinfo="skip", line={"color": "#888888", "width": 1.5},
+        ))
     if ref_line is not None:
         fig.add_trace(go.Scatter(
             x=[ref_line, ref_line], y=[-0.5, len(row_order) - 0.5], mode="lines",
@@ -463,17 +486,25 @@ def plot_paired_rows_interactive(
             line={"color": "gray", "dash": "dash", "width": 1},
         ))
 
-    expected = {"base", *spec.suffixes}
     ticktext = []
     for identity in row_order:
         label = escape(identity)
         members = work[work["base_identity"].astype(str) == identity]
         if not members.empty and not bool(members["is_baseline"].any()):
             present = set(members["condition"].astype(str))
-            if present != expected:
+            if present != set(slots):
                 label = (f'<span style="color:#888888">{label} '
-                         f"{escape(_missing_note(spec, present))}</span>")
+                         f"{escape(_missing_note(spec, present, slots))}</span>")
         ticktext.append(label)
+
+    # Shading alternate rows ties each row's condition sub-rows to its label.
+    bands = [
+        {"type": "rect", "xref": "paper", "yref": "y", "x0": 0, "x1": 1,
+         "y0": idx - 0.5, "y1": idx + 0.5, "layer": "below", "line": {"width": 0},
+         "fillcolor": "rgba(128, 128, 128, 0.08)"}
+        for idx in range(1, len(row_order), 2)
+    ] if paired else []
+    row_height = max(34, 22 * len(slots))
 
     annotations = []
     if provenance_note:
@@ -493,9 +524,9 @@ def plot_paired_rows_interactive(
         yaxis={"tickmode": "array", "tickvals": list(range(len(row_order))), "ticktext": ticktext,
                "range": [len(row_order) - 0.5, -0.5], "showgrid": False, "zeroline": False,
                "automargin": True},
-        height=max(360, 34 * len(row_order) + 190),
+        height=max(360, row_height * len(row_order) + 190),
         margin={"t": 60, "b": 90 if provenance_note else 60},
-        hovermode="closest", annotations=annotations,
+        hovermode="closest", annotations=annotations, shapes=bands,
         legend={"title": {"text": "Click to filter"}},
         meta={"table_tooltip": {
             "title_index": 0, "subtitle_index": 1, "note": tooltip_note,

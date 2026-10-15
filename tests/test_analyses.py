@@ -1408,7 +1408,13 @@ def test_paired_bt_forest_adds_condition_tabs(env, monkeypatch):
         )
         return pd.concat([out, per5], ignore_index=True)
 
+    from bench.plotting import pairing
+
     monkeypatch.setattr("bench.analyses.ratings.bradley_terry.calculate_ratings_bt", fake_bt)
+    drawn = []
+    plot = pairing.plot_paired_rows_interactive
+    monkeypatch.setattr(pairing, "plot_paired_rows_interactive",
+                        lambda *args, **kwargs: drawn.append(plot(*args, **kwargs)) or drawn[-1])
     env.cfg.presentation = {"condition_pairing": {"enabled": True, "suffixes": ["-Per-5"]}}
     r = env(
         "ratings.bradley_terry",
@@ -1416,11 +1422,13 @@ def test_paired_bt_forest_adds_condition_tabs(env, monkeypatch):
         {"tables": ["strength"]},
     )
     views = r.metadata["views"]
-    assert list(views) == ["general", "base", "per_5"]
+    assert list(views) == ["overview", "base", "per_5"]
     assert views["per_5"] == {"label": "Per-5", "figures": ["ratings_per_5"]}
     assert {"ratings", "ratings_base", "ratings_per_5"} <= set(r.figure_paths)
-    general = Path(r.figure_paths["ratings"]).read_text(encoding="utf-8")
-    assert "GPT-OSS-120B-Per-5" in general and "(missing" not in general
+    # The overview puts both GPT-OSS-120B conditions on one row.
+    overview = next(fig for fig in drawn if fig.layout.title.text == "<b>ratings.bradley_terry ratings</b>")
+    rows = [label for label in overview.layout.yaxis.ticktext if "GPT-OSS-120B" in label]
+    assert rows == ["GPT-OSS-120B"]
     per5 = Path(r.figure_paths["ratings_per_5"]).read_text(encoding="utf-8")
     # One condition per tab, under base names, with the baselines kept.
     assert "GPT-OSS-120B" in per5 and "Vanilla" in per5

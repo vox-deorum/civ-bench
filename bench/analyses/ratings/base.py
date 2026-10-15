@@ -339,27 +339,28 @@ class RatingsAnalysis(Analysis):
 
     def _forests(self, ratings: pd.DataFrame, ctx: AnalysisContext, panel: pd.DataFrame,
                  reference: str, metadata: dict, ci_level: float) -> tuple[dict, dict]:
-        """The General leaderboard plus, under condition pairing, one per condition.
+        """The overview leaderboard plus, under condition pairing, one per condition.
 
-        ``ratings`` ranks every player type together. With pairing enabled and at
-        least two conditions present, each condition adds a ``ratings_<slug>``
-        figure that ranks that condition's identities under their base names,
-        with the Vanilla and Null baselines kept for reference. The returned
-        views put each figure behind its own tab, General first.
+        Without pairing, ``ratings`` ranks every player type together. With
+        pairing enabled and at least two conditions present, ``ratings`` shows
+        one row per model with its conditions side by side, and each condition
+        adds a ``ratings_<slug>`` figure that ranks that condition's identities
+        under their base names, with the Vanilla and Null baselines kept for
+        reference. The returned views put each figure behind its own tab,
+        Overview first.
         """
         from ...plotting.pairing import attach_pair_columns, condition_display
 
         df = self._attach_appearances(ratings, panel, "player_type")
-        general = self._forest(df, ctx, reference, metadata, ci_level)
-        if general is None:
-            return {}, {}
-        figures = {"ratings": general}
         spec = ctx.condition_pairing()
         if spec is None:
-            return figures, {}
+            general = self._forest(df, ctx, reference, metadata, ci_level)
+            return ({"ratings": general} if general is not None else {}), {}
         paired = attach_pair_columns(df, ctx.catalog, spec, "player_type")
-        views = {"general": {"label": "General", "tip": "All player types ranked together.",
-                             "figures": ["ratings"]}}
+        figures = {}
+        views = {"overview": {"label": "Overview",
+                              "tip": "Each model on one row, with its conditions side by side.",
+                              "figures": ["ratings"]}}
         for condition in ("base", *spec.suffixes):
             members = paired["condition"].eq(condition) & ~paired["is_baseline"]
             if not members.any():
@@ -374,12 +375,21 @@ class RatingsAnalysis(Analysis):
             figures[f"ratings_{slug}"] = fig
             views[slug] = {"label": label, "figures": [f"ratings_{slug}"]}
         if len(views) < 3:
-            return {"ratings": general}, {}
-        return figures, views
+            general = self._forest(df, ctx, reference, metadata, ci_level)
+            return ({"ratings": general} if general is not None else {}), {}
+        overview = self._forest(df, ctx, reference, metadata, ci_level, spec=spec)
+        if overview is None:
+            return {}, {}
+        return {"ratings": overview, **figures}, views
 
     def _forest(self, df: pd.DataFrame, ctx: AnalysisContext, reference: str,
-                metadata: dict, ci_level: float, condition_label: str = ""):
-        """One interactive Elo forest plot, with a table tooltip per point."""
+                metadata: dict, ci_level: float, condition_label: str = "",
+                spec=None):
+        """One interactive Elo forest plot, with a table tooltip per point.
+
+        ``spec`` pairs each model's conditions on one row; by default every
+        player type gets its own row.
+        """
         from ...plotting.pairing import PairingSpec, plot_paired_rows_interactive
         from .heatmaps import count_text, p_text
 
@@ -404,7 +414,7 @@ class RatingsAnalysis(Analysis):
         return plot_paired_rows_interactive(
             df,
             catalog=ctx.catalog,
-            spec=PairingSpec((), "base", "Identity"),
+            spec=spec or PairingSpec((), "base", "Identity"),
             value_col="elo",
             lo_col="ci_lower" if has_ci else None,
             hi_col="ci_upper" if has_ci else None,

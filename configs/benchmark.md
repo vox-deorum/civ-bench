@@ -113,7 +113,14 @@ top-first direction), or a specific suffix. A concrete condition falls back to
 whichever condition has a value for incomplete pairs; all-NaN identities sort
 last.
 
-The fitted-rating forests (as condition tabs, §6.2), player-type strength panels, score-ratio effects, and
+Within a row, each condition has a fixed sub-row, top to bottom in legend order
+(base first). Only conditions present in the chart get a sub-row, so a
+configured suffix without data takes no space. A row that lacks some of those
+conditions is grayed and noted, for example `(Every-turn only)`. Interactive
+paired forests also draw a faint line linking each identity's conditions, which
+one `Condition links` legend entry toggles, and shade alternate rows.
+
+The fitted-rating forests (as an overview plus condition tabs, §6.2), player-type strength panels, score-ratio effects, and
 token-cost view accept `params.condition_pairing` as either a boolean or an
 object containing `enabled`, `suffixes`, and `sort_condition`. The stage value
 overrides the global block. Matchup modules accept `params.display`. In
@@ -572,8 +579,9 @@ With `group_by: ["player_type"]`, fitted ratings render the `ratings` figure, an
 interactive Elo forest plot with error bars (the bootstrap CI when one exists,
 else +/-1 SE) and a hover table of Elo, the CI or SE, the p-value against the
 reference, and appearances. With condition pairing enabled (§2.2) and at least
-two conditions present, the section shows tabs: `General` ranks every player
-type together in the `ratings` figure, and each condition adds a
+two conditions present, the section shows tabs: `Overview` shows the `ratings`
+figure as paired rows (§2.2), one row per model with its conditions side by
+side, ranked by `sort_condition`, and each condition adds a
 `ratings_<condition>` figure (for example `ratings_base` and `ratings_per_5`)
 that ranks that condition's identities under their base names, with Vanilla and
 Null kept for reference. When `group_by` includes the `strategy` grouping,
