@@ -89,15 +89,19 @@ class WorldConflict(WorldAnalysis):
                     C.ABSOLUTE: "Wars and conquest, actual values per game"},
             help_texts={
                 C.RELATIVE: "\n".join([
-                    f"Each cell: the strategist's average - {versus}'s.",
+                    f"Each cell: the strategist's average minus {versus}'s.",
                     f"Player: its own civ, vs. {player_base}.",
                     f"World: the whole game, vs. {world_base}. It includes the strategist's "
                     "civ (both civs when two strategists play).",
                     f"Top row: the {pinned}'s actual values, for scale.",
+                    "Blue is higher, red is lower; full color at 2 baseline SDs.",
+                    "Counts are per game; shares are in percentage points.",
                 ]),
                 C.ABSOLUTE: "\n".join([
-                    "Each cell: the average per game.",
+                    "Each cell: the average per game, with nothing subtracted.",
                     "Player: the strategist's own civ. World: the whole game.",
+                    "Color: distance from the average row; full color at 2 SDs.",
+                    "Counts are per game; shares are in %.",
                 ]),
             },
         )

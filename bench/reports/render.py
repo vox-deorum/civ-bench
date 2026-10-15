@@ -114,11 +114,13 @@ def _section_summary(section: Section) -> str:
 
 
 def _section_details(section: Section) -> str:
-    return "\n\n".join(filter(None, (
-        section.description,
-        f"Module: {section.module}",
-        _metadata_line(section.metadata),
-    )))
+    """The ? tooltip by a section heading: only what the section measures."""
+    return section.description
+
+
+def _provenance_line(section: Section) -> str:
+    """Module and run details, shown with the section's downloads."""
+    return "; ".join(filter(None, (f"Module: {section.module}", _metadata_line(section.metadata))))
 
 
 def _announcement_date(value: str) -> str:
@@ -1050,18 +1052,22 @@ def _render_section_html(
     if section.views:
         _render_views_html(section, parts, anchor, model_tips)
     _render_artifacts_html(section.figures, section.tables, parts, anchor, model_tips)
+    parts.append('<details class="downloads">')
     if section.downloads:
-        parts.append('<details class="downloads">')
         parts.append(
             f"<summary>Downloads and supporting files ({len(section.downloads)})</summary>"
         )
+    else:
+        parts.append("<summary>Downloads and supporting files</summary>")
+    parts.append(f'<p class="provenance"><strong>Provenance:</strong> {_html.escape(_provenance_line(section))}</p>')
+    if section.downloads:
         parts.append("<ul>")
         for dl in section.downloads:
             parts.append(
                 f'<li><a href="{_html.escape(dl.rel_path)}">{_html.escape(dl.label)}</a></li>'
             )
         parts.append("</ul>")
-        parts.append("</details>")
+    parts.append("</details>")
     parts.append("</section>")
 
 
