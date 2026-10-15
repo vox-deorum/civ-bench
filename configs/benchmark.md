@@ -114,14 +114,14 @@ whichever condition has a value for incomplete pairs; all-NaN identities sort
 last.
 
 Within a row, each condition has a fixed sub-row, top to bottom in legend order
-(base first). Only conditions present in the chart get a sub-row, so a
+(base first). Only conditions with a plotted value get a sub-row, so a
 configured suffix without data takes no space. A row that lacks some of those
 conditions is grayed and noted, for example `(Every-turn only)`. Interactive
 paired forests also draw a faint line linking each identity's conditions, which
 one `Condition links` legend entry toggles, and shade alternate rows.
 
-The fitted-rating forests (as an overview plus condition tabs, §6.2), player-type strength panels, score-ratio effects, and
-token-cost view accept `params.condition_pairing` as either a boolean or an
+The fitted-rating forests (as an overview plus condition tabs, §6.2),
+player-type strength panels, score-ratio effects, and token-cost view accept `params.condition_pairing` as either a boolean or an
 object containing `enabled`, `suffixes`, and `sort_condition`. The stage value
 overrides the global block. Matchup modules accept `params.display`. In
 `matrix` mode they render each matrix as an HTML heatmap; in `vs_reference`
@@ -171,7 +171,7 @@ existed.
         "AirCarrier": {"era": "Modern"}, "Airlift": {"era": "Modern"}
       },
       "persona": ["Boldness", "WarBias", "HostileBias", "WarmongerHate", "Meanness", "DeceptiveBias", "Forgiveness", "DenounceWillingness", "MinorCivWarBias", "VictoryCompetitiveness", "DiplomaticBalance", "Friendliness", "WorkWithWillingness", "WorkAgainstWillingness", "Loyalty", "Neediness", "Chattiness"],
-      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed", "wars_on_city_states", "peace_deals", "units_lost", "cities_captured", "capitals_captured", "city_state_cities_captured", "nukes_detonated"],
+      "events":  ["wars_declared", "wars_received", "cities_nuked", "cities_razed", "wars_on_city_states", "units_lost", "units_killed", "cities_captured", "capitals_captured", "city_state_cities_captured", "nukes_built", "nukes_detonated"],
       "policies": ["policy_changes", "tradition", "authority", "progress", "fealty", "statecraft", "artistry", "industry", "imperialism", "rationalism", "freedom", "autocracy", "order"],
       "relationships": ["relationship_changes", "relationship_targets", "stance_public_avg", "stance_private_avg", "stance_net_avg", "stance_masked_hostility_share", "stance_masked_goodwill_share"]
     }
@@ -207,7 +207,7 @@ The `behavior` table has one row per major player per game. Its key columns are 
 | `flavor` | any `FlavorChanges` column (for example `Offense`, `UseNuke`) | `flavor_<snake_name>_<stat>`, for example `flavor_use_nuke_max` |
 | `flavor_gates` | per-flavor access gate: exactly one of `{"techs": [names]}` or `{"era": name}` | none directly; decides which turns a gated `flavor` column summarizes |
 | `persona` | any `PersonaChanges` personality column (for example `Boldness`, `WarBias`) | `persona_<snake_name>_<stat>`, for example `persona_war_bias_avg` |
-| `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed`, `wars_on_city_states`, `peace_deals`, `units_lost`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `nukes_detonated` | one count column per name |
+| `events` | `wars_declared`, `wars_received`, `cities_nuked`, `cities_razed`, `wars_on_city_states`, `units_lost`, `units_killed`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `nukes_built`, `nukes_detonated` | one count column per name |
 | `policies` | `policy_changes`, `tradition`, `authority`, `progress`, `fealty`, `statecraft`, `artistry`, `industry`, `imperialism`, `rationalism`, `freedom`, `autocracy`, `order` | real policy-change count plus first-adoption turn for each selected branch |
 | `relationships` | `relationship_changes`, `relationship_targets`, `stance_public_avg`, `stance_private_avg`, `stance_net_avg`, `stance_masked_hostility_share`, `stance_masked_goodwill_share` | one column per name |
 
@@ -223,11 +223,12 @@ The `behavior` table has one row per major player per game. Its key columns are 
   - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
   - `cities_razed`: `CityRazed` events by the player.
   - `wars_on_city_states`: `DeclareWar` events the player originated as aggressor on a city-state team. They are also included in `wars_declared`.
-  - `peace_deals`: `MakePeace` events between the player's team and another civ's team, from either side, counted once per team pair per turn (both sides may log the same deal).
   - `units_lost`: `UnitKilledInCombat` events where the player's unit was killed.
+  - `units_killed`: `UnitKilledInCombat` events where the player's unit made the kill, whatever the victim (civ, city-state, or barbarian).
   - `cities_captured`: `CityCaptureComplete` events with `IsConquest` where the player is the new owner and the old owner is a civ (major).
   - `capitals_captured`: as `cities_captured`, and the city was the old owner's capital at the time (`IsCapital`, so possibly a relocated capital).
   - `city_state_cities_captured`: as `cities_captured`, but the old owner is a city-state.
+  - `nukes_built`: `CityTrained` events by the player whose trained unit's `Unit.AIType` is `Icbm` (Atomic Bomb, Nuclear Missile), whether trained or bought with gold or faith. The free Atomic Bomb from the Manhattan Project is not built, so it does not count.
   - `nukes_detonated`: every `NuclearDetonation` by the player (`cities_nuked` counts the subset whose plot held a city).
   - Each selected event gets its own count column, so a selection that includes events the existing table lacks changes the behavior CSV header, and the next extract rebuilds that table once.
 - `policy_changes` counts `PolicyChanges` rows containing a real field mutation, excluding rationale-only and empty rows. Each branch column records its first adoption turn from `PlayerAdoptPolicyBranch` or `IdeologyAdopted`; branches the player never adopted contain `N/A`.
@@ -239,7 +240,7 @@ The `behavior` table has one row per major player per game. Its key columns are 
 - Every behavior column has a kind the analyses use: `count` (events, `policy_changes`, `relationship_changes`; scaled by turns alive), `level` (flavor and persona stats, `relationship_targets`, stance averages), `share` (stance shares), and `turn` (policy branch first-adoption turns).
 - Changing the selection changes the CSV header, so the next extract rebuilds the whole table. `flavor_gates` is the exception: the columns stay the same, so a changed gate map does not trigger a rebuild by itself. After editing it, refresh the table with `civ-bench extract --force-rebuild`.
 
-**The `world` table.** The canonical `world` table (`data.tables.world`, default `runs/world_data.csv`) has one row per game: `experiment`, `game_id`, `final_turn` (the game's last `PlayerSummaries` turn), `n_civs` (the major players), and the whole-game totals `wars_declared`, `wars_on_city_states`, `peace_deals`, `peak_wars`, `units_lost`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `civs_eliminated`, `cities_razed`, `nukes_detonated`, and `cities_nuked`. The counts follow the event rules above, with each event counted once for the game (a war or a peace deal between two civs counts once, not once per side). Three counters differ from their behavior namesakes: `wars_declared` here counts only aggressor declarations between civs (the target team is a major civ), `wars_on_city_states` counts aggressor declarations on city-states, and `peace_deals` counts peace between two civ teams, once per team pair per turn. `peak_wars` is the most wars between civ teams open at once: it replays the game's declarations and peace deals between civ teams in turn order, and a war ends at a peace deal or once every civ on one side is gone (past its last turn with a positive score). `civs_eliminated` counts the majors without a positive score on the final turn. Both read only the latest `PlayerSummaries` row (the highest `ID`) of each player and turn, as the turns table does, so a replayed turn's score of 0 overrides an earlier positive one. A run spec whose `data.extract.outputs` omits a key extracts every table, `world` included; the first extract after adding `world` reads every DB once for this table.
+**The `world` table.** The canonical `world` table (`data.tables.world`, default `runs/world_data.csv`) has one row per game: `experiment`, `game_id`, `final_turn` (the game's last `PlayerSummaries` turn), `n_civs` (the major players), and the whole-game totals `wars_declared`, `wars_on_city_states`, `peak_wars`, `units_lost`, `units_killed`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `civs_eliminated`, `cities_razed`, `nukes_built`, and `nukes_detonated`. The counts follow the event rules above, with each event counted once for the game (a war between two civs counts once, not once per side). Two counters differ from their behavior namesakes: `wars_declared` here counts only aggressor declarations between civs (the target team is a major civ), and `wars_on_city_states` counts aggressor declarations on city-states. `peak_wars` is the most wars between civ teams open at once: it replays the game's declarations and peace deals between civ teams in turn order, and a war ends at a peace deal or once every civ on one side is gone (past its last turn with a positive score). `civs_eliminated` counts the majors without a positive score on the final turn. Both read only the latest `PlayerSummaries` row (the highest `ID`) of each player and turn, as the turns table does, so a replayed turn's score of 0 overrides an earlier positive one. A run spec whose `data.extract.outputs` omits a key extracts every table, `world` included; the first extract after adding `world` reads every DB once for this table.
 
 ### 3.1 `filters`: named, reusable filter presets
 
@@ -1083,7 +1084,7 @@ Per-module params:
 
 #### `world.*`: game outcomes for the civ and the world
 
-The `world.*` family reports what happened in each game: `world.conflict` counts wars, peace, combat losses, conquest, and destruction, and `world.progress` follows growth at fixed turns and how games ended. Every metric has two sub-columns: **Player** (the strategist's own civ, compared with the baseline in the same seat on the same map) and **World** (the whole game, compared with the average over the baseline's games on the same map, each game counted once whichever seats the baseline's players held; for the in-game AI baseline, the AI-only games). Each metric is one column group with a Player and a World sub-column. All params are optional and unknown keys are config errors.
+The `world.*` family reports what happened in each game: `world.conflict` counts wars, combat kills and losses, conquest, and destruction, and `world.progress` follows growth at fixed turns and how games ended. Every metric has two sub-columns: **Player** (the strategist's own civ, compared with the baseline in the same seat on the same map) and **World** (the whole game, compared with the average over the baseline's games on the same map, each game counted once whichever seats the baseline's players held; for the in-game AI baseline, the AI-only games). Each metric is one column group with a Player and a World sub-column. All params are optional and unknown keys are config errors.
 
 ```jsonc
 { "id": "wld_conflict", "module": "world.conflict", "enabled": true, "params": {} }
@@ -1110,17 +1111,17 @@ There is no `rate`: world counts are per game.
 | --- | --- | --- | --- |
 | `wars_declared` | Wars the civ declared on other civs | Wars declared between civs | difference |
 | `wars_on_city_states` | Wars the civ declared on city-states | Wars declared on city-states by any civ | difference |
-| `peace_deals` | Peace deals the civ signed with other civs | Peace deals between civs | difference |
 | `peak_wars` | The most wars the civ was in at once, city-states included (from `turns.active_wars`) | The most wars between civs open at once (the `world` table's `peak_wars`) | difference |
 | `at_war_share` | Share of the civ's turns alive spent at war with anyone | Share of all civ-turns alive spent at war with anyone | points |
 | `units_lost` | The civ's units killed in combat | Civ units killed in combat, on every side | difference |
+| `units_killed` | Units the civ killed in combat, city-state and barbarian units included | Units killed in combat by any civ | difference |
 | `cities_captured` | Civ cities the civ conquered | Civ cities conquered by any civ | difference |
 | `capitals_captured` | Capitals the civ conquered (the capital at the time of capture) | Capitals conquered by any civ | difference |
 | `city_state_cities_captured` | City-state cities the civ conquered | City-state cities conquered by any civ | difference |
 | `eliminated` | Share of the civ's games in which it was eliminated | Civs eliminated per game | points (Player), difference (World) |
 | `cities_razed` | Cities the civ razed | Cities razed by any civ | difference |
+| `nukes_built` | Nuclear weapons the civ built | Nuclear weapons built by any civ | difference |
 | `nukes_detonated` | Nuclear weapons the civ detonated | Nuclear weapons detonated by any civ | difference |
-| `cities_nuked` | The civ's detonations that hit a city | Detonations that hit a city | difference |
 | `turns` | Turns the civ survived (its last turn with a positive score) | Game length in turns | difference |
 
 **`world.progress` ("World growth").** Extra params: **`checkpoints`**, a non-empty increasing list of turn numbers (default `[100, 200, 300]`), and **`overview_metrics`**, a subset of the selected `metrics` shown on the Overview tab (default `population`, `technologies`, and `science_per_turn`; an empty list drops the tab). The section has two switch rows. The first picks **Relative** or **Absolute** (views `relative` and `absolute`, so the choice also switches Wars and conquest and the behavior sections). The second picks **Overview** (the overview metrics at every checkpoint), one **Turn N** tab per checkpoint, or **Endings**, and keeps its choice when the first row changes. Without a controlled baseline only absolute values exist, so only the second row shows. The tables are `world_progress_overview_relative` and `world_progress_overview_absolute`, `world_progress_t<N>_relative` and `world_progress_t<N>_absolute`, and `world_endings_relative` and `world_endings_absolute`; in controlled runs the module also writes `world_progress_by_seed` and `world_progress_by_seat` for the Matched Maps World: progress tab (the overview metrics at the last checkpoint).
@@ -1161,7 +1162,7 @@ per stage via the optional `name`/`description` envelope keys (§6.1).
 | `behavior.diplomacy` | Diplomatic behavior | Describes diplomatic persona traits and the public and private stances strategists set toward rivals, including how often the two conflict. |
 | `behavior.commitment` | Strategic commitment | Shows how often strategists act and revise their settings, how large and how lasting their changes are, and which grand strategy they hold. |
 | `behavior.policies` | Policy paths | Shows which policy branches and ideologies each player type adopts, which it picks first in each tier, and how early, against the in-game AI on the same map and seat. |
-| `world.conflict` | Wars and conquest | Counts wars, peace deals, combat losses, conquests, razed and nuked cities, and eliminations per game, for the strategist's own civ and for the whole world. |
+| `world.conflict` | Wars and conquest | Counts wars, combat kills and losses, conquests, razed cities, nukes built and used, and eliminations per game, for the strategist's own civ and for the whole world. |
 | `world.progress` | World growth | Reads population, cities, land, techs, yields, and armies at fixed turns, and how games ended, for the strategist's own civ and for the whole world. |
 
 Registry-reserved modules (`enabled:false` placeholders, §6.2) have no coded

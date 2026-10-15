@@ -1,10 +1,10 @@
 """Per-game ``world`` extraction (benchmark.md §3.0).
 
-One row per game with whole-world totals: how many wars, peace deals, combat
+One row per game with whole-world totals: how many wars, combat kills and
 losses, conquests, razes, nukes, and eliminations the game saw among its civs
 (major players). The counters reuse the behavior events family's rules, so a
 world total matches the sum of its civs' own counts, except where one event
-involves two civs (a war or a peace deal counts once).
+involves two civs (a war counts once).
 """
 
 from __future__ import annotations
@@ -31,18 +31,19 @@ WORLD_COUNTERS = {
                                   target="TargetTeamID", target_is_team=True,
                                   target_kind="major"),
     **{name: EVENT_COUNTERS[name] for name in (
-        "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
+        "wars_on_city_states", "units_lost", "units_killed", "cities_captured",
         "capitals_captured", "city_state_cities_captured", "cities_razed",
-        "nukes_detonated", "cities_nuked",
+        "nukes_built", "nukes_detonated",
     )},
 }
 _WAR_STATE_TYPES = ("DeclareWar", "MakePeace")
 
 WORLD_FIELDNAMES = [
     "experiment", "game_id", "final_turn", "n_civs",
-    "wars_declared", "wars_on_city_states", "peace_deals", "peak_wars",
-    "units_lost", "cities_captured", "capitals_captured", "city_state_cities_captured",
-    "civs_eliminated", "cities_razed", "nukes_detonated", "cities_nuked",
+    "wars_declared", "wars_on_city_states", "peak_wars",
+    "units_lost", "units_killed", "cities_captured", "capitals_captured",
+    "city_state_cities_captured", "civs_eliminated", "cities_razed",
+    "nukes_built", "nukes_detonated",
 ]
 
 

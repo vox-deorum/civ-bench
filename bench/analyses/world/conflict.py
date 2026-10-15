@@ -48,8 +48,8 @@ class WorldConflict(WorldAnalysis):
     module = "world.conflict"
     friendly_name = "Wars and conquest"
     description = (
-        "Counts wars, peace deals, combat losses, conquests, razed and nuked cities, and "
-        "eliminations per game, for the strategist's own civ and for the whole world."
+        "Counts wars, combat kills and losses, conquests, razed cities, nukes built and "
+        "used, and eliminations per game, for the strategist's own civ and for the whole world."
     )
     report_defaults = {
         "tables": ["world_conflict_relative", "world_conflict_absolute"],

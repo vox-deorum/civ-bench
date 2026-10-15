@@ -90,6 +90,9 @@ EVENTS = [
     _event("CityRazed", 9, {"PlayerID": 0}),
     _event("NuclearDetonation", 9, {"PlayerID": 0, "Plot": {"City": "Athens"}}),
     _event("NuclearDetonation", 9, {"PlayerID": 0, "Plot": {"PlotType": "Land"}}),
+    _event("CityTrained", 8, {"PlayerID": 0, "UnitID": 1, "Unit": {"AIType": "Icbm"}}),
+    _event("CityTrained", 8, {"PlayerID": 0, "UnitID": 2, "Unit": {"AIType": "Attack"}}),
+    _event("CityTrained", 8, {"PlayerID": 22, "UnitID": 3, "Unit": {"AIType": "Icbm"}}),
 ]
 
 
@@ -101,12 +104,13 @@ def test_world_row_counts_every_event_once(tmp_path):
     assert list(row) == WORLD_FIELDNAMES
     assert row == {
         "experiment": "exp", "game_id": "g", "final_turn": 30, "n_civs": 3,
-        "wars_declared": 3, "wars_on_city_states": 1, "peace_deals": 1,
+        "wars_declared": 3, "wars_on_city_states": 1,
         # Rome-Greece, Rome-Egypt, and the Egypt-Greece vassal war, all at turn 3.
         "peak_wars": 3,
-        "units_lost": 1, "cities_captured": 1, "capitals_captured": 1,
+        # Greece's kill of a barbarian counts as a kill but not as a civ's loss.
+        "units_lost": 1, "units_killed": 2, "cities_captured": 1, "capitals_captured": 1,
         "city_state_cities_captured": 1, "civs_eliminated": 2,
-        "cities_razed": 1, "nukes_detonated": 2, "cities_nuked": 1,
+        "cities_razed": 1, "nukes_built": 1, "nukes_detonated": 2,
     }
 
 

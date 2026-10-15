@@ -24,10 +24,6 @@ class EventCounter:
     target: str | None = None
     target_is_team: bool = False
     target_kind: str | None = None
-    # Credit the majors on both sides, once per unordered pair of civ teams per
-    # turn (an event both sides may log, such as a peace deal). Both teams
-    # must be civ teams.
-    both_sides: bool = False
 
     def accepts(self, payload: dict, ctx: GameContext | None = None) -> bool:
         if any(payload_get(payload, path) != value for path, value in self.match):
@@ -40,26 +36,10 @@ class EventCounter:
                 return False
         return True
 
-    def pair(self, payload: dict, ctx: GameContext) -> frozenset:
-        """The unordered team pair of a ``both_sides`` event."""
-        actor = payload_get(payload, self.actor)
-        actor_team = actor if self.actor_is_team else ctx.team_of.get(actor, actor)
-        target = payload_get(payload, self.target)
-        target_team = target if self.target_is_team else ctx.team_of.get(target, target)
-        return frozenset((actor_team, target_team))
-
     def credited(self, payload: dict, ctx: GameContext) -> list:
         """Major players this event counts for (empty when it does not count)."""
         if not self.accepts(payload, ctx):
             return []
-        if self.both_sides:
-            # Both sides must be civ teams: a city-state's deal with a civ is
-            # not a deal between civs, whichever side logged it.
-            pair = self.pair(payload, ctx)
-            if len(pair) != 2 or any(ctx.team_kind.get(team) != "major" for team in pair):
-                return []
-            return [pid for team in sorted(pair, key=str)
-                    for pid in ctx.players_on_team(team)]
         actor = payload_get(payload, self.actor)
         players = ctx.players_on_team(actor) if self.actor_is_team else [actor]
         majors = set(ctx.major_players)
@@ -79,10 +59,9 @@ EVENT_COUNTERS = {
                                         match=(("IsAggressor", True),),
                                         target="TargetTeamID", target_is_team=True,
                                         target_kind="minor"),
-    "peace_deals": EventCounter("MakePeace", actor="OriginatingPlayerID",
-                                target="TargetTeamID", target_is_team=True,
-                                target_kind="major", both_sides=True),
     "units_lost": EventCounter("UnitKilledInCombat", actor="KilledPlayerID"),
+    # Kills of any unit: a civ's, a city-state's, or a barbarian's.
+    "units_killed": EventCounter("UnitKilledInCombat", actor="KillerPlayerID"),
     "cities_captured": EventCounter("CityCaptureComplete", actor="NewOwnerID",
                                     match=(("IsConquest", True),),
                                     target="OldOwnerID", target_kind="major"),
@@ -92,6 +71,9 @@ EVENT_COUNTERS = {
     "city_state_cities_captured": EventCounter("CityCaptureComplete", actor="NewOwnerID",
                                                match=(("IsConquest", True),),
                                                target="OldOwnerID", target_kind="minor"),
+    # Atomic Bombs and Nuclear Missiles, trained or bought; ``Unit`` is the
+    # trained unit's metadata the game logs with the event.
+    "nukes_built": EventCounter("CityTrained", actor="PlayerID", match=(("Unit.AIType", "Icbm"),)),
     "nukes_detonated": EventCounter("NuclearDetonation", actor="PlayerID"),
 }
 
@@ -102,25 +84,14 @@ def read_events(cursor, counters) -> list:
 
 
 def credits(events, counters: dict, ctx: GameContext):
-    """Yield ``(name, players)`` for each event a counter counts, with its majors.
-
-    A ``both_sides`` counter counts one event per unordered team pair per turn,
-    since both sides may log the same deal (often several times).
-    """
-    pairs_seen = {name: set() for name, c in counters.items() if c.both_sides}
-    for event_type, turn, payload in events:
+    """Yield ``(name, players)`` for each event a counter counts, with its majors."""
+    for event_type, _turn, payload in events:
         for name, counter in counters.items():
             if counter.type != event_type:
                 continue
             players = counter.credited(payload, ctx)
-            if not players:
-                continue
-            if counter.both_sides:
-                key = (turn, counter.pair(payload, ctx))
-                if key in pairs_seen[name]:
-                    continue
-                pairs_seen[name].add(key)
-            yield name, players
+            if players:
+                yield name, players
 
 
 def count_events(events, counters: dict, ctx: GameContext) -> dict:

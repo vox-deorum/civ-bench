@@ -259,13 +259,14 @@ def test_interactive_forest_skips_conditions_without_data(configs_dir):
     frame = pd.DataFrame([
         {"player_type": "GPT-OSS-120B-Simple", "elo": 1600.0},
         {"player_type": "GPT-OSS-120B-Simple-Per-5", "elo": 1580.0},
+        {"player_type": "GPT-OSS-120B-Simple-Agentic", "elo": None},
         {"player_type": "Vanilla", "elo": 1500.0},
     ])
     figure = plot_paired_rows_interactive(
         frame, catalog=catalog, spec=spec, value_col="elo", identity_col="player_type",
     )
 
-    # No Agentic data: no empty slot and no "(missing Agentic)" note.
+    # No plottable Agentic value: no empty slot and no "(missing Agentic)" note.
     assert figure.layout.yaxis.ticktext == ("GPT-OSS-120B-Simple", "Vanilla")
     points = {trace.name: trace for trace in figure.data if trace.meta and trace.meta.get("table_tooltip")}
     assert points["GPT-OSS-120B-Simple"].y == pytest.approx((-0.16,))

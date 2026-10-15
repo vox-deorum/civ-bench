@@ -182,13 +182,20 @@ def _condition_label(spec: PairingSpec, condition: str) -> str:
     return spec.base_label if condition == "base" else condition.lstrip("-")
 
 
-def _condition_slots(spec: PairingSpec, work: pd.DataFrame) -> list[str]:
-    """The conditions that get a sub-row: ``base`` then suffixes, as observed.
+def _plottable(work: pd.DataFrame, value_col: str, log_x: bool) -> pd.DataFrame:
+    """The rows that draw a point: a numeric value, and positive on a log axis."""
+    values = pd.to_numeric(work[value_col], errors="coerce")
+    keep = values.notna() & (values > 0 if log_x else True)
+    return work[keep]
+
+
+def _condition_slots(spec: PairingSpec, plotted: pd.DataFrame) -> list[str]:
+    """The conditions that get a sub-row: ``base`` then suffixes, as plotted.
 
     Only non-baseline rows count, so a configured suffix with no data takes no
     space and is not reported missing.
     """
-    observed = set(work.loc[~work["is_baseline"], "condition"].astype(str))
+    observed = set(plotted.loc[~plotted["is_baseline"], "condition"].astype(str))
     return [condition for condition in ("base", *spec.suffixes) if condition in observed]
 
 
@@ -247,7 +254,8 @@ def plot_paired_rows(
     if not row_order:
         return None
 
-    slots = _condition_slots(spec, work)
+    plotted = _plottable(work, value_col, log_x)
+    slots = _condition_slots(spec, plotted)
     fig, ax = plt.subplots(figsize=(10, max(3.5, 0.46 * len(row_order) + 1.8)))
     y_by_identity = {identity: idx for idx, identity in enumerate(row_order)}
     plotted_conditions: set[str] = set()
@@ -299,7 +307,7 @@ def plot_paired_rows(
     ax.invert_yaxis()
 
     for idx, identity in enumerate(row_order):
-        rows = work[work["base_identity"].astype(str) == identity]
+        rows = plotted[plotted["base_identity"].astype(str) == identity]
         if rows.empty or bool(rows["is_baseline"].any()):
             continue
         present = set(rows["condition"].astype(str))
@@ -395,7 +403,8 @@ def plot_paired_rows_interactive(
         return None
 
     rows = list(tooltip or [(xlabel or value_col, "")])
-    slots = _condition_slots(spec, work)
+    plotted = _plottable(work, value_col, log_x)
+    slots = _condition_slots(spec, plotted)
     paired = len(slots) > 1
     y_by_identity = {identity: idx for idx, identity in enumerate(row_order)}
     fig = go.Figure()
@@ -489,7 +498,7 @@ def plot_paired_rows_interactive(
     ticktext = []
     for identity in row_order:
         label = escape(identity)
-        members = work[work["base_identity"].astype(str) == identity]
+        members = plotted[plotted["base_identity"].astype(str) == identity]
         if not members.empty and not bool(members["is_baseline"].any()):
             present = set(members["condition"].astype(str))
             if present != set(slots):

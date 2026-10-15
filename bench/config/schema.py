@@ -166,8 +166,8 @@ PERSONA_INFO = {
 PERSONA_RANGE = (1.0, 10.0)
 BEHAVIOR_EVENTS = (
     "wars_declared", "wars_received", "cities_nuked", "cities_razed",
-    "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
-    "capitals_captured", "city_state_cities_captured", "nukes_detonated",
+    "wars_on_city_states", "units_lost", "units_killed", "cities_captured",
+    "capitals_captured", "city_state_cities_captured", "nukes_built", "nukes_detonated",
 )
 BEHAVIOR_POLICIES = (
     "policy_changes",
@@ -420,9 +420,6 @@ WORLD_CONFLICT_METRICS = {
     "wars_on_city_states": ("Wars on city-states", "Wars on city-states",
                             "Wars the civ declared on city-states.",
                             "Wars declared on city-states by any civ.", "diff", "diff"),
-    "peace_deals": ("Peace deals", "Peace",
-                    "Peace deals the civ signed with other civs.",
-                    "Peace deals between civs.", "diff", "diff"),
     "peak_wars": ("Peak wars", "Peak wars",
                   "The most wars the civ was in at once, city-states included.",
                   "The most wars between civs open at once.", "diff", "diff"),
@@ -432,6 +429,9 @@ WORLD_CONFLICT_METRICS = {
     "units_lost": ("Units lost", "Units lost",
                    "The civ's units killed in combat.",
                    "Civ units killed in combat, on every side.", "diff", "diff"),
+    "units_killed": ("Units killed", "Units killed",
+                     "Units the civ killed in combat, city-state and barbarian units included.",
+                     "Units killed in combat by any civ.", "diff", "diff"),
     "cities_captured": ("Cities captured", "Cities taken",
                         "Civ cities the civ conquered.",
                         "Civ cities conquered by any civ.", "diff", "diff"),
@@ -447,21 +447,21 @@ WORLD_CONFLICT_METRICS = {
     "cities_razed": ("Cities razed", "Razed",
                      "Cities the civ razed.",
                      "Cities razed by any civ.", "diff", "diff"),
-    "nukes_detonated": ("Nukes", "Nukes used",
+    "nukes_built": ("Nukes built", "Nukes built",
+                    "Nuclear weapons the civ built.",
+                    "Nuclear weapons built by any civ.", "diff", "diff"),
+    "nukes_detonated": ("Nukes used", "Nukes used",
                         "Nuclear weapons the civ detonated.",
                         "Nuclear weapons detonated by any civ.", "diff", "diff"),
-    "cities_nuked": ("Cities nuked", "Cities nuked",
-                     "The civ's detonations that hit a city.",
-                     "Detonations that hit a city.", "diff", "diff"),
     "turns": ("Turns", "Turns alive / length",
               "Turns the civ survived (its last turn with a positive score).",
               "Game length in turns.", "diff", "diff"),
 }
 # Behavior event columns behind the Player side of world.conflict.
 WORLD_CONFLICT_EVENTS = (
-    "wars_declared", "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
-    "capitals_captured", "city_state_cities_captured", "cities_razed", "nukes_detonated",
-    "cities_nuked",
+    "wars_declared", "wars_on_city_states", "units_lost", "units_killed", "cities_captured",
+    "capitals_captured", "city_state_cities_captured", "cities_razed", "nukes_built",
+    "nukes_detonated",
 )
 # Read at each checkpoint turn from the turns table. World values are sums over
 # civs, except techs (the average over surviving civs) and civs alive (a count).

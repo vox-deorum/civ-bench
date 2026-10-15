@@ -169,8 +169,8 @@ def test_fieldnames_follow_selection():
         "flavor_use_nuke_min", "flavor_use_nuke_avg", "flavor_use_nuke_max",
         "persona_boldness_min", "persona_boldness_avg", "persona_boldness_max",
         "wars_declared", "wars_received", "cities_nuked", "cities_razed",
-        "wars_on_city_states", "peace_deals", "units_lost", "cities_captured",
-        "capitals_captured", "city_state_cities_captured", "nukes_detonated",
+        "wars_on_city_states", "units_lost", "units_killed", "cities_captured",
+        "capitals_captured", "city_state_cities_captured", "nukes_built", "nukes_detonated",
         *S.BEHAVIOR_POLICIES,
         *S.BEHAVIOR_RELATIONSHIPS,
     ]
@@ -391,9 +391,9 @@ def test_event_counts(tmp_path, with_index):
     }
 
 
-def _peace(turn, origin, target):
-    return _event("MakePeace", turn, {"OriginatingPlayerID": origin, "TargetTeamID": target,
-                                      "PacifierFlag": True})
+def _trained(turn, player, unit_id, unit_type="Atomic Bomb", ai_type="Icbm"):
+    return _event("CityTrained", turn, {"PlayerID": player, "CityID": 1, "UnitID": unit_id,
+                                        "Unit": {"UnitType": unit_type, "AIType": ai_type}})
 
 
 def _capture(turn, old, new, *, conquest=True, capital=False, city=1):
@@ -411,11 +411,6 @@ def _killed(turn, killer, killed, unit="Warrior"):
 # Player 63 is the barbarian slot: neither a civ nor a city-state.
 CONFLICT_EVENTS = [
     *EVENTS,
-    # Peace is logged by both sides, often several times: one deal per pair per turn.
-    _peace(9, 0, 1), _peace(9, 1, 0), _peace(9, 0, 1),
-    _peace(12, 0, 1),                    # a later deal between the same pair
-    _peace(9, 0, 22),                    # with a city-state: not a deal between civs
-    _peace(14, 22, 0),                   # logged by the city-state: not one either
     _killed(5, 1, 0), _killed(5, 1, 0, unit="Archer"), _killed(5, 0, 1),
     _killed(6, 63, 0, unit="Spearman"),  # a barbarian kill still costs Rome a unit
     _capture(10, 1, 0, capital=True, city=2),
@@ -424,6 +419,10 @@ CONFLICT_EVENTS = [
     _capture(11, 63, 1, city=5),         # retaken from barbarians: neither kind
     _capture(11, 0, 1, conquest=False, city=6),   # a peaceful transfer
     _event("NuclearDetonation", 13, {"PlayerID": 1, "Plot": {"PlotType": "Land"}}),
+    _trained(12, 0, 101),
+    _trained(12, 0, 102, unit_type="Nuclear Submarine", ai_type="AssaultSea"),   # not a nuke
+    _trained(12, 1, 103, unit_type="Nuclear Missile"),
+    _trained(12, 22, 104),               # a city-state's: no civ credited
 ]
 
 
@@ -435,12 +434,14 @@ def test_conflict_counters_credit_the_right_side(tmp_path):
     rows = _rows_by_player(db)
     new = [name for name in S.BEHAVIOR_EVENTS if name not in ORIGINAL_EVENTS]
     assert {k: rows[0][k] for k in new} == {
-        "wars_on_city_states": 1, "peace_deals": 2, "units_lost": 3, "cities_captured": 2,
-        "capitals_captured": 1, "city_state_cities_captured": 1, "nukes_detonated": 2,
+        "wars_on_city_states": 1, "units_lost": 3, "units_killed": 1, "cities_captured": 2,
+        "capitals_captured": 1, "city_state_cities_captured": 1, "nukes_built": 1,
+        "nukes_detonated": 2,
     }
     assert {k: rows[1][k] for k in new} == {
-        "wars_on_city_states": 0, "peace_deals": 2, "units_lost": 1, "cities_captured": 0,
-        "capitals_captured": 0, "city_state_cities_captured": 0, "nukes_detonated": 1,
+        "wars_on_city_states": 0, "units_lost": 1, "units_killed": 2, "cities_captured": 0,
+        "capitals_captured": 0, "city_state_cities_captured": 0, "nukes_built": 1,
+        "nukes_detonated": 1,
     }
     # The new counters leave the original columns as they were.
     assert {k: rows[0][k] for k in ORIGINAL_EVENTS} == {
