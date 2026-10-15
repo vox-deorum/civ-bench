@@ -402,6 +402,18 @@ def _assign_views(section: Section, inline_by_name: dict) -> None:
     if not isinstance(declared, dict):
         return
     claimed: set[int] = set()
+    section.views = _build_views(declared, inline_by_name, claimed)
+    section.figures = [f for f in section.figures if id(f) not in claimed]
+    section.tables = [t for t in section.tables if id(t) not in claimed]
+
+
+def _build_views(declared: dict, inline_by_name: dict, claimed: set[int]) -> list[View]:
+    """Views from a ``{name: spec}`` mapping, with a spec's own ``"views"`` nested.
+
+    Each artifact goes to the first view that names it, at any depth. A view
+    with no artifacts and no non-empty child views is dropped.
+    """
+    views = []
     for name, spec in declared.items():
         if not isinstance(spec, dict):
             continue
@@ -413,10 +425,12 @@ def _assign_views(section: Section, inline_by_name: dict) -> None:
                 if item is not None and id(item) not in claimed:
                     target.append(item)
                     claimed.add(id(item))
-        if view.figures or view.tables:
-            section.views.append(view)
-    section.figures = [f for f in section.figures if id(f) not in claimed]
-    section.tables = [t for t in section.tables if id(t) not in claimed]
+        children = spec.get("views")
+        if isinstance(children, dict):
+            view.views = _build_views(children, inline_by_name, claimed)
+        if view.figures or view.tables or view.views:
+            views.append(view)
+    return views
 
 
 def _inline_artifact_names(

@@ -12,17 +12,21 @@ The Endings tab reads the panel: the share of the civ's games it won by each
 victory type (Player) and the share of games that ended that way (World), plus
 game length.
 
-Tabs, in a controlled run:
+Views, on two switch rows. The first picks **relative** (default) or
+**absolute**, with the same names as the other world and behavior sections so
+the choice syncs across the page. The second picks the tab:
 
-* **Overview** (default): ``overview_metrics`` at every checkpoint, relative;
-* **Turn N**: every metric at checkpoint N, relative;
-* **Endings**: win shares and game length, relative;
-* **Absolute**: the absolute tables of the Turn and Endings tabs, stacked.
+* **Overview** (default): ``overview_metrics`` at every checkpoint;
+* **Turn N**: every metric at checkpoint N;
+* **Endings**: win shares and game length.
 
-An uncontrolled run has no relative view, so each tab shows absolute values and
-there is no separate Absolute tab. In controlled runs the module also writes
-``world_progress_by_seed`` and ``world_progress_by_seat`` for the Matched Maps
-chapter's World: progress tab (the overview metrics at the last checkpoint).
+Each view is named ``<outer>/<tab>`` (such as ``relative/turn_100``) and
+:func:`bench.analyses.behavior.common.nested_views_metadata` nests them. An
+uncontrolled run has no relative view, so only the tab row shows.
+
+In controlled runs the module also writes ``world_progress_by_seed`` and
+``world_progress_by_seat`` for the Matched Maps chapter's World: progress tab
+(the overview metrics at the last checkpoint).
 """
 
 from __future__ import annotations
@@ -42,7 +46,6 @@ from .base import (
 SLUG = "world_progress"
 OVERVIEW = "overview"
 ENDINGS = "endings"
-ALL_ABSOLUTE = "all_absolute"
 # World values averaged over the civs alive instead of summed.
 AVERAGED = {"technologies"}
 NO_WINNER = "no_winner"
@@ -65,7 +68,7 @@ class WorldProgress(WorldAnalysis):
         "games ended, for the strategist's own civ and for the whole world."
     )
     report_defaults = {
-        "tables": [f"{SLUG}_overview_*", f"{SLUG}_t*_*", "world_endings_*"],
+        "tables": ["world_progress_overview_*", "world_progress_t*_*", "world_endings_*"],
         "figures": [],
     }
 
@@ -126,68 +129,70 @@ class WorldProgress(WorldAnalysis):
                               per_game=world_columns(columns))
         controlled = views.relative is not None
         out = MetricViews()
-        # Tab order: the views fill in later calls, which keep this order.
-        for name in [OVERVIEW, *(turn_view(t) for t in checkpoints), ENDINGS, ALL_ABSOLUTE]:
-            out.declared[name] = {"tables": [], "figures": []}
+        # Two switch rows: relative or absolute, then the tab. Views are named
+        # "<outer>/<tab>" and declared up front so they keep this order.
+        tabs = [OVERVIEW, *(turn_view(t) for t in checkpoints), ENDINGS]
+        outer = [C.RELATIVE, C.ABSOLUTE] if controlled else [C.ABSOLUTE]
+        out.declared = {f"{o}/{tab}": {"tables": [], "figures": []} for o in outer for tab in tabs}
 
         player_base, world_base = self.baseline_words(views)
+        versus = self.versus_words(views)
         pinned = self.pinned_label(views)
-        relative_help = (
-            "Each Player cell is the mean, over the strategist's civs, of its own value "
-            f"compared with {player_base}. Each World cell is the mean, over its games, of the "
-            f"whole game's value compared with {world_base}. The top row is the {pinned} "
-            "itself, in absolute values. Colors run from 2 SDs of the baseline below (red) to "
-            "2 SDs above (blue)."
+        shared = "It includes the strategist's civ (both civs when two strategists play)."
+        relative_lines = [
+            f"Each cell: the strategist's average compared with {versus}'s.",
+            f"Player: its own civ, vs. {player_base}.",
+            f"World: the whole game, vs. {world_base}. {shared}",
+            f"Top row: the {pinned}'s actual values, for scale.",
+            "Blue is higher, red is lower; full color at 2 baseline SDs.",
+        ]
+        absolute_lines = [
+            "Each cell: the average per game, with nothing subtracted.",
+            "Player: the strategist's own civ. World: the whole game. " + shared,
+            "Color: distance from the average row; full color at 2 SDs.",
+        ]
+        counting = (
+            "Techs are averaged over surviving civs; other World values are sums. A civ "
+            "eliminated by turn N counts as 0; games that ended before turn N are left out."
         )
-        absolute_help = (
-            "Each Player cell is the mean of the civ's own value and each World cell the mean "
-            "of the whole game's value. Colors show each cell as a z-score across players, "
-            "full color at 2 SDs."
-        )
-        stock_note = (
-            " Sizes, yields, and armies differ in percent; civs alive in percentage points "
-            "(Player) or civs (World). World values are sums over civs, except techs (the "
-            "average over surviving civs). A civ eliminated by the checkpoint counts as 0, and "
-            "a game that ended earlier is left out. A World value includes the strategist's "
-            "own civ, and in a game with two strategists it counts for both."
-        )
-        ending_note = (
-            " Win shares differ in percentage points and game length in turns. A World value "
-            "includes the strategist's own civ, and in a game with two strategists it counts "
-            "for both."
-        )
+        stock_notes = {
+            C.RELATIVE: ["Sizes, yields, and armies: % change. Civs alive: pts (Player) or "
+                         "civs (World).", counting],
+            C.ABSOLUTE: ["Civs alive: % of games the civ was still alive (Player) or civs (World).",
+                         counting],
+        }
+        ending_notes = {
+            C.RELATIVE: ["Win shares: pts. Game length: turns."],
+            C.ABSOLUTE: ["Win shares: % of games. Game length: turns."],
+        }
 
-        def emit_tab(slug, part, tab, title, note, *, overview_tab=False):
-            if controlled:
-                view_names = {C.RELATIVE: tab, C.ABSOLUTE: ALL_ABSOLUTE}
-                emit = {C.RELATIVE} if overview_tab else None
-            else:
-                view_names, emit = {C.ABSOLUTE: tab}, {C.ABSOLUTE}
+        def emit_tab(slug, part, tab, subject, notes):
             self.add_paired_views(
                 ctx, views, out, slug, part,
-                titles={C.RELATIVE: f"{title}, relative", C.ABSOLUTE: title},
-                help_texts={C.RELATIVE: relative_help + note, C.ABSOLUTE: absolute_help + note},
-                emit=emit, view_names=view_names,
+                titles={C.RELATIVE: f"{subject} vs. {versus}",
+                        C.ABSOLUTE: f"{subject}, actual values"},
+                help_texts={C.RELATIVE: "\n".join(relative_lines + notes[C.RELATIVE]),
+                            C.ABSOLUTE: "\n".join(absolute_lines + notes[C.ABSOLUTE])},
+                view_names={o: f"{o}/{tab}" for o in outer},
             )
 
         if overview:
-            emit_tab(f"{SLUG}_overview", overview_columns, OVERVIEW, "World growth at a glance",
-                     stock_note, overview_tab=True)
+            emit_tab(f"{SLUG}_overview", overview_columns, OVERVIEW, "World growth overview",
+                     stock_notes)
         for t in checkpoints:
-            emit_tab(f"{SLUG}_t{t}", per_turn[t], turn_view(t), f"World growth by turn {t}",
-                     stock_note)
-        emit_tab("world_endings", endings, ENDINGS, "How games ended", ending_note)
+            emit_tab(f"{SLUG}_t{t}", per_turn[t], turn_view(t), f"World growth at turn {t}",
+                     stock_notes)
+        emit_tab("world_endings", endings, ENDINGS, "How games ended", ending_notes)
 
         metadata = {
             **views.metadata(),
             "metrics": metrics,
             "checkpoints": checkpoints,
             "overview_metrics": overview,
-            "views": C.views_metadata(out.declared, baseline, extra={
+            "views": C.nested_views_metadata(out.declared, baseline, inner={
                 OVERVIEW: ("Overview", "Selected metrics at every checkpoint"),
                 **{turn_view(t): (f"Turn {t}", f"Every metric at turn {t}") for t in checkpoints},
                 ENDINGS: ("Endings", "How games ended, and game length"),
-                ALL_ABSOLUTE: ("Absolute", "Absolute values"),
             }),
             "heatmaps": out.heatmaps,
         }
@@ -198,14 +203,14 @@ class WorldProgress(WorldAnalysis):
             per_turn[last].subset([metric_id(scope, m, f"@{last}")
                                    for m in mapped for scope in (PLAYER, WORLD)]),
             label="World: progress",
-            tip=f"World growth by turn {last}, for the strategist's civ and the whole world",
-            title=f"World growth by turn {last}",
-            help_text=(
-                "Each Player cell is the mean of the strategist's own value on this map (and "
-                "seat) and each World cell the mean of the whole game's value. The top row "
-                f"is the {pinned} on the same map (and seat); the tooltip shows each cell's "
-                "difference from it."
-            ),
+            tip=f"World growth at turn {last}, for the strategist's civ and the whole world",
+            title=f"World growth at turn {last}",
+            help_text="\n".join([
+                "Each cell: the strategist's average on this map (and seat), as measured.",
+                "Player: its own civ. World: the whole game.",
+                f"Top row: the {pinned} on the same map (and seat).",
+                "Hover a cell to see its difference from the top row.",
+            ]),
         )
         if tab is not None:
             metadata["matched_maps"] = tab

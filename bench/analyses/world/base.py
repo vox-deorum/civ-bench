@@ -197,6 +197,12 @@ class WorldAnalysis(BehaviorAnalysis):
         return (f"the {label} in the same seat on the same map",
                 f"the {label} games on the same map")
 
+    def versus_words(self, views: C.BehaviorViews) -> str:
+        """How titles and help texts name the baseline: "the in-game AI"."""
+        if views.baseline is not None and views.baseline.in_game_ai:
+            return "the in-game AI"
+        return f"the {views.baseline.label}" if views.baseline is not None else "the baseline"
+
     # ── heatmaps ──────────────────────────────────────────────────────────────
     def add_paired_views(self, ctx: AnalysisContext, views: C.BehaviorViews, out: MetricViews,
                          slug: str, columns: Columns, *, titles: dict, help_texts: dict,
@@ -205,6 +211,10 @@ class WorldAnalysis(BehaviorAnalysis):
         companions = {m: {"value_mean": f"{m}__value", "baseline_mean": f"{m}__baseline"}
                       for m in columns.names}
         absolute_units = columns.units[C.ABSOLUTE]
+        pinned = self.pinned_label(views)
+        # The heatmap capitalizes the pinned row's label.
+        pinned_row = pinned[:1].upper() + pinned[1:]
+        world_base = self.baseline_words(views)[1]
         self.add_heatmap_views(
             ctx, views, out, slug,
             titles=titles,
@@ -216,18 +226,20 @@ class WorldAnalysis(BehaviorAnalysis):
             legends={C.RELATIVE: RELATIVE_LEGEND, C.ABSOLUTE: ABSOLUTE_LEGEND},
             value_labels={C.RELATIVE: "Difference", C.ABSOLUTE: "Average"},
             decimals=1,
+            row_tips={pinned_row: f"{world_base[:1].upper()}{world_base[1:]}. "
+                                  "Actual values, not differences."} if pinned else None,
             baseline_row=True,
             view_names=view_names,
             column_decimals=columns.decimals,
             column_units=columns.units,
             companions={C.RELATIVE: companions},
             tip_rows={C.RELATIVE: [
-                {"column": "value_mean", "label": "Value", "units": absolute_units},
-                {"column": "baseline_mean", "label": "Matched baseline", "units": absolute_units},
+                {"column": "value_mean", "label": "Strategist average", "units": absolute_units},
+                {"column": "baseline_mean", "label": "Baseline average", "units": absolute_units},
             ]},
             emit=emit,
             cell_text=True,
-            pinned_label=self.pinned_label(views),
+            pinned_label=pinned,
         )
 
     def add_paired_matched_maps(self, ctx: AnalysisContext, views: C.BehaviorViews,

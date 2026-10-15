@@ -192,10 +192,11 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
   });
   document.addEventListener("focusout", hideTip);
   var groups = document.querySelectorAll(".view-group");
-  function syncFrames(panel) {
-    panel.querySelectorAll("iframe").forEach(function (frame) {
+  // A frame inside any hidden panel (a nested switch's too) stays unloaded.
+  function syncFrames() {
+    document.querySelectorAll(".view-panel iframe").forEach(function (frame) {
       var deferred = frame.getAttribute("data-src");
-      if (panel.hidden) {
+      if (frame.closest(".view-panel[hidden]")) {
         if (!deferred && !frame.hasAttribute("data-shown")) {
           frame.setAttribute("data-src", frame.getAttribute("src"));
           frame.src = "about:blank";
@@ -209,17 +210,17 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
       frame.setAttribute("data-shown", "");
     });
   }
+  // Only the group's own panels and buttons; a nested group handles its own.
   function showView(group, name) {
-    var panels = group.querySelectorAll(".view-panel");
+    var panels = group.querySelectorAll(":scope > .view-panel");
     var known = Array.prototype.some.call(panels, function (panel) {
       return panel.getAttribute("data-view") === name;
     });
     if (!known) { return; }
     panels.forEach(function (panel) {
       panel.hidden = panel.getAttribute("data-view") !== name;
-      syncFrames(panel);
     });
-    group.querySelectorAll(".view-button").forEach(function (button) {
+    group.querySelectorAll(":scope > .view-switch > .view-button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.getAttribute("data-view") === name));
     });
   }
@@ -227,16 +228,18 @@ REPORT_HELP_JS = """/* Shared report help: hover, keyboard focus, click, and Esc
   if (groups.length) {
     document.documentElement.classList.add("views-ready");
     groups.forEach(function (group) {
-      var first = group.querySelector(".view-panel");
+      var first = group.querySelector(":scope > .view-panel");
       if (first) { showView(group, first.getAttribute("data-view")); }
       if (requestedView) { showView(group, requestedView); }
-      group.querySelectorAll(".view-button").forEach(function (button) {
+      group.querySelectorAll(":scope > .view-switch > .view-button").forEach(function (button) {
         button.addEventListener("click", function () {
           var name = button.getAttribute("data-view");
           groups.forEach(function (other) { showView(other, name); });
+          syncFrames();
         });
       });
     });
+    syncFrames();
   }
   document.querySelectorAll(".report-help").forEach(function (help) {
     var button = help.querySelector(".help-toggle");

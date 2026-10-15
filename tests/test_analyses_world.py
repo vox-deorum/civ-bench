@@ -241,16 +241,23 @@ def test_progress_endings_compare_win_shares_in_points(world_env):
     assert spec["column_order"][:2] == ["p__win_domination", "w__win_domination"]
 
 
-def test_progress_tabs_follow_the_overview_turns_endings_absolute_order(world_env):
+def test_progress_views_nest_the_tabs_under_relative_and_absolute(world_env):
     result = world_env("world.progress", PROGRESS)
     views = result.metadata["views"]
-    assert list(views) == ["overview", "turn_2", "turn_4", "endings", "all_absolute"]
-    assert [views[v]["label"] for v in views] == ["Overview", "Turn 2", "Turn 4", "Endings",
-                                                  "Absolute"]
-    assert views["overview"]["tables"] == ["world_progress_overview_relative"]
-    assert views["all_absolute"]["tables"] == [
-        "world_progress_t2_absolute", "world_progress_t4_absolute", "world_endings_absolute",
-    ]
+    assert list(views) == ["relative", "absolute"]
+    tabs = ["overview", "turn_2", "turn_4", "endings"]
+    for outer in ("relative", "absolute"):
+        inner = views[outer]["views"]
+        assert list(inner) == tabs
+        assert [inner[v]["label"] for v in tabs] == ["Overview", "Turn 2", "Turn 4", "Endings"]
+        assert inner["turn_2"]["tables"] == [f"world_progress_t2_{outer}"]
+        assert inner["overview"]["tables"] == [f"world_progress_overview_{outer}"]
+        assert inner["endings"]["tables"] == [f"world_endings_{outer}"]
+    heatmaps = result.metadata["heatmaps"]
+    assert heatmaps["world_progress_t2_relative"]["title"] == (
+        "World growth at turn 2 vs. the in-game AI")
+    assert heatmaps["world_progress_t2_absolute"]["title"] == "World growth at turn 2, actual values"
+    assert "differ" not in heatmaps["world_progress_t2_absolute"]["help"]
     spec = result.metadata["heatmaps"]["world_progress_overview_relative"]
     assert spec["column_order"][:4] == ["p__population@2", "w__population@2",
                                         "p__population@4", "w__population@4"]
@@ -266,9 +273,11 @@ def test_progress_tabs_follow_the_overview_turns_endings_absolute_order(world_en
 def test_uncontrolled_progress_shows_absolute_values_in_every_tab(world_env):
     result = world_env("world.progress", PROGRESS, games=False)
     views = result.metadata["views"]
-    assert list(views) == ["overview", "turn_2", "turn_4", "endings"]
-    assert views["turn_2"]["tables"] == ["world_progress_t2_absolute"]
-    assert views["overview"]["tables"] == ["world_progress_overview_absolute"]
+    assert list(views) == ["absolute"]
+    inner = views["absolute"]["views"]
+    assert list(inner) == ["overview", "turn_2", "turn_4", "endings"]
+    assert inner["turn_2"]["tables"] == ["world_progress_t2_absolute"]
+    assert inner["overview"]["tables"] == ["world_progress_overview_absolute"]
 
 
 def test_world_tables_are_byte_stable(world_env, tmp_path):
@@ -331,17 +340,24 @@ def test_world_page_renders_both_sections_with_their_tabs(world_env):
     out = report_dir(cfg)
     page = (out / "world.html").read_text(encoding="utf-8")
     assert "Wars and conquest" in page and "World growth" in page
-    assert page.count('<div class="view-switch"') == 2
+    # Wars and conquest: one switch. World growth: relative or absolute, then a
+    # tab row inside each.
+    assert page.count('<div class="view-switch"') == 4
     for label in ("Overview", "Turn 2", "Turn 4", "Endings"):
-        assert f">{label}</button>" in page
+        assert page.count(f">{label}</button>") == 2
     assert page.index(">Overview</button>") < page.index(">Turn 2</button>") < page.index(
         ">Endings</button>")
+    # Inner panels carry their parent's name, so ids stay unique.
+    assert 'id="section-wld-progress-relative-view-turn-2"' in page
+    assert 'id="section-wld-progress-absolute-view-turn-2"' in page
     assert ">AI-only world<" in page
     assert ">+25%<" in page
     # The Matched Maps tables are not drawn inline on the World page.
     assert "World: progress" not in page
+    assert "Hover a cell to see its difference from the top row." not in page
     md = (out / "report.md").read_text(encoding="utf-8")
     assert "## World" in md
+    assert "**Relative · Turn 2**" in md and "**Absolute · Endings**" in md
 
 
 def test_world_columns_match_the_completed_pool_by_map_not_by_seat():

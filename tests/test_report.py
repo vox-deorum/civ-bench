@@ -1344,6 +1344,40 @@ def test_malformed_views_fall_back_to_a_single_view(views_env):
     assert 'src="assets/beh_two/commitment_relative.png"' in page
 
 
+def test_nested_views_render_a_switch_inside_each_view(views_env):
+    views = {
+        "relative": {"label": "Relative", "views": {
+            "early": {"label": "Early", "figures": ["commitment_relative"]},
+            "late": {"label": "Late", "figures": ["commitment_late"]},
+        }},
+        "absolute": {"label": "Absolute", "views": {
+            "early": {"label": "Early", "figures": ["commitment_absolute"]},
+        }},
+    }
+    views_env.report["section_overrides"]["beh_two"] = {
+        "tables": [], "figures": ["commitment_relative", "commitment_late", "commitment_absolute"]}
+    _emit(views_env, "beh_two", "behavior.commitment", summary="Nested.",
+          metadata={"views": views},
+          figures=["commitment_relative", "commitment_late", "commitment_absolute"])
+    run_report(views_env)
+    out = report_dir(views_env)
+    page = (out / "behavior.html").read_text(encoding="utf-8")
+    section = page.split('id="section-beh-two"', 1)[1].split("</section>", 1)[0]
+    # The outer switch, then one inner switch (absolute has a single inner view).
+    assert section.count('<div class="view-switch"') == 2
+    relative = section.index('id="section-beh-two-view-relative"')
+    assert relative < section.index('id="section-beh-two-relative-view-early"') < section.index(
+        'id="section-beh-two-relative-view-late"') < section.index(
+        'id="section-beh-two-view-absolute"') < section.index(
+        'id="section-beh-two-absolute-view-early"')
+    assert section.index("commitment_late.png") < section.index("commitment_absolute.png")
+    script = (out / "assets/report-help.js").read_text(encoding="utf-8")
+    assert ":scope > .view-panel" in script
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert md.index("**Relative · Early**") < md.index("**Relative · Late**") < md.index(
+        "**Absolute · Early**")
+
+
 # ── HTML heatmap tables ────────────────────────────────────────────────────────
 BASELINE_ROW = "Completed-experiment average"
 

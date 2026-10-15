@@ -52,7 +52,7 @@ class WorldConflict(WorldAnalysis):
         "eliminations per game, for the strategist's own civ and for the whole world."
     )
     report_defaults = {
-        "tables": [f"{SLUG}_relative", f"{SLUG}_absolute"],
+        "tables": ["world_conflict_relative", "world_conflict_absolute"],
         "figures": [],
     }
 
@@ -82,28 +82,23 @@ class WorldConflict(WorldAnalysis):
         out = MetricViews()
         player_base, world_base = self.baseline_words(views)
         pinned = self.pinned_label(views)
-        note = (
-            " Counts are per game. Shares differ in percentage points. A World value "
-            "includes the strategist's own civ, and in a game with two strategists it "
-            "counts for both."
-        )
+        versus = self.versus_words(views)
         self.add_paired_views(
             ctx, views, out, SLUG, columns,
-            titles={C.RELATIVE: "Wars and conquest, relative",
-                    C.ABSOLUTE: "Wars and conquest per game"},
+            titles={C.RELATIVE: f"Wars and conquest vs. {versus}",
+                    C.ABSOLUTE: "Wars and conquest, actual values per game"},
             help_texts={
-                C.RELATIVE: (
-                    "Each Player cell is the mean, over the strategist's civs, of its own "
-                    f"value minus {player_base}. Each World cell is the mean, over its "
-                    f"games, of the whole game's value minus {world_base}. The top row is "
-                    f"the {pinned} itself, in absolute values. Colors run from 2 SDs of the "
-                    f"baseline below (red) to 2 SDs above (blue).{note}"
-                ),
-                C.ABSOLUTE: (
-                    "Each Player cell is the mean of the civ's own value and each World cell "
-                    "the mean of the whole game's value. Colors show each cell as a z-score "
-                    f"across players, full color at 2 SDs.{note}"
-                ),
+                C.RELATIVE: "\n".join([
+                    f"Each cell: the strategist's average - {versus}'s.",
+                    f"Player: its own civ, vs. {player_base}.",
+                    f"World: the whole game, vs. {world_base}. It includes the strategist's "
+                    "civ (both civs when two strategists play).",
+                    f"Top row: the {pinned}'s actual values, for scale.",
+                ]),
+                C.ABSOLUTE: "\n".join([
+                    "Each cell: the average per game.",
+                    "Player: the strategist's own civ. World: the whole game.",
+                ]),
             },
         )
         metadata = {
@@ -117,12 +112,12 @@ class WorldConflict(WorldAnalysis):
             label="World: conflict",
             tip="Wars and conquest, for the strategist's civ and the whole world",
             title="Wars and conquest per game",
-            help_text=(
-                "Each Player cell is the mean of the strategist's own value on this map (and "
-                "seat) and each World cell the mean of the whole game's value. The top row "
-                f"is the {pinned} on the same map (and seat); the tooltip shows each cell's "
-                "difference from it."
-            ),
+            help_text="\n".join([
+                "Each cell: the strategist's average on this map (and seat), as measured.",
+                "Player: its own civ. World: the whole game.",
+                f"Top row: the {pinned} on the same map (and seat).",
+                "Hover a cell to see its difference from the top row.",
+            ]),
         )
         if tab is not None:
             metadata["matched_maps"] = tab

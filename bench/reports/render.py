@@ -287,10 +287,7 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         lines.append("")
         return
     # Artifacts no view claims follow the views, so a section's tabs lead.
-    for view in section.views:
-        lines.append(f"**{view.label}**")
-        lines.append("")
-        _render_artifacts_md(view.figures, view.tables, lines)
+    _render_views_md(section.views, lines)
     _render_artifacts_md(section.figures, section.tables, lines)
     if section.downloads:
         lines.append("**Downloads and supporting files**")
@@ -298,6 +295,17 @@ def _render_section_md(section: Section, lines: list[str]) -> None:
         for dl in section.downloads:
             lines.append(f"- [{dl.label}]({dl.rel_path})")
         lines.append("")
+
+
+def _render_views_md(views, lines: list[str], parent: str = "") -> None:
+    """Every view under its own bold heading; a nested view reads "Parent · Child"."""
+    for view in views:
+        label = f"{parent} · {view.label}" if parent else view.label
+        if view.figures or view.tables:
+            lines.append(f"**{label}**")
+            lines.append("")
+            _render_artifacts_md(view.figures, view.tables, lines)
+        _render_views_md(view.views, lines, label)
 
 
 def _render_artifacts_md(figures, tables, lines: list[str]) -> None:
@@ -1087,12 +1095,20 @@ def _render_views_html(
     section: Section, parts: list[str], anchor: str, model_tips: dict[str, str] | None = None,
 ) -> None:
     """Render a section's views behind the shared tab switch (see render_view_group)."""
-    views = []
-    for view in section.views:
+    parts.append(_view_group_html(section.views, anchor, model_tips))
+
+
+def _view_group_html(views, anchor: str, model_tips: dict[str, str] | None) -> str:
+    """One tab switch; a view's child views form a second switch above its artifacts."""
+    entries = []
+    for view in views:
         body: list[str] = []
+        if view.views:
+            # Child panel ids carry the parent's name, so sibling groups never clash.
+            body.append(_view_group_html(view.views, f"{anchor}-{_slug(view.name)}", model_tips))
         _render_artifacts_html(view.figures, view.tables, body, anchor, model_tips)
-        views.append((_slug(view.name), view.label, view.tip, "\n".join(body)))
-    parts.append(render_view_group(anchor, views))
+        entries.append((_slug(view.name), view.label, view.tip, "\n".join(body)))
+    return render_view_group(anchor, entries)
 
 
 def _render_table_html(

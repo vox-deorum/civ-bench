@@ -28,3 +28,30 @@ def test_report_defaults_are_literal_and_include_empty_curations():
         "tables": [],
         "figures": [],
     }
+
+
+def test_report_defaults_match_every_registered_class():
+    from bench.analyses.registry import ANALYSIS_REGISTRY
+
+    for module, cls in ANALYSIS_REGISTRY.items():
+        expected = getattr(cls, "report_defaults", None)
+        if expected is None:
+            continue
+        assert analysis_report_defaults(module) == expected, module
+
+
+def test_report_defaults_reject_non_literals(tmp_path):
+    import pytest
+
+    from bench.config.analysis_metadata import _report_defaults_in_file
+
+    path = tmp_path / "broken.py"
+    path.write_text(
+        'SLUG = "x"\n'
+        "class Broken:\n"
+        '    module = "custom.broken"\n'
+        '    report_defaults = {"tables": [f"{SLUG}_relative"], "figures": []}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Broken.report_defaults"):
+        _report_defaults_in_file(path)

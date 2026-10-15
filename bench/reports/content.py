@@ -78,7 +78,9 @@ def render_view_group(anchor: str, views: list[tuple[str, str, str, str]]) -> st
     choice switches every group on the page that offers a view of the same
     name. ``?view=<name>`` in the page URL picks the initial view. Without
     JavaScript every view stays visible under its label. A ``tip`` (the long
-    wording behind a short label) shows as the button's tooltip.
+    wording behind a short label) shows as the button's tooltip. A body may hold
+    another group (a second switch row); the script handles each group's own
+    panels and buttons, so the two rows switch independently.
     """
     parts = ['<div class="view-group">']
     if len(views) > 1:

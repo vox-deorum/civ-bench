@@ -63,9 +63,11 @@ class View:
     """One of several alternative presentations of a section's results.
 
     An analysis declares views in ``metadata["views"]`` (an ordered mapping of
-    view name to ``{"label", "tables", "figures"}``). The first view is the
-    default; the HTML report shows one view at a time behind a toggle, and the
-    Markdown report renders every view under its own subheading.
+    view name to ``{"label", "tip", "tables", "figures"}``). The first view is
+    the default; the HTML report shows one view at a time behind a toggle, and
+    the Markdown report renders every view under its own subheading. A view
+    spec may hold its own ``"views"`` mapping, which becomes a second switch
+    inside that view (``views`` here), rendered above the view's own artifacts.
     """
 
     name: str
@@ -73,6 +75,7 @@ class View:
     figures: list[Figure] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
     tip: str = ""  # the long wording behind a short label, shown on hover
+    views: list["View"] = field(default_factory=list)
 
 
 @dataclass

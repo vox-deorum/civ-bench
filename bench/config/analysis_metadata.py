@@ -89,10 +89,16 @@ def _report_defaults_in_file(path: Path) -> dict[str, dict]:
             if name == "module" and isinstance(value, ast.Constant) and isinstance(value.value, str):
                 module = value.value
             elif name == "report_defaults" and value is not None:
+                # A non-literal (an f-string, a name) would silently inline every
+                # artifact, so fail loudly instead.
                 try:
                     parsed = ast.literal_eval(value)
-                except (ValueError, TypeError, SyntaxError):
-                    parsed = None
+                except (ValueError, TypeError, SyntaxError) as exc:
+                    raise ValueError(
+                        f"{path}:{stmt.lineno}: {node.name}.report_defaults must be a plain "
+                        "literal (no f-strings or names) so the config layer can read it "
+                        "without importing the analysis."
+                    ) from exc
                 if isinstance(parsed, dict):
                     report_defaults = parsed
         if module is not None and report_defaults is not None:

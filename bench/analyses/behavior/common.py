@@ -492,9 +492,30 @@ def views_metadata(declared: dict, baseline: Optional[Baseline] = None,
     out = {}
     for name in order:
         spec = declared.get(name)
-        if spec and (spec.get("tables") or spec.get("figures")):
+        if spec and (spec.get("tables") or spec.get("figures") or spec.get("views")):
             out[name] = {"label": labels.get(name, name), "tip": tips.get(name, ""), **spec}
     return out
+
+
+def nested_views_metadata(declared: dict, baseline: Optional[Baseline] = None,
+                          inner: Optional[dict] = None) -> dict:
+    """``metadata["views"]`` with two switch rows: relative or absolute, then a tab.
+
+    ``declared`` names each view ``<outer>/<inner>`` (such as ``relative/turn_100``).
+    Outer views are labeled and ordered as in :func:`views_metadata`; inner views
+    keep declaration order and take ``inner[name] = (label, tip)``. Empty views
+    are skipped.
+    """
+    outer: dict = {}
+    for name, spec in declared.items():
+        if "/" not in name or not (spec.get("tables") or spec.get("figures")):
+            continue
+        parent, child = name.split("/", 1)
+        label, tip = (inner or {}).get(child, (child, ""))
+        outer.setdefault(parent, {"tables": [], "figures": [], "views": {}})["views"][child] = {
+            "label": label, "tip": tip, **spec,
+        }
+    return views_metadata(outer, baseline)
 
 
 # ── HTML heatmap tables ───────────────────────────────────────────────────────
