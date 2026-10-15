@@ -655,6 +655,7 @@ def heatmap_spec(
         "column_tips": dict(column_tips),
         "decimals": int(decimals),
         "signed": view == RELATIVE,
+        "mark_significant": view == RELATIVE,
         "value_label": value_label,
         "ci_level": float(ci_level),
         "legend": [list(entry) for entry in legend],

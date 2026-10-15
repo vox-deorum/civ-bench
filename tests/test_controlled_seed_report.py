@@ -364,7 +364,12 @@ def test_ordering_and_colors_stable(env):
     result = env()
     meta = result.metadata
     assert meta["strategist_order"] == ["GPT-OSS-120B-Simple", "Kimi-K2.5"]
-    assert meta["condition_order"] == ["Every-turn", "Per-5"]
+    # The base condition leads, then the catalog's configured conditions. The
+    # tracked catalog may configure more than these games play (such as
+    # Agentic), so only the order of the played ones is pinned.
+    assert meta["condition_order"][0] == "Every-turn"
+    played = [c for c in meta["condition_order"] if c in {"Every-turn", "Per-5"}]
+    assert played == ["Every-turn", "Per-5"]
     assert meta["base_label"] == "Every-turn"
     assert meta["vanilla_label"] == "Vanilla"
     assert meta["strategist_colors"]["GPT-OSS-120B-Simple"] == "#FF7F00"

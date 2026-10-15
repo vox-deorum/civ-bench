@@ -1152,10 +1152,14 @@ def test_report_help_contains_escaped_section_details_and_accessible_link():
     help_start = '<span class="help-text" role="tooltip" id="help-section-s">'
     assert help_start in family
     help_text = family.split(help_start, 1)[1].split("</span>", 1)[0]
+    # The heading tooltip says what the section measures; the module and
+    # metadata sit with the downloads as its provenance.
     assert "Description &lt;with&gt; &amp; details" in help_text
-    assert "Module: family.module" in help_text
-    assert "source: table &lt;main&gt; &amp; derived" in help_text
+    assert "Module:" not in help_text
     assert "<with>" not in help_text
+    provenance = family.split('<p class="provenance">', 1)[1].split("</p>", 1)[0]
+    assert "Module: family.module" in provenance
+    assert "source: table &lt;main&gt; &amp; derived" in provenance
 
     markdown = render_markdown(doc)
     assert "<details>" in markdown and "<summary>Technical details</summary>" in markdown
@@ -1186,7 +1190,9 @@ def test_cached_controlled_summary_is_publicly_normalized():
 def test_help_ids_remain_unique_when_section_anchors_overlap_help_suffix():
     from bench.reports.model import FamilyGroup, ReportDocument, Section
 
-    sections = [Section(id="x", module="m"), Section(id="x-help", module="m")]
+    # A section shows a help control only when it has a description.
+    sections = [Section(id="x", module="m", description="First."),
+                Section(id="x-help", module="m", description="Second.")]
     doc = ReportDocument(
         title="Benchmark", run_name="run", seed=1, config_path="config.json",
         output_root="reports", groups=[FamilyGroup(key="family", title="Family", sections=sections)],
@@ -1571,6 +1577,43 @@ def test_heatmap_columns_carry_their_own_format_units_and_labels():
     # The pinned baseline row is absolute, so it takes the baseline units.
     assert "Average\t64.9%" in page
     assert "| Kimi | +28 | -1.2 |" in render_heatmap_md(frame, spec)
+
+
+def test_heatmap_marks_cells_whose_ci_excludes_zero():
+    import html as _html
+
+    from bench.reports.heatmap import render_heatmap_html, render_heatmap_md
+
+    frame = pd.DataFrame([
+        {"row_label": "Base", "metric": "a", "mean": 50.0, "ci_lower": 40.0, "ci_upper": 60.0,
+         "color_position": 0.5},
+        {"row_label": "Up", "metric": "a", "mean": 28.0, "ci_lower": 25.0, "ci_upper": 31.0,
+         "color_position": 0.9},
+        {"row_label": "Down", "metric": "a", "mean": -5.0, "ci_lower": -9.0, "ci_upper": -2.0,
+         "color_position": 0.2},
+        {"row_label": "Wide", "metric": "a", "mean": 1.0, "ci_lower": -1.0, "ci_upper": 4.0,
+         "color_position": 0.6},
+        {"row_label": "One", "metric": "a", "mean": 7.0, "color_position": 0.7},
+        {"row_label": "Text", "metric": "a", "mean": 40.0, "ci_lower": 10.0, "ci_upper": 70.0,
+         "text": "+40%", "color_position": 0.9},
+    ])
+    spec = {"row": "row_label", "column": "metric", "decimals": 0, "signed": True,
+            "baseline_rows": ["Base"], "ci_level": 0.95, "text_column": "text",
+            "mark_significant": True}
+    page = _html.unescape(render_heatmap_html(frame, spec))
+    assert ">+28*</td>" in page and ">-5*</td>" in page and ">+40%*</td>" in page
+    # A CI across 0, no CI, and the absolute baseline row stay unmarked.
+    assert ">+1</td>" in page and ">+7</td>" in page and ">50</td>" in page
+    assert "* The 95% CI excludes 0." in page
+    md = "\n".join(render_heatmap_md(frame, spec))
+    assert "| Up | +28* |" in md and "| Wide | +1 |" in md
+    assert "_\\* The 95% CI excludes 0._" in md
+
+    # Without the key, or with no significant cell, nothing is marked or noted.
+    unmarked = _html.unescape(render_heatmap_html(frame, {**spec, "mark_significant": False}))
+    assert "*" not in unmarked
+    quiet = frame[frame["row_label"].isin(["Base", "Wide", "One"])]
+    assert "*" not in _html.unescape(render_heatmap_html(quiet, spec))
 
 
 def test_heatmap_category_cells_take_their_category_color():

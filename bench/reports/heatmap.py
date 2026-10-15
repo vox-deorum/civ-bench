@@ -32,6 +32,10 @@ and optionally ``ci_lower`` / ``ci_upper`` / ``median`` / ``n_players`` /
     text, and the header tooltip.
 ``decimals``, ``signed``, ``value_label``, ``ci_level``
     Number format and the tooltip's value line.
+``mark_significant``
+    When true, a signed cell whose ``ci_lower`` and ``ci_upper`` are both above
+    or both below 0 ends in ``*``, and a note under the table says what the
+    star means. Baseline rows and cells without a CI are never marked.
 ``column_decimals``, ``column_value_labels``, ``column_units``, ``unit``
     Optional per-column overrides of ``decimals`` and ``value_label``, and a
     unit appended to the tooltip's numbers (such as ``%``) per column or for
@@ -253,12 +257,33 @@ def _decimals(spec: dict, column: str) -> int:
     return int(per_column.get(column, spec.get("decimals", 1)))
 
 
+def _significant(rec: dict, spec: dict, row: str) -> bool:
+    """Whether a marked table's signed cell has a CI entirely above or below 0."""
+    if not spec.get("mark_significant") or not _signed(spec, row):
+        return False
+    try:
+        lo, hi = float(rec.get("ci_lower")), float(rec.get("ci_upper"))
+    except (TypeError, ValueError):
+        return False
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return False
+    return (lo > 0 and hi > 0) or (lo < 0 and hi < 0)
+
+
 def _cell_value(rec: dict, spec: dict, row: str, column: str) -> str:
-    text = _text(rec, spec.get("text_column"))
-    if text:
-        return text
-    return _number(rec.get(spec.get("value", "mean")), _decimals(spec, column),
-                   _signed(spec, row))
+    text = _text(rec, spec.get("text_column")) or _number(
+        rec.get(spec.get("value", "mean")), _decimals(spec, column), _signed(spec, row)
+    )
+    return f"{text}*" if text and _significant(rec, spec, row) else text
+
+
+def _significance_note(spec: dict, cells: dict) -> str:
+    """The note under a table with at least one marked cell, else blank."""
+    if not any(_significant(rec, spec, row) for (row, _), rec in cells.items()):
+        return ""
+    level = spec.get("ci_level")
+    prefix = f"{float(level) * 100:g}% CI" if isinstance(level, (int, float)) else "CI"
+    return f"* The {prefix} excludes 0."
 
 
 def _raw_value(rec: dict, spec: dict) -> str:
@@ -490,6 +515,9 @@ def render_heatmap_html(
     parts.extend(_rows_html(body, columns, cells, spec, reference=False, model_tips=model_tips))
     parts.append("</table></div>")
     parts.append(_legend_html(spec))
+    note = _significance_note(spec, cells)
+    if note:
+        parts.append(f'<p class="caption">{_esc(note)}</p>')
     if csv_link:
         parts.append(f'<p class="caption">{csv_link}</p>')
     parts.append("</figure>")
@@ -521,4 +549,8 @@ def render_heatmap_md(frame: pd.DataFrame, spec: dict) -> list[str]:
     out.append("")
     if key:
         out.extend([f"_Columns: {'; '.join(key)}._", ""])
+    note = _significance_note(spec, cells)
+    if note:
+        # Escaped, so the leading star stays text inside the italics.
+        out.extend(["_" + note.replace("*", "\\*") + "_", ""])
     return out

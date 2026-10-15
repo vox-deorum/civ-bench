@@ -261,6 +261,10 @@ def test_progress_views_nest_the_tabs_under_relative_and_absolute(world_env):
         "World growth at turn 2 vs. the in-game AI")
     assert heatmaps["world_progress_t2_absolute"]["title"] == "World growth at turn 2, actual values"
     assert "differ" not in heatmaps["world_progress_t2_absolute"]["help"]
+    # Only the relative tables carry CIs, so only they mark significant cells.
+    assert heatmaps["world_progress_t2_relative"]["mark_significant"] is True
+    assert heatmaps["world_progress_t2_absolute"]["mark_significant"] is False
+    assert heatmaps["world_progress_by_seed"]["mark_significant"] is False
     spec = result.metadata["heatmaps"]["world_progress_overview_relative"]
     assert spec["column_order"][:4] == ["p__population@2", "w__population@2",
                                         "p__population@4", "w__population@4"]
