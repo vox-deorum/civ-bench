@@ -214,11 +214,14 @@ def test_uncontrolled_conflict_shows_only_absolute_values(world_env):
 def test_progress_reads_percent_changes_at_each_checkpoint(world_env):
     result = world_env("world.progress", PROGRESS)
     t2 = _table(result, "world_progress_t2_relative")
-    # Seat 0: 30 vs mean(10, 20) = +100%, 5 vs 10 = -50%.
-    assert _cell(t2, LLM, "p__population@2") == pytest.approx(25.0)
-    assert _cell(t2, LLM, "p__population@2", "cell_text") == "+25%"
-    # Sums: 60 vs mean(30, 60) = +33%, 25 vs 30 = -17%.
-    assert _cell(t2, LLM, "w__population@2") == pytest.approx(25 / 3)
+    # Seat 0: 30 vs mean(10, 20) = 15, then 5 vs 10. A cell compares the
+    # averages, 17.5 vs 12.5 = +40%, not the average of +100% and -50%.
+    assert _cell(t2, LLM, "p__population@2") == pytest.approx(40.0)
+    assert _cell(t2, LLM, "p__population@2", "cell_text") == "+40%"
+    assert _cell(t2, LLM, "p__population@2", "value_mean") == pytest.approx(17.5)
+    assert _cell(t2, LLM, "p__population@2", "baseline_mean") == pytest.approx(12.5)
+    # Sums: 60 vs mean(30, 60) = 45, then 25 vs 30.
+    assert _cell(t2, LLM, "w__population@2") == pytest.approx(100 * (85 / 75 - 1))
     assert _cell(t2, "Null", "p__population@2") == pytest.approx(-100.0)
     t4 = _table(result, "world_progress_t4_relative")
     # B1b ended at turn 3, so seed 1 compares with B1a alone; the civ eliminated
@@ -227,7 +230,7 @@ def test_progress_reads_percent_changes_at_each_checkpoint(world_env):
     assert _cell(t4, LLM, "w__population@4") == pytest.approx(25.0)
     assert _cell(t4, LLM, "w__civs_alive@4") == pytest.approx(-0.5)
     # Techs average over surviving civs: 40/3 vs 10, then 15 vs 10.
-    assert _cell(t4, LLM, "w__technologies@4") == pytest.approx((100 / 3 + 50) / 2)
+    assert _cell(t4, LLM, "w__technologies@4") == pytest.approx(100 * ((40 / 3 + 15) / 20 - 1))
 
 
 def test_progress_endings_compare_win_shares_in_points(world_env):
@@ -352,6 +355,8 @@ def test_world_page_renders_both_sections_with_their_tabs(world_env):
     assert 'id="section-wld-progress-absolute-view-turn-2"' in page
     assert ">AI-only world<" in page
     assert ">+25%<" in page
+    # The No winner group is headed "None", which must not read back as missing.
+    assert ">None<" in page and ">nan<" not in page
     # The Matched Maps tables are not drawn inline on the World page.
     assert "World: progress" not in page
     assert "Hover a cell to see its difference from the top row." not in page

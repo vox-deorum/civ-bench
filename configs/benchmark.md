@@ -1084,7 +1084,7 @@ The `world.*` family reports what happened in each game: `world.conflict` counts
 
 Rows cover every non-Vanilla player type. Against the in-game AI baseline the Vanilla rows are left out because the pinned top row (`AI-only world`) stands for them; the Null strategist stays. The pinned row shows the baseline in absolute values. A World value includes the strategist's own civ. Within one row, a World cell counts each game once, however many of the row's players the game held, so its player count equals its game count; a game with two different strategists counts once for each of their rows. The bootstrap resamples whole games.
 
-Relative cells read per the metric's unit: counts as a difference (`+2.1`), shares as percentage points (`+3 pts`), and sizes and yields as a percent change (`+6%`; blank when the matched baseline value is 0). Cells show their unit, and the tooltip shows the value, the matched baseline value, and the game count.
+Relative cells read per the metric's unit: counts as a difference (`+2.1`), shares as percentage points (`+3 pts`), and sizes and yields as a percent change (`+6%`). A percent cell compares two averages over the row's measured players: their own values and their matched baseline values (each player's baseline seat or map average). It is not the average of each player's own percent change, which a few small baseline values could dominate. The Matched Maps difference reads the same way. Cells show their unit, and the tooltip shows the value, the matched baseline value, and the game count.
 
 Params shared by both modules:
 

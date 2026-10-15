@@ -300,7 +300,9 @@ def _build_section(
             context.record_table(stage_id, tbl["name"], src_dir, tbl["file"])
         if tbl["name"] in inline_tables:
             spec = heatmap_spec(section.metadata, tbl["name"])
-            frame = pd.read_csv(src, dtype={name: str for name in text_columns(spec)})
+            # Only blank cells are missing: a label such as "None" or "NA" stays text.
+            frame = pd.read_csv(src, dtype={name: str for name in text_columns(spec)},
+                                keep_default_na=False, na_values=[""])
             if not spec_fits(spec, frame):
                 spec = None
             # A heatmap pivots its long table into one grid, so it needs every row.

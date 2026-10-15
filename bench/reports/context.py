@@ -84,4 +84,5 @@ class ReportBuildContext:
                 f"report section '{stage_id}': table artifact '{name}' is missing "
                 f"at '{source.rel_file}'."
             )
-        return pd.read_csv(path)
+        # Only blank cells are missing: a label such as "None" or "NA" stays text.
+        return pd.read_csv(path, keep_default_na=False, na_values=[""])

@@ -95,7 +95,7 @@ class BehaviorViews:
     baseline_sd: dict = field(default_factory=dict)
     # metric → the SD a relative cell's color is scaled by: ``baseline_sd``,
     # except for percent-change metrics, where it is the pool's SD of its own
-    # percent deviations from the cell means.
+    # deviations from the cell means, as a percent of the pool's mean.
     color_sd: dict = field(default_factory=dict)
     # Metrics whose relative value is a percent change, not a difference.
     percent: frozenset = frozenset()
@@ -280,9 +280,11 @@ def build_views(
 
     A metric in ``percent`` reads as a percent change from its baseline cell
     mean, ``100 * (x - base) / base``, blank where that mean is not positive.
-    With ``keep_baseline``, each relative row also keeps ``<metric>__value``
-    (as measured) and ``<metric>__baseline`` (the matched cell mean) for
-    tooltips.
+    Each relative row keeps ``<metric>__value`` (as measured) and
+    ``<metric>__baseline`` (the matched cell mean, blank where the value is)
+    for percent metrics, and for every metric with ``keep_baseline``:
+    :func:`summarize` reads a group's percent change from their averages, and
+    tooltips show them.
 
     A metric in ``per_game`` holds one value per game, copied onto each of its
     players (such as a whole-game total). It is matched against the mean over
@@ -336,9 +338,12 @@ def build_views(
     for metric in usable:
         if metric in percent:
             own = with_cells(source(metric), "__cell")
-            cell = own[f"{metric}__cell"]
-            change = (100.0 * (own[metric] - cell) / cell).where(cell > 0)
-            views.color_sd[metric] = float(change.std(ddof=1))
+            scale = float(own[metric].mean())
+            if scale > 0:
+                change = 100.0 * (own[metric] - own[f"{metric}__cell"]) / scale
+                views.color_sd[metric] = float(change.std(ddof=1))
+            else:
+                views.color_sd[metric] = float("nan")
     for metric in usable:
         values = source(metric)[["game_id", metric]].dropna()
         views.baseline_summary[metric] = {
@@ -371,9 +376,9 @@ def build_views(
         else:
             def shift(values, base=base):
                 return values - base
-        if keep_baseline:
+        if keep_baseline or metric in percent:
             kept[f"{metric}__value"] = matched[metric]
-            kept[f"{metric}__baseline"] = base
+            kept[f"{metric}__baseline"] = base.where(matched[metric].notna())
         shifted[metric] = shift(matched[metric])
         for column in (companions or {}).get(metric, ()):
             if column in matched.columns:
@@ -403,6 +408,16 @@ def one_per_game(frame: pd.DataFrame, metric: str, per_game, keys=()) -> pd.Data
     return frame.drop_duplicates([*keys, "game_id"])
 
 
+def group_differences(views: BehaviorViews, metric: str, keys: list[str]) -> pd.Series:
+    """Each ``keys`` group's relative value of ``metric``, read as :func:`summarize` reads it."""
+    own = one_per_game(views.relative, metric, views.per_game, keys)
+    if metric not in views.percent:
+        return own.groupby(keys)[metric].mean()
+    value, base = f"{metric}__value", f"{metric}__baseline"
+    sums = own.dropna(subset=[value, base]).groupby(keys)[[value, base]].sum()
+    return pd.Series(_percent_change(sums[value], sums[base]), index=sums.index, dtype=float)
+
+
 def summarize(
     ctx: AnalysisContext,
     df: pd.DataFrame,
@@ -412,26 +427,41 @@ def summarize(
     bootstrap_n: int,
     ci_level: float,
     per_game=frozenset(),
+    percent=frozenset(),
 ) -> pd.DataFrame:
     """Long table: one row per ``(by, metric)`` with mean, median, and a game-level bootstrap CI.
 
-    A metric in ``per_game`` counts each game of a group once.
+    A metric in ``per_game`` counts each game of a group once. A metric in
+    ``percent`` (relative rows from :func:`build_views`) reads as the percent
+    change of the group's average ``<metric>__value`` from its average
+    ``<metric>__baseline``, so a few small baseline cells cannot dominate it;
+    its median is the median player's own percent change.
     """
     records = []
     for group, grp in df.groupby(by, sort=False):
         for metric in metrics:
-            values = one_per_game(grp, metric, per_game)[["game_id", metric]].dropna()
-            if values.empty:
-                continue
-            lo, hi = _game_bootstrap(
-                values, metric, bootstrap_n, ci_level,
-                stage_rng(ctx, ctx.stage_id, view, metric, group),
-            )
+            own = one_per_game(grp, metric, per_game)
+            rng = stage_rng(ctx, ctx.stage_id, view, metric, group)
+            if metric in percent:
+                value, base = f"{metric}__value", f"{metric}__baseline"
+                values = own[["game_id", value, base]].dropna()
+                if values.empty:
+                    continue
+                mean = _percent_change(values[value].sum(), values[base].sum())
+                lo, hi = _game_bootstrap(values, value, bootstrap_n, ci_level, rng, base)
+                median = own[metric].median()
+            else:
+                values = own[["game_id", metric]].dropna()
+                if values.empty:
+                    continue
+                mean = values[metric].mean()
+                lo, hi = _game_bootstrap(values, metric, bootstrap_n, ci_level, rng)
+                median = values[metric].median()
             records.append({
                 by: group,
                 "metric": metric,
-                "mean": float(values[metric].mean()),
-                "median": float(values[metric].median()),
+                "mean": float(mean),
+                "median": float(median),
                 "ci_lower": lo,
                 "ci_upper": hi,
                 "n_players": int(len(values)),
@@ -441,15 +471,34 @@ def summarize(
     return order_groups(out, by)
 
 
-def _game_bootstrap(values: pd.DataFrame, metric: str, n: int, ci_level: float, rng) -> tuple:
-    """Percentile CI of the mean, resampling whole games (players in a game move together)."""
-    per_game = values.groupby("game_id", sort=True)[metric].agg(["sum", "count"])
+def _percent_change(value, base):
+    """``100 * (value - base) / base``, NaN where ``base`` is not positive (scalars or arrays)."""
+    value, base = np.asarray(value, dtype=float), np.asarray(base, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(base > 0, 100.0 * (value - base) / base, np.nan)
+
+
+def _game_bootstrap(values: pd.DataFrame, metric: str, n: int, ci_level: float, rng,
+                    base: str | None = None) -> tuple:
+    """Percentile CI of the mean, resampling whole games (players in a game move together).
+
+    With ``base``, the CI is of the percent change of ``metric``'s mean from
+    ``base``'s mean, as :func:`summarize` reads a percent metric.
+    """
+    per_game = values.groupby("game_id", sort=True).agg(
+        sum=(metric, "sum"), count=(metric, "count"),
+        **({"base": (base, "sum")} if base else {}))
     if len(per_game) < 2 or n < 1:
         return float("nan"), float("nan")
     sums = per_game["sum"].to_numpy()
-    counts = per_game["count"].to_numpy()
     idx = rng.integers(0, len(per_game), size=(n, len(per_game)))
-    means = sums[idx].sum(axis=1) / counts[idx].sum(axis=1)
+    if base:
+        means = _percent_change(sums[idx].sum(axis=1), per_game["base"].to_numpy()[idx].sum(axis=1))
+        means = means[np.isfinite(means)]
+        if not len(means):
+            return float("nan"), float("nan")
+    else:
+        means = sums[idx].sum(axis=1) / per_game["count"].to_numpy()[idx].sum(axis=1)
     alpha = (1.0 - ci_level) / 2.0
     return float(np.quantile(means, alpha)), float(np.quantile(means, 1.0 - alpha))
 

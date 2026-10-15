@@ -179,7 +179,8 @@ class BehaviorAnalysis(Analysis):
             if not view_metrics:
                 continue
             summary = C.summarize(ctx, frame, view_metrics, self.by, view,
-                                  self.bootstrap_n, self.ci_level, views.per_game)
+                                  self.bootstrap_n, self.ci_level, views.per_game,
+                                  percent=views.percent if view == C.RELATIVE else frozenset())
             if summary.empty:
                 continue
             summary.insert(summary.columns.get_loc("metric") + 1, "metric_group",
@@ -340,8 +341,7 @@ class BehaviorAnalysis(Analysis):
         """One long absolute table per ``keys`` cell, the baseline row first."""
         by = self.by
         cell_keys = keys + [by]
-        difference = {m: C.one_per_game(views.relative, m, views.per_game, cell_keys)
-                      .groupby(cell_keys)[m].mean() for m in metrics}
+        difference = {m: C.group_differences(views, m, cell_keys) for m in metrics}
         records = []
         for values, grp in rows.groupby(cell_keys, sort=True):
             cell, group = tuple(values[:-1]), values[-1]
