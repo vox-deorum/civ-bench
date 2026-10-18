@@ -33,6 +33,10 @@ class PruneGate:
         for game_id, row in rows.items():
             self._details.setdefault(game_id, row)
 
+    def approve(self, game_ids: Iterable[str]) -> None:
+        """Pre-approve games the caller already confirmed, so they are never asked about."""
+        self.approved.update(game_ids)
+
     def review(self, game_ids: Iterable[str]) -> set:
         """Return the subset of ``game_ids`` approved for pruning, asking about new ones."""
         game_ids = set(game_ids)

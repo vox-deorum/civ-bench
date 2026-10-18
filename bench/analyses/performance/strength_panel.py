@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from bench.data.loading import drop_problem_games
+from bench.data.repeats import REPEATED_GAMES_COLUMNS, controlled_rows, repeated_slots
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 
@@ -29,10 +30,6 @@ from ..errors import AnalysisError
 COMPLETENESS_COLUMNS = [
     "experiment", "required_games", "present_games", "missing_games",
     "completeness_pct", "repeated_slots", "excluded_games", "warning",
-]
-REPEATED_GAMES_COLUMNS = [
-    "experiment", "seed", "seating_rotation", "n_games", "game_ids",
-    "keep_candidate_game_id", "extra_game_ids",
 ]
 COMPLETENESS_GAPS_COLUMNS = [
     "experiment", "seed", "missing_rotations", "n_missing",
@@ -99,62 +96,6 @@ def _summarize_by(
     return pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
 
 
-def _truthy(series: pd.Series) -> pd.Series:
-    if series.dtype == bool:
-        return series.fillna(False)
-    return series.astype(str).str.lower().isin({"true", "1", "yes"})
-
-
-def _controlled_panel(panel: pd.DataFrame) -> pd.DataFrame:
-    required = {"experiment", "game_id", "seed", "seating_rotation", "player_id"}
-    if not required <= set(panel.columns):
-        return pd.DataFrame(columns=list(panel.columns))
-    if "controlled" in panel.columns:
-        mask = _truthy(panel["controlled"])
-    else:
-        mask = (panel["seed"].fillna(-1).astype(int) != -1) & (
-            panel["seating_rotation"].fillna(-1).astype(int) != -1
-        )
-    out = panel[mask].copy()
-    if out.empty:
-        return out
-    out["seed"] = out["seed"].astype(int)
-    out["seating_rotation"] = out["seating_rotation"].astype(int)
-    out["player_id"] = out["player_id"].astype(int)
-    out["game_id"] = out["game_id"].astype(str)
-    out["experiment"] = out["experiment"].astype(str)
-    return out
-
-
-def _game_sort_frame(games: pd.DataFrame | None) -> pd.DataFrame:
-    if games is None or games.empty or "game_id" not in games.columns:
-        return pd.DataFrame(columns=["game_id", "_timestamp_num", "_timestamp_str"])
-    cols = ["game_id"] + (["timestamp"] if "timestamp" in games.columns else [])
-    out = games[cols].drop_duplicates("game_id").copy()
-    out["game_id"] = out["game_id"].astype(str)
-    if "timestamp" in out.columns:
-        out["_timestamp_num"] = pd.to_numeric(out["timestamp"], errors="coerce")
-        out["_timestamp_str"] = out["timestamp"].astype(str)
-    else:
-        out["_timestamp_num"] = np.nan
-        out["_timestamp_str"] = ""
-    return out[["game_id", "_timestamp_num", "_timestamp_str"]]
-
-
-def _ordered_game_ids(ids: list[str], games: pd.DataFrame | None) -> list[str]:
-    base = pd.DataFrame({"game_id": sorted(set(map(str, ids)))})
-    if base.empty:
-        return []
-    order = base.merge(_game_sort_frame(games), on="game_id", how="left")
-    order["_timestamp_missing"] = order["_timestamp_num"].isna()
-    order["_timestamp_str"] = order["_timestamp_str"].fillna("")
-    order = order.sort_values(
-        ["_timestamp_missing", "_timestamp_num", "_timestamp_str", "game_id"],
-        kind="mergesort",
-    )
-    return order["game_id"].tolist()
-
-
 def _reference_slots(controlled: pd.DataFrame, baseline_experiment: str | None) -> list[tuple[int, int]]:
     ref = controlled
     if baseline_experiment is not None:
@@ -177,7 +118,7 @@ def build_experiment_completeness(
     The summary counts distinct games, while completeness is based on occupied
     seed/rotation slots so repeated game ids in one slot cannot mask gaps.
     """
-    controlled = _controlled_panel(panel)
+    controlled = controlled_rows(panel)
     if controlled.empty:
         return {}
 
@@ -196,24 +137,13 @@ def build_experiment_completeness(
         accepted = drop_problem_games(exp_df, excluded_game_ids)
         excluded_games = exp_df["game_id"].nunique() - accepted["game_id"].nunique()
         exp_df = accepted
-        slot_groups = exp_df.groupby(["seed", "seating_rotation"], sort=True)["game_id"]
-        present_slots: set[tuple[int, int]] = set()
-        repeated_slots = 0
-        for (seed, rot), ids in slot_groups:
-            key = (int(seed), int(rot))
-            present_slots.add(key)
-            ordered = _ordered_game_ids(ids.dropna().astype(str).unique().tolist(), games)
-            if len(ordered) > 1:
-                repeated_slots += 1
-                repeated_rows.append({
-                    "experiment": experiment,
-                    "seed": int(seed),
-                    "seating_rotation": int(rot),
-                    "n_games": int(len(ordered)),
-                    "game_ids": ",".join(ordered),
-                    "keep_candidate_game_id": ordered[0],
-                    "extra_game_ids": ",".join(ordered[1:]),
-                })
+        present_slots = {
+            (int(seed), int(rot))
+            for seed, rot in exp_df[["seed", "seating_rotation"]].drop_duplicates().itertuples(index=False)
+        }
+        repeats = repeated_slots(exp_df, games)
+        repeated_rows.extend(repeats)
+        n_repeated = len(repeats)
 
         missing_by_seed: dict[int, list[int]] = {}
         for seed, rot in sorted(reference_set - present_slots):
@@ -258,8 +188,8 @@ def build_experiment_completeness(
             warnings.append(f"{excluded_games} game(s) excluded by decision failure cutoff")
         if missing_games:
             warnings.append(f"{missing_games} missing slot(s)")
-        if repeated_slots:
-            warnings.append(f"{repeated_slots} repeated slot(s)")
+        if n_repeated:
+            warnings.append(f"{n_repeated} repeated slot(s)")
         if cell_repeat_issue:
             warnings.append(
                 f"cell repeat counts differ from expected {expected_per_cell}"
@@ -271,7 +201,7 @@ def build_experiment_completeness(
             "missing_games": missing_games,
             "completeness_pct": round((required - missing_games) / required, 4)
             if required else float("nan"),
-            "repeated_slots": int(repeated_slots),
+            "repeated_slots": int(n_repeated),
             "excluded_games": int(excluded_games),
             "warning": "; ".join(warnings) if warnings else "ok",
         })

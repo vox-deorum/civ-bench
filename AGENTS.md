@@ -79,6 +79,7 @@ civ-bench extract --config configs/benchmark.dev.json
 civ-bench run --config configs/benchmark.dev.json
 civ-bench report --config configs/benchmark.dev.json
 civ-bench fix --config configs/benchmark.dev.json --dry-run
+civ-bench trim --config configs/benchmark.dev.json --dry-run
 pytest
 ```
 

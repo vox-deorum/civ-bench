@@ -61,6 +61,8 @@ Handy flags:
 - `--prune-missing` (with `extract` or `run`) removes games whose DB is gone from the CSVs, without extracting new games. It lists the games and asks before removing anything.
 - `--no-publish` (with `run` or `report`) skips the post-report offer to commit and push the rendered report. See [Release the report](#release-the-report).
 
+`civ-bench trim --config <spec>` enforces one game per (seed, seating_rotation) slot: it keeps the earliest accepted game in each slot, renames every file under `runs_dir` belonging to each extra game to `.bak`, and drops those games' rows from every canonical table. Slots whose kept game has no DB are left alone. If pruning fails partway, run trim again to finish it. It lists the slots and files and asks before changing anything; `--dry-run` lists without changing anything.
+
 Your finished report lands in `reports/<run-name>/`. It contains `index.html`, a compact overview; `ratings.html`, `prediction.html`, `calibration.html`, `performance.html`, and `exploratory.html` for represented analysis families; `report.md`; and a self-contained `assets/` tree with `report.css`, figures, and full-table CSVs. Rendering is **deterministic** (no timestamps), so re-running `civ-bench report` reproduces every document byte-for-byte.
 
 ---
@@ -218,3 +220,4 @@ civ-bench run --config configs/benchmark.dev.json --skip extract       # reuse e
 - **Extraction seems to do nothing.** It is skipped automatically when every output CSV already exists and is newer than the game DBs. Pass `--force-rebuild` to rebuild anyway.
 - **A new game is missing from the report.** The skip check compares file times, not game IDs. A DB that shows up after the last extract but keeps an older modified time (for example, one OneDrive syncs from the game machine) looks "already extracted", so every later `run` skips it. To confirm, search `runs/game_data.csv` for the game's UUID and check that the CSVs are dated after the DB file. Fix it with `civ-bench run --config <spec> --force-rebuild`. The flag only turns off the skip check: games already in the tables are still skipped, so only the missing game is extracted.
 - **A game you moved out of `runs_dir` still shows up.** A skipped extract does not notice removed DBs. Run `civ-bench extract --config <spec> --prune-missing`, check the listed games, and answer `y`.
+- **A slot has more than one game.** A controlled experiment needs one game per (seed, seating_rotation) slot; the extras show up in `repeated_games.csv`. Run `civ-bench trim --config <spec> --dry-run` to see which games would be trimmed, then `civ-bench trim --config <spec>` to trim them.

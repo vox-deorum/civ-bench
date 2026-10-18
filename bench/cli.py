@@ -2,6 +2,7 @@
 
     civ-bench extract|run|report --config <path> [--only ID] [--skip ID] [--dry-run]
                                  [--no-publish] [--prune-missing]
+    civ-bench fix|trim --config <path> [--dry-run]
 
 Stage 0 implements config loading + validation + DAG resolution + dry-run
 printing; stage 1 adds the ``extract`` stage (raw game DBs → canonical CSVs);
@@ -19,6 +20,9 @@ runs. Disable via ``data.extract.auto_fix: false`` or ``--no-fix``.
 Before any extract drops rows for games whose DB is gone, it lists those games and
 asks. ``--prune-missing`` runs a prune-only extract (no new games) for this
 invocation; a run that is skipped because its outputs are fresh never prunes.
+
+``trim`` keeps the earliest game in each repeated controlled slot, renames the
+extra games' source files to ``.bak``, and prunes their rows from the tables.
 """
 
 from __future__ import annotations
@@ -109,6 +113,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="re-repair even when a <name>.db.bak backup already exists (overwrites it)",
     )
+
+    trim = sub.add_parser(
+        "trim",
+        help="rename extra games in repeated controlled slots to .bak and prune them "
+             "from the tables",
+    )
+    trim.add_argument(
+        "--config", required=True,
+        help="path to a benchmark run-spec (configs/benchmark*.json)",
+    )
+    trim.add_argument(
+        "--dry-run", action="store_true",
+        help="list the games and files that would be trimmed, without changing anything",
+    )
     return parser
 
 
@@ -137,6 +155,21 @@ def _confirm_prune(games: list[dict]) -> bool:
         return False
     try:
         answer = input("Remove these games from the canonical tables? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _confirm_trim(slots: list[dict]) -> bool:
+    """Ask before renaming the listed extra games; a non-TTY stdin declines."""
+    n_games = sum(len(slot["extra_game_ids"].split(",")) for slot in slots)
+    print()
+    if not sys.stdin.isatty():
+        print("civ-bench: trim: no interactive console; nothing was renamed.")
+        return False
+    try:
+        answer = input(f"Rename the source files of these {n_games} game(s) to .bak "
+                       f"and remove them from the tables? [y/N] ")
     except EOFError:
         return False
     return answer.strip().lower() in ("y", "yes")
@@ -381,6 +414,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         # Best-effort tool: non-zero only when the run resolved nothing yet left
         # unresolved DBs (every attempt failed, or none could be located).
         return 2 if (result.unresolved and not result.repaired) else 0
+
+    if args.command == "trim":
+        # Like `fix`, `trim` works on files and tables directly and needs no DAG.
+        from .trim import TrimError, run_trim
+
+        try:
+            result = run_trim(
+                cfg, dry_run=bool(args.dry_run),
+                confirm=_confirm_trim, prune_confirm=_confirm_prune,
+            )
+        except (ConfigError, ExtractError, TrimError) as exc:
+            print(f"civ-bench: trim error: {exc}", file=sys.stderr)
+            return 2
+        return 2 if (result.failed and not result.trimmed) else 0
 
     try:
         dag = build_dag(cfg)

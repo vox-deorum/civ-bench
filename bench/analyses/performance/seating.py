@@ -24,7 +24,8 @@ import json
 import pandas as pd
 
 from bench.data.loading import drop_problem_games
-from .strength_panel import _controlled_panel, _ordered_game_ids, _reference_slots
+from bench.data.repeats import controlled_rows, ordered_game_ids
+from .strength_panel import _reference_slots
 
 # Not in civ-bench data; correct for ``randomizeSeating`` in {true, 0, false}. Flagged
 # in each file's ``_comment`` so an operator can adjust for a nonzero numeric seed.
@@ -62,7 +63,7 @@ def _present_slots(exp_df: pd.DataFrame, games: pd.DataFrame | None) -> dict[tup
     """
     present: dict[tuple[int, int], str] = {}
     for (seed, rot), ids in exp_df.groupby(["seed", "seating_rotation"], sort=True)["game_id"]:
-        ordered = _ordered_game_ids(ids.dropna().astype(str).unique().tolist(), games)
+        ordered = ordered_game_ids(ids.dropna().astype(str).unique().tolist(), games)
         if ordered:
             present[(int(rot), int(seed))] = ordered[0]
     return present
@@ -193,7 +194,7 @@ def generate_seating_files(
     index_rows: list[dict] = []
     warnings: list[str] = []
 
-    controlled = _controlled_panel(panel)
+    controlled = controlled_rows(panel)
     if controlled.empty:
         return artifacts, index_rows, warnings
 

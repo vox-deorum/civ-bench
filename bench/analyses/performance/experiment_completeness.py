@@ -10,14 +10,11 @@ from __future__ import annotations
 import pandas as pd
 
 from bench.data.loading import drop_problem_games
+from bench.data.repeats import controlled_rows
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .seating import SEATING_INDEX_COLUMNS, generate_seating_files
-from .strength_panel import (
-    _controlled_panel,
-    _reference_slots,
-    build_experiment_completeness,
-)
+from .strength_panel import _reference_slots, build_experiment_completeness
 
 
 DECISION_TURN_FAILURE_COLUMNS = [
@@ -47,7 +44,7 @@ def build_condition_progress(
     earliest valid accepted game in each reference slot, which keeps later
     reruns from moving it when player identities vary by slot.
     """
-    controlled = _controlled_panel(panel)
+    controlled = controlled_rows(panel)
     required_columns = {"experiment", "player_type"}
     if controlled.empty or not required_columns <= set(controlled.columns):
         return pd.DataFrame(columns=CONDITION_PROGRESS_COLUMNS)

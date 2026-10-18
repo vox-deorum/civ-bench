@@ -36,7 +36,8 @@ DEFAULT_TABLE_PATHS = {
 }
 
 
-def _expected_fieldnames(key: str, behavior_spec: dict) -> list[str]:
+def expected_fieldnames(key: str, behavior_spec: dict) -> list[str]:
+    """The CSV header the ``key`` exporter writes (and accepts when pruning)."""
     if key == "games":
         return GAME_FIELDNAMES
     if key == "panel":
@@ -64,7 +65,8 @@ class ExtractResult:
     kept_missing_game_ids: set = field(default_factory=set)
 
 
-def _table_path(cfg: RunConfig, key: str) -> str:
+def table_path(cfg: RunConfig, key: str) -> str:
+    """Canonical CSV path for ``key``: ``data.tables`` or the extract default."""
     tables = cfg.data.get("tables", {}) or {}
     return tables.get(key) or DEFAULT_TABLE_PATHS[key]
 
@@ -107,7 +109,7 @@ def run_extract(
     issues_path = extract_cfg.get("issues_path", DEFAULT_ISSUES_PATH)
     behavior_spec = resolve_behavior_spec(extract_cfg.get("behavior"))
 
-    output_paths = {key: _table_path(cfg, key) for key in outputs}
+    output_paths = {key: table_path(cfg, key) for key in outputs}
 
     print("=" * 60)
     print("civ-bench extract")
@@ -121,7 +123,7 @@ def run_extract(
 
     # game_data is small, so read it up front: it names the games that would be
     # pruned (with experiment and seed for the prompt) before any big table is read.
-    games_path = _table_path(cfg, "games")
+    games_path = table_path(cfg, "games")
     game_rows = read_game_rows(games_path)
     missing_game_ids = set(game_rows) - available_game_ids
 
@@ -143,7 +145,7 @@ def run_extract(
     # mtimes cannot see a config change.
     freshness_paths = list(output_paths.values()) + [issues_path]
     headers_current = all(
-        csv_header_matches(path, _expected_fieldnames(key, behavior_spec))
+        csv_header_matches(path, expected_fieldnames(key, behavior_spec))
         for key, path in output_paths.items()
     )
     if not force_rebuild and not prune_only and not capped and headers_current \
