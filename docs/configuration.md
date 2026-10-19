@@ -86,13 +86,16 @@ extract  ->  estimators  ->  adjust  ->  analyses  ->  report
     "turns":  "runs/turn_data.csv",          // per-player per-turn features
     "panel":  "runs/panel_data.csv",         // per-player per-game outcomes, strategy, civ
     "games":  "runs/game_data.csv",          // per-game: timestamp, experiment, seed, seating
-    "tokens": "runs/model_token_usage.csv"
+    "tokens": "runs/model_token_usage.csv",  // per-player token use and failed turns
+    "behavior": "runs/behavior_data.csv",    // per-player per-game play style
+    "world":  "runs/world_data.csv",         // per-game world totals
+    "agentic": "runs/agentic_data.csv"       // per tool call, strategists with a workspace
   },
   "filter": "llm_only"               // global selector: a preset name, inline object, or list
 }
 ```
 
-- Set `extract.enabled: false` (or pass `--skip extract`) when you already have the four CSVs and just want to analyze them.
+- Set `extract.enabled: false` (or pass `--skip extract`) when you already have the CSVs and just want to analyze them. [Canonical tables](tables/README.md) explains what each one holds.
 - Extraction is **skipped automatically** when every output CSV exists and is newer than the game DBs, unless `force_rebuild` is set.
 - When a fresh extract records malformed DBs, they are **auto-repaired and re-imported** (extract → `fix` → re-import) before the rest of the run. Turn this off with `auto_fix: false` or the CLI `--no-fix` flag.
 - The global `data.filter` is inherited by every stage. A stage may *narrow* it but never *widen* it.

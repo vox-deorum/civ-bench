@@ -17,12 +17,17 @@ from typing import Dict, List, Optional, Tuple
 
 from ..catalog import Catalog
 from .export_common import run_table_export
-from .identity import compose_identities
 from .issues import record_db_failure
+from .player_traces import (
+    OTEL_ERROR_STATUS_CODE,
+    fetch_valid_traces,
+    find_player_trace_databases,
+    game_player_types,
+    is_top_level_agent_span,
+    parse_player_trace_path,
+)
 from .utilities import (
-    extract_seeding_fields,
-    get_experiment_from_path, get_game_id_from_path, get_player_info_cache,
-    open_database_readonly, read_game_metadata,
+    get_experiment_from_path, get_game_id_from_path, open_database_readonly,
 )
 
 
@@ -55,17 +60,11 @@ VANILLA_MODEL_NAME = "Vanilla"
 VANILLA_MODEL_BASE = "vanilla"
 UNATTRIBUTED_MODEL_NAME = "Unattributed"
 UNATTRIBUTED_MODEL_BASE = "unattributed"
-OTEL_ERROR_STATUS_CODE = 2
 # A call counts as having fully reported reasoning when its reasoning tokens
 # exceed this multiple of its output tokens.
 RECORDED_REASONING_MIN_RATIO = 1.0
 
 STEP_SPAN_PATTERN = re.compile(r"\.step\.(\d+)$")
-
-PLAYER_TRACE_PATTERN = re.compile(
-    r"^(?P<game_id>[0-9a-f-]+)-player-(?P<player_id>\d+)\.db$",
-    re.IGNORECASE,
-)
 
 
 def _extract_agent_name(span_name: str, agent_name: Optional[str]) -> str:
@@ -77,61 +76,8 @@ def _extract_agent_name(span_name: str, agent_name: Optional[str]) -> str:
     return span_name
 
 
-def _is_top_level_agent_span(span_name: str) -> bool:
-    return span_name.startswith("agent.") and ".step." not in span_name
-
-
 def _is_tool_span(span_name: str) -> bool:
     return span_name.startswith("mcp-tool.") or span_name.startswith("simple-tool.")
-
-
-def _parse_player_trace_path(trace_db_path: str) -> Tuple[Optional[str], Optional[int]]:
-    match = PLAYER_TRACE_PATTERN.match(os.path.basename(trace_db_path))
-    if not match:
-        return None, None
-    return match.group("game_id"), int(match.group("player_id"))
-
-
-def _find_player_trace_databases(game_db_path: str) -> List[Tuple[int, str]]:
-    game_id = get_game_id_from_path(game_db_path)
-    if not game_id:
-        return []
-
-    directory = os.path.dirname(game_db_path)
-    trace_dbs = []
-    for filename in os.listdir(directory):
-        if not filename.startswith(f"{game_id}-player-") or not filename.endswith(".db"):
-            continue
-        if filename.endswith(".telepathist.db"):
-            continue
-        _, player_id = _parse_player_trace_path(filename)
-        if player_id is None:
-            continue
-        trace_dbs.append((player_id, os.path.join(directory, filename)))
-    return sorted(trace_dbs, key=lambda item: item[0])
-
-
-def _fetch_valid_traces(cursor) -> List[Tuple[int, str, int]]:
-    cursor.execute(
-        """
-        SELECT turn, traceId, statusCode
-        FROM (
-            SELECT turn, traceId, statusCode, startTime, id,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY turn
-                       ORDER BY startTime DESC, id DESC
-                   ) AS rn
-            FROM spans
-            WHERE name LIKE 'strategist.turn.%'
-        )
-        WHERE rn = 1
-        ORDER BY turn
-        """
-    )
-    return [
-        (int(turn), trace_id, int(status_code))
-        for turn, trace_id, status_code in cursor.fetchall()
-    ]
 
 
 def _fetch_relevant_spans(cursor, trace_ids: List[str]) -> List[dict]:
@@ -230,7 +176,7 @@ def _find_owner_span(tool_span: dict, span_lookup: Dict[Tuple[str, str], dict]) 
         parent = span_lookup.get((trace_id, current_parent_span_id))
         if not parent:
             return None
-        if _is_top_level_agent_span(parent["name"]) and parent["model_raw"]:
+        if is_top_level_agent_span(parent["name"]) and parent["model_raw"]:
             return parent
         current_parent_span_id = parent["parent_span_id"]
     return None
@@ -308,7 +254,7 @@ def extract_player_model_token_rows(
     was unreadable); passing it lets a trace failure report the game's real seed/
     rotation rather than "unknown".
     """
-    _, player_id = _parse_player_trace_path(trace_db_path)
+    _, player_id = parse_player_trace_path(trace_db_path)
     if player_id is None:
         return []
 
@@ -324,7 +270,7 @@ def extract_player_model_token_rows(
 
     try:
         cursor = conn.cursor()
-        valid_turns = _fetch_valid_traces(cursor)
+        valid_turns = fetch_valid_traces(cursor)
         if not valid_turns:
             conn.close()
             return []
@@ -357,7 +303,7 @@ def extract_player_model_token_rows(
     repeated_input = _repeated_input_by_agent_span(spans)
 
     for span in spans:
-        if not _is_top_level_agent_span(span["name"]) or not span["model_raw"]:
+        if not is_top_level_agent_span(span["name"]) or not span["model_raw"]:
             continue
         row = _get_or_create_model_row(
             rows_by_model, catalog, experiment, game_id, player_id,
@@ -435,38 +381,6 @@ def extract_player_model_token_rows(
     return final_rows
 
 
-def _game_player_types(game_db_path: str, catalog: Optional[Catalog], issues=None):
-    """Compose ``({player_id: player_type}, metadata)`` from the game DB (§3.3).
-
-    Token counts come from the separate ``*-player-*.db`` trace files, so a corrupt
-    game DB only costs us the ``player_type`` labels: record the issue and degrade
-    to ``({}, {})`` (labels become ``N/A``) rather than crashing or dropping tokens.
-    The ``metadata`` is returned so a *trace* failure on an otherwise-readable game
-    can still report the game's real seed/rotation instead of "unknown".
-    """
-    conn, cursor = open_database_readonly(game_db_path)
-    if not conn:
-        if issues is not None:
-            issues.record(stage="tokens", db_path=game_db_path, message="could not open database")
-        return {}, {}
-    try:
-        metadata = read_game_metadata(cursor)
-        experiment = get_experiment_from_path(game_db_path)
-        game_id = metadata.get("gameId", get_game_id_from_path(game_db_path))
-        player_info_cache = get_player_info_cache(cursor)
-        major_players = [pid for pid, info in player_info_cache.items() if info["is_major"]]
-        seeding = extract_seeding_fields(metadata, where=f"game {game_id}")
-        identities = compose_identities(metadata, major_players, experiment, catalog, seeding)
-    except sqlite3.DatabaseError as exc:
-        # Malformed/locked image: record and degrade labels to N/A. A
-        # controlled-seed mismatch (ExtractError) stays a hard abort.
-        record_db_failure(issues, stage="tokens", db_path=game_db_path, exc=exc)
-        return {}, {}
-    finally:
-        conn.close()
-    return {pid: ident.get("player_type") for pid, ident in identities.items()}, metadata
-
-
 def extract_game_model_token_data(game_db_path: str, catalog: Catalog, issues=None) -> List[dict]:
     """Aggregate per-(player, model) token rows for one game's trace DBs."""
     experiment = get_experiment_from_path(game_db_path)
@@ -474,10 +388,10 @@ def extract_game_model_token_data(game_db_path: str, catalog: Catalog, issues=No
     if not game_id:
         return []
 
-    player_types, metadata = _game_player_types(game_db_path, catalog, issues=issues)
+    player_types, metadata = game_player_types(game_db_path, catalog, issues=issues)
 
     all_rows = []
-    for player_id, trace_db_path in _find_player_trace_databases(game_db_path):
+    for player_id, trace_db_path in find_player_trace_databases(game_db_path):
         player_type = player_types.get(player_id) or "N/A"
         all_rows.extend(
             extract_player_model_token_rows(

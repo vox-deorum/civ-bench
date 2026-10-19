@@ -1,6 +1,6 @@
 """Extract-stage orchestrator: raw game DBs under ``runs_dir`` → canonical CSVs.
 
-Wires ``data.extract`` / ``data.tables`` (benchmark.md §3) to the six exporters,
+Wires ``data.extract`` / ``data.tables`` (benchmark.md §3) to the seven exporters,
 applies the **skip-if-newer** shortcut, and threads a single :class:`Catalog` (for
 the orthodox ``player_type`` composition) through panel / turn / token extraction.
 """
@@ -14,6 +14,7 @@ from ..catalog import Catalog
 from ..config import RunConfig
 from ..config.behavior import resolve_behavior_spec
 from .errors import ExtractError
+from .extract_agentic import AGENTIC_FIELDNAMES, export_agentic_data
 from .extract_behavior import behavior_fieldnames, export_behavior_data
 from .extract_games import GAME_FIELDNAMES, export_game_data
 from .extract_model_tokens import MODEL_TOKEN_FIELDNAMES, export_model_token_data
@@ -33,6 +34,7 @@ DEFAULT_TABLE_PATHS = {
     "tokens": "runs/model_token_usage.csv",
     "behavior": "runs/behavior_data.csv",
     "world": "runs/world_data.csv",
+    "agentic": "runs/agentic_data.csv",
 }
 
 
@@ -48,6 +50,8 @@ def expected_fieldnames(key: str, behavior_spec: dict) -> list[str]:
         return MODEL_TOKEN_FIELDNAMES
     if key == "world":
         return WORLD_FIELDNAMES
+    if key == "agentic":
+        return AGENTIC_FIELDNAMES
     return behavior_fieldnames(behavior_spec)
 
 
@@ -198,6 +202,8 @@ def run_extract(
             new_rows[key] = export_behavior_data(selected_db_files, available_game_ids, path, behavior_spec, catalog=catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
         elif key == "world":
             new_rows[key] = export_world_data(selected_db_files, available_game_ids, path, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
+        elif key == "agentic":
+            new_rows[key] = export_agentic_data(selected_db_files, available_game_ids, path, catalog, prune_only=prune_only, issues=issues, prune_gate=prune_gate)
 
     # Reconcile this run's findings with the prior report (carry forward issues for
     # games no stage re-examined; drop those whose DB is gone) and persist. This

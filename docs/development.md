@@ -15,7 +15,7 @@ The installable package is `bench/`. Each subpackage owns one stage kind or one 
 | `bench/cli.py` | The `civ-bench extract\|run\|report` entrypoint. |
 | `bench/config/` | Load and validate JSON into typed config objects; resolve the output root and the DAG edges once, at load time. |
 | `bench/pipeline/` | The DAG builder and scheduler: resolve `needs` and `uses`, topo-sort, run stages. |
-| `bench/extract/` | Game SQLite DBs to canonical CSVs; composes the orthodox `player_type`. |
+| `bench/extract/` | Game SQLite DBs and per-player telemetry DBs to canonical CSVs; composes the orthodox `player_type`. `agentic/` parses workspace shell commands for the `agentic` table. |
 | `bench/data/` | Canonical CSV loading and the shared filter resolver (`apply_filter_spec`). |
 | `bench/catalog/` | The model and experiment catalogs, backed by `configs/*.json`. |
 | `bench/estimators/` | Victory-probability predictor producers: tune, train, load, infer. |
@@ -164,4 +164,5 @@ The suite (in [tests/](../tests/), one file per area) exercises config validatio
 
 - **[AGENTS.md](../AGENTS.md)** defines the repository conventions.
 - **[configs/benchmark.md](../configs/benchmark.md)** is the run-spec schema you must keep in parity when you add a selectable module.
+- **[tables/](tables/README.md)** describes each canonical table. Update the table's page when an extractor adds, removes, or redefines a column.
 - **[plans/](../plans/)** holds the roadmap and implementation notes.

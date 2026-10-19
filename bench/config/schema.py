@@ -55,7 +55,7 @@ EXTRACT_KEYS = {
     "issues_path",
     "behavior",
 }
-TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior", "world")
+TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior", "world", "agentic")
 
 # ── data.extract.behavior (§3.0) ───────────────────────────────────────────
 # Game-DB column names each behavior family may summarize. The extract layer

@@ -156,7 +156,7 @@ existed.
   "extract": {
     "enabled": true,                     // false → reuse existing CSVs, never touch runs/ DBs
     "runs_dir": "runs/",                 // root searched for *.db game DBs
-    "outputs": ["turns", "panel", "games", "tokens", "behavior", "world"],  // which canonical CSVs to (re)build
+    "outputs": ["turns", "panel", "games", "tokens", "behavior", "world", "agentic"],  // which canonical CSVs to (re)build
     "max_dbs": null,                     // int → only first N discovered DBs (smoke tests)
     "prune_missing": false,              // true → only drop rows for missing DBs, no new extract (CLI: --prune-missing)
     "force_rebuild": false,              // true → rebuild even if outputs exist & are newer
@@ -184,7 +184,8 @@ existed.
     "games":      "runs/game_data.csv",          // per-GAME row: game_id, timestamp, experiment, seed, seating_rotation (-1 ⇒ uncontrolled)
     "tokens":     "runs/model_token_usage.csv",  // token use plus failed strategist turns per player trace
     "behavior":   "runs/behavior_data.csv",      // per-player per-game behavior and policy summaries
-    "world":      "runs/world_data.csv"          // per-game world totals
+    "world":      "runs/world_data.csv",         // per-game world totals
+    "agentic":    "runs/agentic_data.csv"        // per tool call of strategists given a workspace
   },
 
   "filter": "llm_only"                   // GLOBAL selector: inline object OR a preset name (§3.1)
@@ -199,9 +200,23 @@ existed.
 - When a fresh extract records malformed DBs, they are **auto-repaired and re-imported** in place (extract → `fix` → re-import) before the rest of the DAG runs. Disable with `auto_fix: false` or the CLI `--no-fix` flag; games that recovery cannot save stay flagged and are excluded downstream, exactly as before.
 - When the selected stages need experiment ids or player-type names, they resolve through `catalogs.experiments` + `catalogs.models`. **`player_type` is composed at extract from the per-player game metadata** (`model-{id}` + `strategist-{id}`) via the catalog's template + aliases + unified label map (§3.3); the old seat→model mapping is only an optional fallback; never spell out seat→model mappings here.
 
-### 3.0 `data.extract.behavior`: behavior summary table
+### 3.0 Canonical tables and `data.extract.behavior`
 
-The `behavior` table has one row per major player per game. Its key columns are `experiment`, `game_id`, `player_id`, `player_type`, `civilization`, and `survival_turn` (the player's last recorded turn). The remaining columns follow `data.extract.behavior`:
+The canonical tables are described in their own pages under [docs/tables/](../docs/tables/README.md): what one row is, what each group of columns means, and the exact rules behind them.
+
+| Key in `data.tables` | Default file | One row per | Page |
+| --- | --- | --- | --- |
+| `turns` | `runs/turn_data.csv` | player per turn | [turns](../docs/tables/turns.md) |
+| `panel` | `runs/panel_data.csv` | player per game | [panel](../docs/tables/panel.md) |
+| `games` | `runs/game_data.csv` | game | [games](../docs/tables/games.md) |
+| `tokens` | `runs/model_token_usage.csv` | model per player per game | [tokens](../docs/tables/tokens.md) |
+| `behavior` | `runs/behavior_data.csv` | player per game | [behavior](../docs/tables/behavior.md) |
+| `world` | `runs/world_data.csv` | game | [world](../docs/tables/world.md) |
+| `agentic` | `runs/agentic_data.csv` | tool call, for strategists with a workspace | [agentic](../docs/tables/agentic.md) |
+
+A run spec whose `data.extract.outputs` omits a key extracts every table. A table whose columns no longer match the code is rebuilt in full by the next extract.
+
+**`data.extract.behavior`** picks which columns the `behavior` table has. Its key columns are always `experiment`, `game_id`, `player_id`, `player_type`, `civilization`, and `survival_turn`.
 
 | Key | Allowed values | Columns produced |
 | --- | --- | --- |
@@ -213,36 +228,10 @@ The `behavior` table has one row per major player per game. Its key columns are 
 | `policies` | `policy_changes`, `tradition`, `authority`, `progress`, `fealty`, `statecraft`, `artistry`, `industry`, `imperialism`, `rationalism`, `freedom`, `autocracy`, `order` | real policy-change count plus first-adoption turn for each selected branch |
 | `relationships` | `relationship_changes`, `relationship_targets`, `stance_public_avg`, `stance_private_avg`, `stance_net_avg`, `stance_masked_hostility_share`, `stance_masked_goodwill_share` | one column per name |
 
-- Each key is optional and falls back to the default shown above. An empty list turns that family off. Unknown names, stats, and duplicates are config errors. Policy fields have no `stats`; only flavor and persona use the `stats` selection.
-- Flavor and persona values are the state in effect on each turn: the last row of a turn wins, and it carries forward until the next row. `min` and `max` range over the states in effect from the player's first row to `survival_turn`. `avg` is turn-weighted. Rows written by the in-game AI (`Tweaked by In-Game AI`) count, because the game used them. A player with no rows (for example an in-game AI player with no `FlavorChanges`) gets blank cells. If an older DB lacks a selected column, only that column's cells are blank.
-- **`flavor_gates`** keeps a flavor's `min`/`avg`/`max` from summarizing settings the player could not yet act on. Each gate is exactly one of:
-  - `{"techs": [names]}`: the access turn is the player's first `PlayerSummaries` turn whose `CurrentResearch` starts with one of the names (a prefix match, so research progress suffixes are fine).
-  - `{"era": name}`: the access turn is the player's first turn whose `PlayerSummaries.Era` first word is that era or a later one, in game order: Ancient, Classical, Medieval, Renaissance, Industrial, Modern, Atomic, Information.
-  A gated flavor is summarized only from its access turn on; the state in effect at that turn counts from the turn on. A player who never clears the gate gets blanks, and so does every player when the DB lacks the gate's column. The default gates the nuclear flavors (`Nuke`, `UseNuke`) behind `Nuclear Fission`, `Satellites`, or `Advanced Ballistics` and the air flavors (`Air`, `Antiair`, `AirCarrier`, `Airlift`) behind the Modern era. Set `"flavor_gates": {}` to disable gating; a given map replaces the default entirely (it is not merged). Unknown flavors, both gate kinds at once, unknown eras, and empty tech lists are config errors.
-- Event counts come from `GameEvents`, with exact duplicate events (same type, turn, and payload) counted once:
-  - `wars_declared`: `DeclareWar` events the player originated as aggressor. This includes the automatic declarations on the target's defensive-pact partners and excludes wars joined as a vassal.
-  - `wars_received`: every `DeclareWar` event whose target team is the player's team, from any originator.
-  - `cities_nuked`: `NuclearDetonation` events by the player whose plot held a city.
-  - `cities_razed`: `CityRazed` events by the player.
-  - `wars_on_city_states`: `DeclareWar` events the player originated as aggressor on a city-state team. They are also included in `wars_declared`.
-  - `units_lost`: `UnitKilledInCombat` events where the player's unit was killed.
-  - `units_killed`: `UnitKilledInCombat` events where the player's unit made the kill, whatever the victim (civ, city-state, or barbarian).
-  - `cities_captured`: `CityCaptureComplete` events with `IsConquest` where the player is the new owner and the old owner is a civ (major).
-  - `capitals_captured`: as `cities_captured`, and the city was the old owner's capital at the time (`IsCapital`, so possibly a relocated capital).
-  - `city_state_cities_captured`: as `cities_captured`, but the old owner is a city-state.
-  - `nukes_built`: `CityTrained` events by the player whose trained unit's `Unit.AIType` is `Icbm` (Atomic Bomb, Nuclear Missile), whether trained or bought with gold or faith. The free Atomic Bomb from the Manhattan Project is not built, so it does not count.
-  - `nukes_detonated`: every `NuclearDetonation` by the player (`cities_nuked` counts the subset whose plot held a city).
-  - Each selected event gets its own count column, so a selection that includes events the existing table lacks changes the behavior CSV header, and the next extract rebuilds that table once.
-- `policy_changes` counts `PolicyChanges` rows containing a real field mutation, excluding rationale-only and empty rows. Each branch column records its first adoption turn from `PlayerAdoptPolicyBranch` or `IdeologyAdopted`; branches the player never adopted contain `N/A`.
-- Relationship columns come from the `RelationshipChanges` table. State is tracked per `(player, target)` pair: only major-civ targets, never self; the last row of a turn wins and carries forward.
-  - `relationship_changes` counts rows that change the pair's public or private value (the starting state is 0 and 0; re-setting the same values does not count). `relationship_targets` counts distinct major targets ever set.
-  - The stance averages weight each pair-turn once, from the first row on that target through the earlier of the two players' survival turns (inclusive). Resets to 0 still count, and targets never set are excluded. `stance_net_avg` is public plus private.
-  - `stance_masked_hostility_share` is the share of pair-turns with public > 0 > private; `stance_masked_goodwill_share` is the share with public < 0 < private.
-  - When the table exists, the two counts are 0 for players who set nothing and the averages and shares are blank; when the table is missing, every cell is blank. The documented range of the values is -100 to 100 but it is not enforced; values are kept raw.
-- Every behavior column has a kind the analyses use: `count` (events, `policy_changes`, `relationship_changes`; scaled by turns alive), `level` (flavor and persona stats, `relationship_targets`, stance averages), `share` (stance shares), and `turn` (policy branch first-adoption turns).
-- Changing the selection changes the CSV header, so the next extract rebuilds the whole table. `flavor_gates` is the exception: the columns stay the same, so a changed gate map does not trigger a rebuild by itself. After editing it, refresh the table with `civ-bench extract --force-rebuild`.
-
-**The `world` table.** The canonical `world` table (`data.tables.world`, default `runs/world_data.csv`) has one row per game: `experiment`, `game_id`, `final_turn` (the game's last `PlayerSummaries` turn), `n_civs` (the major players), and the whole-game totals `wars_declared`, `wars_on_city_states`, `peak_wars`, `units_lost`, `units_killed`, `cities_captured`, `capitals_captured`, `city_state_cities_captured`, `civs_eliminated`, `cities_razed`, `nukes_built`, and `nukes_detonated`. The counts follow the event rules above, with each event counted once for the game (a war between two civs counts once, not once per side). Two counters differ from their behavior namesakes: `wars_declared` here counts only aggressor declarations between civs (the target team is a major civ), and `wars_on_city_states` counts aggressor declarations on city-states. `peak_wars` is the most wars between civ teams open at once: it replays the game's declarations and peace deals between civ teams in turn order, and a war ends at a peace deal or once every civ on one side is gone (past its last turn with a positive score). `civs_eliminated` counts the majors without a positive score on the final turn. Both read only the latest `PlayerSummaries` row (the highest `ID`) of each player and turn, as the turns table does, so a replayed turn's score of 0 overrides an earlier positive one. A run spec whose `data.extract.outputs` omits a key extracts every table, `world` included; the first extract after adding `world` reads every DB once for this table.
+- Each key is optional and falls back to the default shown in §3. An empty list turns that family off. Unknown names, stats, and duplicates are config errors. Only flavor and persona use `stats`.
+- **`flavor_gates`** starts a flavor's summary at the turn the player can act on it. A tech gate opens on the first turn the player researches one of the listed techs; an era gate opens on the first turn in that era or a later one (Ancient, Classical, Medieval, Renaissance, Industrial, Modern, Atomic, Information). The default gates `Nuke` and `UseNuke` behind `Nuclear Fission`, `Satellites`, or `Advanced Ballistics`, and `Air`, `Antiair`, `AirCarrier`, and `Airlift` behind the Modern era. A given map replaces the default entirely, and `{}` disables gating. Unknown flavors, both gate kinds at once, unknown eras, and empty tech lists are config errors.
+- Changing the selection changes the CSV header, so the next extract rebuilds the table. `flavor_gates` keeps the same columns, so after editing it run `civ-bench extract --force-rebuild`.
+- What each column means, including the exact event and relationship rules, is in [docs/tables/behavior.md](../docs/tables/behavior.md).
 
 ### 3.1 `filters`: named, reusable filter presets
 

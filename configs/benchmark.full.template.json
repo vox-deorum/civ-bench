@@ -50,7 +50,8 @@
         "games",
         "tokens",
         "behavior",
-        "world"
+        "world",
+        "agentic"
       ],
       "max_dbs": null,
       "prune_missing": false,
@@ -73,7 +74,8 @@
       "games": "runs/game_data.csv",
       "tokens": "runs/model_token_usage.csv",
       "behavior": "runs/behavior_data.csv",
-      "world": "runs/world_data.csv"
+      "world": "runs/world_data.csv",
+      "agentic": "runs/agentic_data.csv"
     },
     "filter": "staff_recent"
   },

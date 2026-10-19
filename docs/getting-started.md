@@ -87,13 +87,14 @@ You will see the stages in dependency order (extract, estimators, adjust, analys
 
 `civ-bench` reads two things:
 
-- **Raw game databases**, the `*.db` files Vox Deorum writes, one per game, sitting somewhere under a `runs_dir` you point at. The **extract** stage turns these into six canonical CSVs:
+- **Raw game files** under a `runs_dir` you point at: the game database Vox Deorum writes for each game, and a telemetry database for each strategist. The **extract** stage turns these into seven canonical CSVs, each explained in [Canonical tables](tables/README.md):
   - `runs/turn_data.csv`, one row per player per turn (the features the victory-probability models learn from)
   - `runs/panel_data.csv`, one row per player per game (final outcomes, strategy mix, civilization)
   - `runs/game_data.csv`, one row per game (timestamp, experiment, and the controlled `seed` and `seating_rotation`)
   - `runs/model_token_usage.csv`, token counts per model plus failed strategist-turn counts
   - `runs/behavior_data.csv`, one row per major player per game (flavor and persona settings, event counts, policy branches, and relationships)
   - `runs/world_data.csv`, one row per game (per-game world totals: wars, peace deals, conquests, razes, nukes, and eliminations)
+  - `runs/agentic_data.csv`, one row per tool call, only for strategists given a workspace (what they read, wrote, and chose)
 - **A run-spec**, the JSON config that names the data, the estimators, the analyses, and the report.
 
 If you already have the six canonical CSVs (for example, someone handed them to you, or you generated them on another machine), you can skip extraction entirely by setting `data.extract.enabled: false` and dropping the CSVs into `runs/`. That is exactly what the **pretrained** template does.

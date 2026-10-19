@@ -21,7 +21,7 @@ import pytest
 
 from bench.extract.errors import ExtractError
 from bench.extract.extract_games import extract_game_row
-from bench.extract.extract_model_tokens import _game_player_types
+from bench.extract.player_traces import game_player_types
 from bench.extract.extract_panel import extract_game_panel_data
 from bench.extract.extract_turns import _fetch_flavor_events, extract_game_turn_data
 from bench.extract.issues import UNKNOWN, ImportIssueLog
@@ -86,7 +86,7 @@ def test_one_merged_issue_across_all_four_stages(tmp_path):
     assert extract_game_row(db, issues=log) is None
     assert extract_game_panel_data(db, issues=log) == []
     assert extract_game_turn_data(db, issues=log) == []
-    assert _game_player_types(db, catalog=None, issues=log) == ({}, {})
+    assert game_player_types(db, catalog=None, issues=log) == ({}, {})
 
     # Deduped by game_id → one entry whose stages list every affected exporter.
     assert len(log) == 1
