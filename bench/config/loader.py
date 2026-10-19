@@ -488,6 +488,12 @@ def _validate_analysis_params(module: str, params: dict, where: str) -> None:
     elif module.startswith("world."):
         _validate_view_param_types(params, where)
         _validate_world_param_types(module, params, where)
+    elif module.startswith(S.AGENTIC_PREFIX):
+        _validate_view_param_types(params, where)
+        if "progress_bins" in params:
+            v = params["progress_bins"]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 2:
+                raise ConfigError(f"{where}.params.progress_bins: must be an integer >= 2.")
     elif "metrics" in params:
         metrics = _check_string_list(params["metrics"], f"{where}.params.metrics")
         bad = [m for m in metrics if m not in S.PREDICTION_METRICS]
@@ -616,6 +622,24 @@ def _validate_world_tables(analyses: list[Stage], data: dict) -> None:
                 f"{where}: the Player columns need behavior events {missing}; select them in "
                 "data.extract.behavior.events."
             )
+
+
+def _validate_agentic_tables(analyses: list[Stage], data: dict) -> None:
+    """An enabled ``agentic.*`` stage needs the agentic table."""
+    stages = [s for s in analyses
+              if s.enabled and str(s.raw.get("module", "")).startswith(S.AGENTIC_PREFIX)]
+    if not stages:
+        return
+    extract = data.get("extract") or {}
+    tables = data.get("tables") or {}
+    outputs = extract.get("outputs") if extract.get("enabled", True) else None
+    if "agentic" in tables and (outputs is None or "agentic" in outputs):
+        return
+    raise ConfigError(
+        f"analyses (id={stages[0].id!r}): {stages[0].raw['module']} reads the agentic table; "
+        "add \"agentic\" to data.extract.outputs and set data.tables.agentic (for example "
+        "\"runs/agentic_data.csv\")."
+    )
 
 
 def _validate_behavior_columns(analyses: list[Stage], data: dict) -> None:
@@ -1072,6 +1096,7 @@ def load_config(path: str | Path) -> RunConfig:
     ]
     _validate_behavior_columns(cfg.analyses, cfg.data)
     _validate_world_tables(cfg.analyses, cfg.data)
+    _validate_agentic_tables(cfg.analyses, cfg.data)
     _validate_intro_charts(cfg.report, cfg.analyses)
 
     cfg._resolved_graph = resolve_stage_graph(cfg)

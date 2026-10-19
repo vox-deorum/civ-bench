@@ -4,7 +4,7 @@
 
 - **File:** `runs/agentic_data.csv` (set by `data.tables.agentic`)
 - **Built from:** the per-player telemetry databases (`<game>-player-<n>.db`)
-- **Read by:** nothing yet; the agentic report family is planned
+- **Read by:** the `agentic.*` analyses `engagement`, `foraging`, `memory`, and `reliability` (Agentic report page); see [`agentic.*`](../../configs/benchmark.md#agentic-how-strategists-use-their-workspace) in the run-spec schema
 
 ## The workspace
 

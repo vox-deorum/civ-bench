@@ -586,6 +586,30 @@
       "module": "world.progress",
       "enabled": true,
       "params": {}
+    },
+    {
+      "id": "agt_engagement",
+      "module": "agentic.engagement",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "agt_foraging",
+      "module": "agentic.foraging",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "agt_memory",
+      "module": "agentic.memory",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "agt_reliability",
+      "module": "agentic.reliability",
+      "enabled": true,
+      "params": {}
     }
   ],
   "report": {
@@ -608,7 +632,9 @@
       "beh_commitment",
       "beh_policies",
       "wld_conflict",
-      "wld_progress"
+      "wld_progress",
+      "agt_engagement",
+      "agt_memory"
     ],
     "section_overrides": {},
     "title": null,

@@ -13,6 +13,12 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
+from .agentic import (
+    AgenticEngagement,
+    AgenticForaging,
+    AgenticMemory,
+    AgenticReliability,
+)
 from .base import Analysis
 from .behavior import (
     BehaviorCommitment,
@@ -72,6 +78,11 @@ ANALYSIS_REGISTRY: Dict[str, Type[Analysis]] = {
     "behavior.diplomacy": BehaviorDiplomacy,
     "behavior.commitment": BehaviorCommitment,
     "behavior.policies": BehaviorPolicies,
+    # agentic.*
+    "agentic.engagement": AgenticEngagement,
+    "agentic.foraging": AgenticForaging,
+    "agentic.memory": AgenticMemory,
+    "agentic.reliability": AgenticReliability,
     # world.*
     "world.conflict": WorldConflict,
     "world.progress": WorldProgress,

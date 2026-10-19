@@ -43,6 +43,7 @@ _FAMILY_TITLES = {
     "performance": "Performance",
     "controlled_seed": CONTROLLED_SEED_TITLE,
     "behavior": "Behavior",
+    "agentic": "Agentic",
     "world": "World",
     "exploratory": "Exploratory",
 }
@@ -72,6 +73,11 @@ _FAMILY_PURPOSES = {
         "policy choices), against the in-game AI on the same map and seat and "
         "in absolute terms."
     ),
+    "agentic": (
+        "Describe how strategists use a workspace of records, rules, and notes "
+        "when the condition offers one. Conditions without workspace tools are "
+        "hidden."
+    ),
     "world": (
         "Describe what happened in each game, for the strategist's own civ and for "
         "the whole world, against the in-game AI in the same seat and the AI-only "
@@ -86,7 +92,7 @@ _FAMILY_PURPOSES = {
 # order they first appear among the sections.
 _FAMILY_ORDER = [
     "ratings", "performance", "controlled_seed",
-    "behavior", "world", "exploratory", "prediction", "calibration"
+    "behavior", "agentic", "world", "exploratory", "prediction", "calibration"
 ]
 
 

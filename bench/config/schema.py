@@ -371,6 +371,11 @@ ANALYSIS_MODULES = {
     "behavior.diplomacy",
     "behavior.commitment",
     "behavior.policies",
+    # agentic.*
+    "agentic.engagement",
+    "agentic.foraging",
+    "agentic.memory",
+    "agentic.reliability",
     # world.*
     "world.conflict",
     "world.progress",
@@ -405,6 +410,11 @@ MATCHED_MAPS_TAB_MODULES = {
 BEHAVIOR_COMMON_PARAMS = {"baseline", "rate", "by", "bootstrap_n", "ci_level", "condition_pairing"}
 BEHAVIOR_BASELINE_COMPLETED = "completed"
 BEHAVIOR_RATES = ("per_100_turns", "per_game")
+
+# Params every agentic.* module accepts (§6.2). No baseline plays with a
+# workspace, so there is no `baseline` and no `rate`.
+AGENTIC_COMMON_PARAMS = {"by", "bootstrap_n", "ci_level", "condition_pairing"}
+AGENTIC_PREFIX = "agentic."
 
 # ── world.* (§6.2) ────────────────────────────────────────────────────────────
 # Every world metric has a Player column (the strategist's own civ, matched to
@@ -537,6 +547,10 @@ ANALYSIS_PARAM_KEYS = {
     "behavior.diplomacy": {"traits", *BEHAVIOR_COMMON_PARAMS},
     "behavior.commitment": set(BEHAVIOR_COMMON_PARAMS),
     "behavior.policies": {"branches", *(BEHAVIOR_COMMON_PARAMS - {"rate"})},
+    "agentic.engagement": {"progress_bins", *AGENTIC_COMMON_PARAMS},
+    "agentic.foraging": set(AGENTIC_COMMON_PARAMS),
+    "agentic.memory": set(AGENTIC_COMMON_PARAMS),
+    "agentic.reliability": set(AGENTIC_COMMON_PARAMS),
     "world.conflict": set(WORLD_COMMON_PARAMS),
     "world.progress": {"checkpoints", "overview_metrics", *WORLD_COMMON_PARAMS},
 }
