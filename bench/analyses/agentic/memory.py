@@ -7,8 +7,8 @@ Per player per game, from the workspace calls of the ``agentic`` table:
 * ``persist_share``: percent of written paths that were kept (blank with no
   writes);
 * ``guide_edits_per_100_runs``: commands that changed the guide, per 100 runs;
-* ``note_reads_per_run``: commands reading the notes, per run;
-* ``note_missing_share``: percent of note reads that hit a note that did not exist.
+* ``note_reads_per_run``: commands reading the notes or guide, per run;
+* ``note_missing_share``: percent of note or guide reads that hit a file that did not exist.
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ TIPS = {
     **{per_100(d): f"{tip} Counted per 100 decision runs." for d, (_, tip) in DESTINATIONS.items()},
     "persist_share": "Percent of written paths that were kept in the notes folder.",
     "guide_edits_per_100_runs": "Commands that changed the guide (AGENTS.md), per 100 runs.",
-    "note_reads_per_run": "Workspace commands reading the notes folder, per run.",
-    "note_missing_share": "Percent of note-reading commands that asked for a note that did not exist.",
+    "note_reads_per_run": "Workspace commands reading the notes or guide, per run.",
+    "note_missing_share": "Percent of note or guide reads that asked for a file that did not exist.",
 }
 GROUPS = {
     **{per_100(d): "Writes per 100 runs" for d in DESTINATIONS},
@@ -77,7 +77,7 @@ def memory_metrics(grp: pd.DataFrame) -> dict:
         out[per_100(dest)] = 100.0 * ratio(totals[dest], runs)
     out["persist_share"] = share(totals["persisted"], sum(totals.values()))
     out["guide_edits_per_100_runs"] = 100.0 * ratio(int(flagged(ws, "guide_edit").sum()), runs)
-    reads = ws[flagged(ws, "src_notes") | flagged(ws, "note_missing")]
+    reads = ws[flagged(ws, "src_notes") | flagged(ws, "src_guide")]
     out["note_reads_per_run"] = ratio(len(reads), runs)
     out["note_missing_share"] = share(int(flagged(reads, "note_missing").sum()), len(reads))
     return out

@@ -81,11 +81,11 @@ class AgenticAnalysis(BehaviorAnalysis):
         flags = [c for c in rows.columns if c.startswith(FLAG_PREFIXES)]
         rows = C.numeric(rows, [c for c in (*NUMERIC_COLUMNS, *flags) if c in rows.columns])
         rows["kind"] = rows["kind"].astype(str)
-        rows[self.by] = rows[self.by].astype(str)
-        used = set(rows.loc[rows["kind"] == WORKSPACE, self.by])
-        hidden = sorted(set(rows[self.by]) - used)
-        rows = rows[rows[self.by].isin(used)].reset_index(drop=True)
-        return self._derive(rows), hidden
+        groups = rows[self.by].astype(str)
+        used = set(groups[rows["kind"] == WORKSPACE])
+        hidden = sorted(set(groups) - used)
+        rows = self._derive(rows)
+        return rows[groups.isin(used)].reset_index(drop=True), hidden
 
     def keys(self) -> list[str]:
         """Columns naming one player in one game (and its ``by`` group)."""
@@ -95,7 +95,7 @@ class AgenticAnalysis(BehaviorAnalysis):
         """Add ``step_kind`` (per run step) and ``progress`` (turn over the player's last)."""
         if rows.empty:
             return rows.assign(step_kind=pd.Series(dtype=object), progress=pd.Series(dtype=float))
-        keys = self.keys()
+        keys = C.KEY_COLUMNS
         step_keys = [*keys, "run", "step"]
         flags = rows.assign(_ws=rows["kind"] == WORKSPACE, _act=rows["kind"] == ACTION)
         steps = flags.dropna(subset=["step"]).groupby(step_keys, sort=False)[["_ws", "_act"]].any()

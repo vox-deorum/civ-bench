@@ -143,6 +143,15 @@ def _cell(table, group, metric):
     return float(row["mean"].iloc[0])
 
 
+def _table_of(calls, game="G9"):
+    """A full-column frame of one USER player-game from ``calls`` row dicts."""
+    frame = pd.DataFrame([{"experiment": EXP, "game_id": game, "player_id": 0,
+                           "player_type": USER, "agent": "simple-strategist", **c}
+                          for c in calls])
+    template = _rows().iloc[0:0]
+    return pd.concat([template, frame], ignore_index=True)[template.columns]
+
+
 # ── hide rule ───────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("module", ["agentic.engagement", "agentic.foraging",
                                     "agentic.memory", "agentic.reliability"])
@@ -245,6 +254,40 @@ def test_memory_summary_names_refused_writes(agentic_env):
     assert result.summary == f"No strategist kept a note; **{USER}** had **2** writes refused."
 
 
+def test_memory_guide_reads_count_as_note_reads(agentic_env):
+    calls = [
+        dict(run=1, turn=0, step=1, call=1, **_ws(src_guide=1, src_notes=0, note_missing=0)),
+        dict(run=1, turn=0, step=1, call=2,
+             **_ws(outcome="missing_file", src_guide=1, src_notes=0, note_missing=1)),
+        # One command that reads both the notes and the guide counts as one read.
+        dict(run=1, turn=0, step=1, call=3, **_ws(src_guide=1, src_notes=1, note_missing=0)),
+        dict(run=1, turn=0, step=1, call=4,
+             **_ws(outcome="missing_file", src_guide=0, src_notes=1, note_missing=1)),
+    ]
+    _table_of(calls).to_csv(agentic_env.path, index=False)
+    result = agentic_env("agentic.memory")
+    table = _table(result, "memory_absolute")
+    # All four calls read the notes or the guide, so the run has 4 reads and
+    # two of them found nothing.
+    assert _cell(table, USER, "note_reads_per_run") == pytest.approx(4.0)
+    assert _cell(table, USER, "note_missing_share") == pytest.approx(50.0)
+
+
+def test_memory_summary_names_sparse_note_keeper(agentic_env):
+    # Three games of one player type, all with workspace calls, but only one
+    # keeps a note; the summary must still name that player.
+    games = (("G1", _ws()), ("G2", _ws(writes_persisted=1)), ("G3", _ws()))
+    calls = [dict(run=1, turn=0, step=1, call=1, **ws) for _, ws in games]
+    rows = _table_of(calls)
+    rows["game_id"] = [game for game, _ in games]
+    rows.to_csv(agentic_env.path, index=False)
+    result = agentic_env("agentic.memory")
+    table = _table(result, "memory_absolute")
+    assert table.loc[table["metric"] == "persist_share", "n_players"].item() == 1
+    assert "Keeps most notes" in result.summary
+    assert USER in result.summary
+
+
 def test_reliability_metrics(agentic_env):
     result = agentic_env("agentic.reliability")
     table = _table(result, "reliability_absolute")
@@ -254,10 +297,15 @@ def test_reliability_metrics(agentic_env):
     assert _cell(table, USER, "truncated_share") == pytest.approx(100 / 3)
     # The failed call 1 of run 2 is followed by call 3.
     assert _cell(table, USER, "recovery_share") == 100.0
+    # One missing-file failure in three commands; the kinds add up to the failure rate.
     kinds = _table(result, "error_kinds_absolute")
-    assert _cell(kinds, USER, "error_missing_file_share") == 100.0
-    assert _cell(kinds, USER, "error_syntax_share") == 0.0
+    assert _cell(kinds, USER, "error_missing_file_per_100_calls") == pytest.approx(100 / 3)
+    assert _cell(kinds, USER, "error_syntax_per_100_calls") == 0.0
+    user_kinds = kinds[kinds["player_type"] == USER]
+    assert user_kinds["mean"].sum() == pytest.approx(_cell(table, USER, "error_share"))
     assert _cell(table, NOTER, "error_share") == 0.0
+    # A player without failures has none of any kind, not a blank.
+    assert _cell(kinds, NOTER, "error_missing_file_per_100_calls") == 0.0
 
 
 def test_progress_bins_keep_boundary_runs_in_their_own_slice(agentic_env):
@@ -265,6 +313,62 @@ def test_progress_bins_keep_boundary_runs_in_their_own_slice(agentic_env):
     _player([4], last=7).to_csv(agentic_env.path, index=False)
     progress = _table(agentic_env("agentic.engagement", {"progress_bins": 7}), "progress")
     assert progress.loc[progress["use_share"] == 100.0, "bin"].tolist() == [4]
+
+
+@pytest.mark.parametrize("module, table_name, metric, expected", [
+    ("agentic.engagement", "engagement_absolute", "calls_per_run", 2.0),
+    ("agentic.foraging", "sources_absolute", "src_notes", 50.0),
+    ("agentic.memory", "memory_absolute", "writes_rejected_per_100_runs", 200.0),
+    ("agentic.reliability", "reliability_absolute", "error_share", 50.0),
+])
+def test_grouping_by_turn_keeps_numeric_groups(agentic_env, module, table_name, metric, expected):
+    result = agentic_env(module, {"by": "turn"})
+    # Only the ``none`` run at turn 20 lacks a workspace call; its hidden
+    # label is a string.
+    assert result.metadata["hidden"] == ["20"]
+    for name in result.metadata["heatmaps"]:
+        table = _table(result, name)
+        assert pd.api.types.is_numeric_dtype(table["turn"]), name
+        # Turn 20 is gone; a turn that measured nothing for a table is left
+        # out of that table, never relabeled as a string.
+        assert set(table["turn"]) <= {0, 10}, name
+        assert not table.empty, name
+    # Turn 10 holds only USER's run 2: two workspace calls, one a failed
+    # note read, one a no-match reference read with 2 refused writes.
+    table = _table(result, table_name)
+    mean = table.loc[(table["turn"] == 10) & (table["metric"] == metric), "mean"].item()
+    assert mean == pytest.approx(expected)
+    assert set(table["turn"]) == {0, 10}
+
+
+def test_progress_by_turn_uses_the_full_player_timeline(agentic_env):
+    _player([0, 10], last=20).to_csv(agentic_env.path, index=False)
+    result = agentic_env("agentic.engagement", {"by": "turn", "progress_bins": 4})
+    assert result.metadata["hidden"] == ["20"]
+    progress = _table(result, "progress")
+    assert pd.api.types.is_numeric_dtype(progress["turn"])
+    # Turn 20 is hidden as a group but still marks the player's last turn,
+    # so turn 10 is halfway through the game.
+    assert len(progress) == 2
+    bins = progress.set_index("turn")["bin"]
+    assert int(bins.loc[0]) == 0
+    assert int(bins.loc[10]) == 2
+    assert set(progress["use_share"]) == {100.0}
+    assert set(progress["calls_per_run"]) == {1.0}
+
+
+def test_progress_has_game_level_cis_and_a_table_tooltip(agentic_env):
+    # Two games: the second half of the game is used in one and not the other.
+    used, skipped = _player([0, 10]), _player([0], last=10).assign(game_id="G8")
+    pd.concat([used, skipped], ignore_index=True).to_csv(agentic_env.path, index=False)
+    result = agentic_env("agentic.engagement", {"progress_bins": 2})
+    late = _table(result, "progress").set_index("bin").loc[1]
+    assert late["use_share"] == 50.0 and late["n_games"] == 2
+    for metric in ("use_share", "calls_per_run"):
+        assert late[f"{metric}_ci_lower"] <= late[metric] <= late[f"{metric}_ci_upper"]
+    assert late["use_share_ci_lower"] < late["use_share_ci_upper"]
+    html = open(result.figure_paths["progress"], encoding="utf-8").read()
+    assert "table_tooltip" in html and "95% CI" in html
 
 
 def test_a_missing_column_asks_to_re_run_extract(agentic_env):

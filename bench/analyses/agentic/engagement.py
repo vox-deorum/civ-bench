@@ -11,7 +11,8 @@ Per player per game, from the ``agentic`` table:
 * ``mixed_share``: percent of workspace calls made in a step that also acted.
 
 The ``progress`` table and figure follow ``use_share`` and ``calls_per_run``
-over the game, in ``progress_bins`` equal slices of each player's turns.
+over the game, in ``progress_bins`` equal slices of each player's turns, each
+with a game-level bootstrap CI.
 """
 
 from __future__ import annotations
@@ -55,6 +56,11 @@ SHARES = {"use_share", "look_first_share", "mixed_share"}
 DECIMALS = {"use_share": 0, "look_first_share": 0, "mixed_share": 0, "calls_per_run": 1,
             "gather_steps_per_run": 1, "kb_per_run": 1}
 DASHES = ("solid", "dash", "dot", "dashdot")
+# The progress figure's metrics: subplot title, tooltip unit, and tooltip decimals.
+PROGRESS = {
+    "use_share": ("Runs using the workspace", "%", 1),
+    "calls_per_run": ("Workspace calls per run", "", 2),
+}
 
 
 def engagement_metrics(grp: pd.DataFrame) -> dict:
@@ -75,6 +81,27 @@ def engagement_metrics(grp: pd.DataFrame) -> dict:
         "kb_per_run": ratio(ws["out_chars"].fillna(0).sum() / 1000.0, runs),
         "mixed_share": share(int((ws["step_kind"] == MIXED).sum()), len(ws)),
     }
+
+
+def progress_tips(grp: pd.DataFrame, label: str, column: str) -> list[list[str]]:
+    """Tooltip text per progress point: title, subtitle, average, CI, and players."""
+    title, unit, places = PROGRESS[column]
+
+    def number(value) -> str:
+        return f"{value:.{places}f}{unit}" if np.isfinite(value) else ""
+
+    tips = []
+    for rec in grp.to_dict("records"):
+        lo, hi = number(rec[f"{column}_ci_lower"]), number(rec[f"{column}_ci_upper"])
+        games = int(rec["n_games"])
+        tips.append([
+            label,
+            f"{title} · {rec['progress_start']:.0f}% to {rec['progress_end']:.0f}% of the game",
+            number(rec[column]),
+            f"{lo} to {hi}" if lo and hi else "N/A (needs 2 games)",
+            f"{int(rec['n_players'])} in {games} game{'s' if games != 1 else ''}",
+        ])
+    return tips
 
 
 class AgenticEngagement(AgenticAnalysis):
@@ -136,10 +163,21 @@ class AgenticEngagement(AgenticAnalysis):
         per_player = runs.groupby([*keys, "bin"], sort=True).agg(
             use_share=("used", "mean"), calls_per_run=("calls", "mean"),
         ).reset_index()
-        table = per_player.groupby([self.by, "bin"], sort=True).agg(
-            use_share=("use_share", "mean"), calls_per_run=("calls_per_run", "mean"),
-            n_players=("game_id", "size"), n_games=("game_id", "nunique"),
-        ).reset_index()
+        records = []
+        for b, grp in per_player.groupby("bin", sort=True):
+            summary = C.summarize(ctx, grp, list(PROGRESS), self.by, f"progress_{b}",
+                                  self.bootstrap_n, self.ci_level)
+            for group, cells in summary.groupby(self.by, sort=False):
+                record = {self.by: group, "bin": int(b)}
+                for cell in cells.itertuples(index=False):
+                    record[cell.metric] = cell.mean
+                    record[f"{cell.metric}_ci_lower"] = cell.ci_lower
+                    record[f"{cell.metric}_ci_upper"] = cell.ci_upper
+                # Neither metric is ever blank, so both count the same players.
+                record["n_players"] = int(cells["n_players"].iloc[0])
+                record["n_games"] = int(cells["n_games"].iloc[0])
+                records.append(record)
+        table = pd.DataFrame(records).sort_values([self.by, "bin"], kind="mergesort")
         table["progress_start"] = table["bin"] / bins * 100.0
         table["progress_end"] = (table["bin"] + 1) / bins * 100.0
         table, order = C.heatmap_rows(ctx, table, self.by)
@@ -160,7 +198,7 @@ class AgenticEngagement(AgenticAnalysis):
         if progress.empty:
             return None
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                            subplot_titles=("Runs using the workspace", "Workspace calls per run"))
+                            subplot_titles=[title for title, _, _ in PROGRESS.values()])
         seen: dict[str, int] = {}
         for label, grp in progress.groupby("row_label", sort=False):
             group = str(grp[self.by].iloc[0])
@@ -168,21 +206,28 @@ class AgenticEngagement(AgenticAnalysis):
             dash = DASHES[seen.get(color, 0) % len(DASHES)]
             seen[color] = seen.get(color, 0) + 1
             x = ((grp["progress_start"] + grp["progress_end"]) / 2).tolist()
-            for row, column, unit in ((1, "use_share", "%"), (2, "calls_per_run", "")):
+            for row, column in enumerate(PROGRESS, start=1):
                 fig.add_trace(go.Scatter(
                     x=x, y=grp[column].round(4).tolist(), name=escape(str(label)),
                     legendgroup=str(label), showlegend=row == 1, mode="lines+markers",
                     line={"color": color, "dash": dash, "width": 2}, marker={"size": 6},
-                    customdata=grp[["n_players"]].to_numpy().tolist(),
-                    hovertemplate=(f"{escape(str(label))}<br>%{{x:.0f}}% through the game"
-                                   f"<br>%{{y:.{0 if unit else 2}f}}{unit}"
-                                   "<br>%{customdata[0]} player-games<extra></extra>"),
+                    customdata=progress_tips(grp, str(label), column),
+                    meta={"table_tooltip": True}, hoverinfo="none",
                 ), row=row, col=1)
         fig.update_layout(
             template="plotly_white",
             title={"text": "Workspace use over the game", "x": 0.05},
             legend={"title": {"text": "Strategist | Condition"}},
             height=620, hovermode="closest",
+            meta={"table_tooltip": {
+                "title_index": 0, "subtitle_index": 1,
+                "note": "Averages per player per game. The CI resamples whole games.",
+                "rows": [
+                    {"label": "Average", "index": 2, "emphasis": True},
+                    {"label": f"{self.ci_level * 100:g}% CI", "index": 3},
+                    {"label": "Players", "index": 4},
+                ],
+            }},
         )
         fig.update_yaxes(title_text="Runs (%)", range=[0, 100], row=1, col=1)
         fig.update_yaxes(title_text="Calls per run", rangemode="tozero", row=2, col=1)

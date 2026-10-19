@@ -1109,7 +1109,7 @@ Per-module params:
 | Output | Contents |
 | --- | --- |
 | `engagement_absolute` | `use_share`: percent of runs with at least one workspace call; `calls_per_run`: workspace calls per run; `look_first_share`: percent of runs with an action in which a workspace call came in an earlier step than the first action; `gather_steps_per_run`: steps with workspace calls and no action, per run; `kb_per_run`: thousands of output characters the workspace printed, per run; `mixed_share`: percent of workspace calls made in a step that also acted. |
-| `progress` | Table and figure that follow `use_share` and `calls_per_run` over the game, in `progress_bins` equal slices of each player's turns: per group and slice, the two metrics plus `progress_start`, `progress_end`, `n_players`, and `n_games`. |
+| `progress` | Table and figure that follow `use_share` and `calls_per_run` over the game, in `progress_bins` equal slices of each player's turns: per group and slice, the two metrics, their bootstrap CIs (`use_share_ci_lower`, `use_share_ci_upper`, `calls_per_run_ci_lower`, `calls_per_run_ci_upper`, from `bootstrap_n` and `ci_level`), plus `progress_start`, `progress_end`, `n_players`, and `n_games`. The figure's tooltip shows the average, the CI, and the player count. |
 
 **`agentic.foraging` ("What strategists read").** Which parts of the workspace strategists read, and how.
 
@@ -1126,14 +1126,14 @@ Per-module params:
 
 | Output | Contents |
 | --- | --- |
-| `memory_absolute` | `writes_persisted_per_100_runs`, `writes_scratch_per_100_runs`, `writes_lost_per_100_runs`, and `writes_rejected_per_100_runs`: paths written per 100 runs, by where they landed (kept in the notes folder, scratch, lost, or refused); `persist_share`: percent of written paths that were kept (blank with no writes); `guide_edits_per_100_runs`: commands that changed the guide, per 100 runs; `note_reads_per_run`: commands reading the notes, per run; `note_missing_share`: percent of note reads that hit a note that did not exist. |
+| `memory_absolute` | `writes_persisted_per_100_runs`, `writes_scratch_per_100_runs`, `writes_lost_per_100_runs`, and `writes_rejected_per_100_runs`: paths written per 100 runs, by where they landed (kept in the notes folder, scratch, lost, or refused); `persist_share`: percent of written paths that were kept (blank with no writes); `guide_edits_per_100_runs`: commands that changed the guide, per 100 runs; `note_reads_per_run`: commands reading the notes or guide, per run (a command reading both counts once); `note_missing_share`: percent of note or guide reads that hit a file that did not exist. |
 
 **`agentic.reliability` ("Command failures").** How often workspace commands fail, and what follows.
 
 | Output | Contents |
 | --- | --- |
 | `reliability_absolute` | `error_share`: percent of commands whose outcome is neither `ok` nor `no_match` (a search that found nothing is not a failure); `no_match_share`: percent of commands that searched and found nothing; `truncated_share`: percent of commands whose output the host cut; `recovery_share`: percent of failures followed by another workspace command later in the same run. |
-| `error_kinds_absolute` | The mix of failures as a percent of failures, by kind: `error_read_only_share`, `error_missing_file_share`, `error_syntax_share`, `error_not_found_share`, `error_other_share`. |
+| `error_kinds_absolute` | Failures of each kind per 100 workspace commands: `error_read_only_per_100_calls`, `error_missing_file_per_100_calls`, `error_syntax_per_100_calls`, `error_not_found_per_100_calls`, `error_other_per_100_calls`. A player's kinds add up to its `error_share`. Colored by z-score. |
 
 #### `world.*`: game outcomes for the civ and the world
 

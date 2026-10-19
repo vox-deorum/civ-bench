@@ -8,7 +8,8 @@ Per player per game, from the workspace calls of the ``agentic`` table:
 * ``truncated_share``: percent of commands whose output the host cut;
 * ``recovery_share``: percent of failures followed by another workspace
   command later in the same run;
-* ``error_<kind>_share``: the mix of failures, as a percent of failures.
+* ``error_<kind>_per_100_calls``: failures of each kind per 100 commands, so
+  a player's kinds add up to its ``error_share``.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ ERROR_KINDS = {
 
 
 def error_kind(kind: str) -> str:
-    return f"error_{kind}_share"
+    return f"error_{kind}_per_100_calls"
 
 
 NAMES = {
@@ -68,7 +69,7 @@ def reliability_metrics(grp: pd.DataFrame) -> dict:
     }
     kinds = failed["outcome"].astype(str)
     for kind in ERROR_KINDS:
-        out[error_kind(kind)] = share(int((kinds == kind).sum()), len(failed))
+        out[error_kind(kind)] = share(int((kinds == kind).sum()), len(ws))
     return out
 
 
@@ -95,10 +96,14 @@ class AgenticReliability(AgenticAnalysis):
         )
         self.heatmap(
             ctx, frame, out, "error_kinds", title="Kinds of failure",
-            help_text=f"{common} A cell is the percent of a player's failed commands of each kind.",
-            names={error_kind(k): name for k, (name, _) in ERROR_KINDS.items()},
-            column_tips={error_kind(k): tip for k, (_, tip) in ERROR_KINDS.items()},
-            shares={error_kind(k) for k in ERROR_KINDS}, decimals=0,
+            help_text=(f"{common} A cell is the failed commands of each kind per 100 workspace "
+                       "commands. A row adds up to the Failed column of Command failures."),
+            names={error_kind(k): f"{name} failures per 100 commands"
+                   for k, (name, _) in ERROR_KINDS.items()},
+            short_names={error_kind(k): name for k, (name, _) in ERROR_KINDS.items()},
+            column_tips={error_kind(k): f"{tip} Counted per 100 workspace commands."
+                         for k, (_, tip) in ERROR_KINDS.items()},
+            decimals=1,
         )
         summary = self.top_row_summary(
             out.summaries.get(("reliability", C.ABSOLUTE)),

@@ -437,12 +437,12 @@ class BehaviorAnalysis(Analysis):
         if "row_kind" in candidates.columns:
             candidates = candidates[candidates["row_kind"] != "baseline"]
         candidates = candidates[~candidates[self.by].astype(str).isin(skip_labels)]
-        strong = candidates[candidates["n_players"] >= 3]
-        if not strong.empty:
-            candidates = strong
         parts = []
         for label, metric in metrics.items():
             rows = candidates[candidates["metric"] == metric].dropna(subset=["mean"])
+            strong = rows[rows["n_players"] >= 3]
+            if not strong.empty:
+                rows = strong
             if rows.empty:
                 continue
             best = rows["mean"].min() if label in lowest else rows["mean"].max()
