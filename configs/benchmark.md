@@ -106,17 +106,18 @@ With pairing enabled, suffix-style values from `experiments.json`
 `player_type_labels` (§3.3), including per-slot dictionary values, define the
 conditions. For example, `"*-per-5": "-Per-5"` pairs
 `GLM-5.2-Simple` and `GLM-5.2-Simple-Per-5` on one row. `suffixes:null`
-derives all such values; an explicit non-empty list restricts them. Vanilla and
-Null remain unsplit. Rows sort by `sort_condition`: `"base"`, `"best"` (each
+derives all such values, longest first; an explicit non-empty list restricts
+them and sets their display order, for example `["-Per-5", "-Agentic"]`. Vanilla
+and Null remain unsplit. Rows sort by `sort_condition`: `"base"`, `"best"` (each
 identity keys off its best value across all conditions, honoring the plot's
 top-first direction), or a specific suffix. A concrete condition falls back to
 whichever condition has a value for incomplete pairs; all-NaN identities sort
 last.
 
-Within a row, each condition has a fixed sub-row, top to bottom in legend order
-(base first). Only conditions with a plotted value get a sub-row, so a
-configured suffix without data takes no space. A row that lacks some of those
-conditions is grayed and noted, for example `(Every-turn only)`. Interactive
+Within a row, each condition the model has a value for gets a sub-row, top to
+bottom in legend order (base first). A row is only as tall as its own
+conditions, so a model with one condition takes a single line and no row holds
+an empty sub-row. Interactive
 paired forests also draw a faint line linking each identity's conditions, which
 one `Condition links` legend entry toggles, and shade alternate rows.
 

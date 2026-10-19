@@ -229,21 +229,22 @@ def test_interactive_forest_has_one_tooltip_trace_per_point(configs_dir):
     ]
     reference = [trace for trace in figure.data if trace.mode == "lines" and trace.legendgroup != "links"]
     assert len(reference) == 1 and reference[0].x == (1500, 1500)
-    # Rows sort by the base condition, highest first; a missing condition is noted.
-    assert figure.layout.yaxis.ticktext[1:] == ("GPT-OSS-120B-Simple", "Vanilla")
-    assert "(Every-turn only)" in figure.layout.yaxis.ticktext[0]
+    # Rows sort by the base condition, highest first, with no note for a missing
+    # condition. Each row is only as tall as its conditions: Opus takes one line.
+    assert figure.layout.yaxis.ticktext == ("Opus-5.5-Simple", "GPT-OSS-120B-Simple", "Vanilla")
+    assert figure.layout.yaxis.tickvals == pytest.approx((0.0, 1.25, 2.5))
     # Only a model with both conditions gets a link, from its top (base) slot
     # to its Per-5 slot, drawn under the markers and toggled by one legend entry.
     links = [trace for trace in figure.data if trace.legendgroup == "links" and not trace.showlegend]
     assert [trace.name for trace in links] == ["GPT-OSS-120B-Simple"]
     assert links[0].x == (1600.0, 1580.0)
-    assert links[0].y == pytest.approx((0.84, 1.16))
+    assert links[0].y == pytest.approx((1.0, 1.5))
     assert list(figure.data).index(links[0]) < list(figure.data).index(points[0])
     assert [trace.name for trace in figure.data if trace.legendgroup == "links" and trace.showlegend] == [
         "Condition links",
     ]
-    # Alternate rows are shaded: three rows, one band on the middle row.
-    assert [(shape.y0, shape.y1) for shape in figure.layout.shapes] == [(0.5, 1.5)]
+    # Alternate rows are shaded: three rows, one band on the taller middle row.
+    assert [(shape.y0, shape.y1) for shape in figure.layout.shapes] == [(0.5, 2.0)]
     assert figure.layout.meta["table_tooltip"]["rows"] == [{"label": "Elo", "index": 2, "emphasis": True}]
     assert figure.layout.height == 360
     assert "plotly_hover" in figure_html(figure, "forest", include_plotlyjs=False)
@@ -269,11 +270,21 @@ def test_interactive_forest_skips_conditions_without_data(configs_dir):
     # No plottable Agentic value: no empty slot and no "(missing Agentic)" note.
     assert figure.layout.yaxis.ticktext == ("GPT-OSS-120B-Simple", "Vanilla")
     points = {trace.name: trace for trace in figure.data if trace.meta and trace.meta.get("table_tooltip")}
-    assert points["GPT-OSS-120B-Simple"].y == pytest.approx((-0.16,))
-    assert points["GPT-OSS-120B-Simple-Per-5"].y == pytest.approx((0.16,))
-    assert points["Vanilla"].y == (1,)
+    assert points["GPT-OSS-120B-Simple"].y == pytest.approx((0.0,))
+    assert points["GPT-OSS-120B-Simple-Per-5"].y == pytest.approx((0.5,))
+    assert points["Vanilla"].y == pytest.approx((1.5,))
     legend = [trace.name for trace in figure.data if trace.showlegend and trace.mode == "markers"]
     assert legend == ["Every-turn", "Per-5"]
+
+
+def test_explicit_pairing_suffixes_keep_their_order(configs_dir):
+    from bench.plotting.pairing import resolve_pairing
+
+    catalog, _spec = _pairing_setup(configs_dir)
+    spec = resolve_pairing({"enabled": True, "suffixes": ["-Per-5", "-Agentic"]}, None, catalog)
+
+    # The configured order is the display order, even though "-Agentic" is longer.
+    assert spec.suffixes == ("-Per-5", "-Agentic")
 
 
 def test_interactive_forest_returns_none_without_rows(configs_dir):
