@@ -4,10 +4,13 @@ Three player types, one player-game each:
 
 * ``Kimi-K2.5`` (game G1, seat 0) uses the workspace in runs 1 and 2 and
   makes no call in run 3 (a ``none`` row). Run 1 looks, then acts; run 2 looks
-  and acts in one step, then looks again. Every metric below is worked by hand
-  from these rows;
-* ``GLM-5`` (game G2, seat 1) makes one workspace call and keeps a note;
+  and acts in one step, then looks again. Every run carries its reply count in
+  ``run_steps`` (3, 4, and 0), which need not match its call rows;
+* ``GLM-5`` (game G2, seat 1) makes one workspace call, keeps a note, and
+  replies once more without a call;
 * ``Qwen3.5`` (game G1, seat 1) only acts, so every module hides it.
+
+Every metric below is worked by hand from these rows.
 """
 
 from __future__ import annotations
@@ -42,32 +45,35 @@ def _act(tool, **kw):
 
 def _rows():
     user = [
-        # run 1, turn 0: look (step 1), then act (step 2)
-        dict(run=1, turn=0, step=1, call=1, **_ws(out_chars=2000, src_records=1,
-                                                  rec_events_all=1, lookback=4)),
-        dict(run=1, turn=0, step=2, call=2, **_act("set-research", option="Pottery",
-                                                   action_ok=1, grounded=1)),
-        dict(run=1, turn=0, step=2, call=3, **_act("set-research", option="Mining",
-                                                   action_ok=0, grounded=0)),
-        # run 2, turn 10: a failed look while acting (mixed step), then a search
-        dict(run=2, turn=10, step=1, call=1, **_ws(outcome="missing_file", read_style="none",
-                                                   src_notes=1, note_missing=1)),
-        dict(run=2, turn=10, step=1, call=2, **_act("set-policy", option="Liberty",
-                                                    action_ok=1, grounded=0)),
-        dict(run=2, turn=10, step=2, call=3, **_ws(outcome="no_match", read_style="targeted",
-                                                   out_chars=300, truncated_chars=50,
-                                                   src_reference=1, ref_policies=1,
-                                                   writes_rejected=2)),
-        # run 3, turn 20: no calls
-        dict(run=3, turn=20, kind="none"),
+        # run 1, turn 0: look (step 1), then act (step 2); a third reply made no call
+        dict(run=1, turn=0, step=1, call=1, run_steps=3, **_ws(out_chars=2000, src_records=1,
+                                                               rec_events_all=1, lookback=4)),
+        dict(run=1, turn=0, step=2, call=2, run_steps=3, **_act("set-research", option="Pottery",
+                                                                action_ok=1, grounded=1)),
+        dict(run=1, turn=0, step=2, call=3, run_steps=3, **_act("set-research", option="Mining",
+                                                                action_ok=0, grounded=0)),
+        # run 2, turn 10: a failed look while acting (mixed step), then a search;
+        # 4 replies in all, so the last two made no call
+        dict(run=2, turn=10, step=1, call=1, run_steps=4, **_ws(outcome="missing_file",
+                                                                read_style="none",
+                                                                src_notes=1, note_missing=1)),
+        dict(run=2, turn=10, step=1, call=2, run_steps=4, **_act("set-policy", option="Liberty",
+                                                                 action_ok=1, grounded=0)),
+        dict(run=2, turn=10, step=2, call=3, run_steps=4, **_ws(outcome="no_match",
+                                                                read_style="targeted",
+                                                                out_chars=300, truncated_chars=50,
+                                                                src_reference=1, ref_policies=1,
+                                                                writes_rejected=2)),
+        # run 3, turn 20: no calls, and it ended before any reply
+        dict(run=3, turn=20, kind="none", run_steps=0),
     ]
     noter = [
-        dict(run=1, turn=0, step=1, call=1, **_ws(src_tmp=1, writes_persisted=1)),
-        dict(run=1, turn=0, step=2, call=2, **_act("keep-status-quo", action_ok=1)),
+        dict(run=1, turn=0, step=1, call=1, run_steps=3, **_ws(src_tmp=1, writes_persisted=1)),
+        dict(run=1, turn=0, step=2, call=2, run_steps=3, **_act("keep-status-quo", action_ok=1)),
     ]
     actor = [
-        dict(run=1, turn=0, step=1, call=1, **_act("set-research", option="Pottery",
-                                                   action_ok=1, grounded=0)),
+        dict(run=1, turn=0, step=1, call=1, run_steps=1,
+             **_act("set-research", option="Pottery", action_ok=1, grounded=0)),
     ]
     rows = []
     for player_type, game, seat, calls in ((USER, "G1", 0, user), (NOTER, "G2", 1, noter),
@@ -90,9 +96,10 @@ def _rows():
 
 def _player(turns, last=None):
     """A player with one workspace call per run at ``turns``, ending at ``last``."""
-    rows = [dict(run=i + 1, turn=t, step=1, call=1, **_ws()) for i, t in enumerate(turns)]
+    rows = [dict(run=i + 1, turn=t, step=1, call=1, run_steps=1, **_ws())
+            for i, t in enumerate(turns)]
     if last is not None:
-        rows.append(dict(run=len(turns) + 1, turn=last, kind="none"))
+        rows.append(dict(run=len(turns) + 1, turn=last, kind="none", run_steps=0))
     frame = pd.DataFrame([{"experiment": EXP, "game_id": "G9", "player_id": 0,
                            "player_type": USER, "agent": "simple-strategist", **r} for r in rows])
     template = _rows().iloc[0:0]
@@ -186,7 +193,51 @@ def test_engagement_metrics(agentic_env):
     assert _cell(table, USER, "gather_steps_per_run") == pytest.approx(2 / 3)
     assert _cell(table, USER, "kb_per_run") == pytest.approx(2.3 / 3)
     assert _cell(table, USER, "mixed_share") == pytest.approx(100 / 3)
+    # Each run's reply count comes from its run_steps (3, 4, and 0), not from
+    # its call rows: the mean of those, not a row-weighted 21 / 7.
+    assert _cell(table, USER, "steps_per_run") == pytest.approx(7 / 3)
+    assert _cell(table, NOTER, "steps_per_run") == pytest.approx(3.0)
     assert _cell(table, NOTER, "use_share") == pytest.approx(100.0)
+
+
+def test_steps_per_run_averages_runs_not_calls(agentic_env):
+    # Run 1 has two call steps but three replies (its last reply made no call);
+    # run 2 is one reply; the no-call run 3 ended before any reply. Each run
+    # counts once: (3 + 1 + 0) / 3, not the row-weighted (9 + 1 + 0) / 5.
+    calls = [
+        dict(run=1, turn=0, step=1, call=1, run_steps=3, **_ws()),
+        dict(run=1, turn=0, step=2, call=2, run_steps=3, **_ws()),
+        dict(run=1, turn=0, step=2, call=3, run_steps=3, **_ws()),
+        dict(run=2, turn=1, step=1, call=1, run_steps=1, **_ws()),
+        dict(run=3, turn=2, kind="none", run_steps=0),
+    ]
+    _table_of(calls).to_csv(agentic_env.path, index=False)
+    table = _table(agentic_env("agentic.engagement"), "engagement_absolute")
+    assert _cell(table, USER, "steps_per_run") == pytest.approx(4 / 3)
+
+
+def test_steps_per_run_averages_player_games_equally(agentic_env):
+    # One game had a single nine-step run; the other had three one-step runs.
+    # The cell is the mean of the two player-games, as every metric is, not
+    # the mean over the four runs.
+    big = _table_of([dict(run=1, turn=0, step=1, call=1, run_steps=9, **_ws())], game="G1")
+    small = _table_of([
+        dict(run=1, turn=0, step=1, call=1, run_steps=1, **_ws()),
+        dict(run=2, turn=1, step=1, call=1, run_steps=1, **_ws()),
+        dict(run=3, turn=2, step=1, call=1, run_steps=1, **_ws()),
+    ], game="G2")
+    pd.concat([big, small], ignore_index=True).to_csv(agentic_env.path, index=False)
+    table = _table(agentic_env("agentic.engagement"), "engagement_absolute")
+    assert _cell(table, USER, "steps_per_run") == pytest.approx(5.0)
+
+
+def test_engagement_needs_run_steps(agentic_env):
+    _rows().drop(columns=["run_steps"]).to_csv(agentic_env.path, index=False)
+    with pytest.raises(AnalysisError,
+                       match=r"lacks column\(s\) \['run_steps'\]; re-run extract"):
+        agentic_env("agentic.engagement")
+    # Only engagement reads the column; the other modules still run.
+    assert not agentic_env("agentic.memory", sid="mem").empty
 
 
 def test_engagement_progress_bins_split_the_game(agentic_env):
@@ -422,7 +473,7 @@ def test_agentic_page_renders(agentic_env):
     out = report_dir(cfg)
     page = (out / "agentic.html").read_text(encoding="utf-8")
     for title in ("Workspace use", "What strategists read", "Notes and memory",
-                  "Command failures", "Informed choices"):
+                  "Command failures", "Informed choices", "Steps per run"):
         assert title in page, title
     # The hidden group is named only in each section's details note, never as a row.
     assert page.count(ACTOR) == page.count(f"hidden: {ACTOR}") == 4

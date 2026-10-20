@@ -1108,8 +1108,10 @@ Per-module params:
 
 | Output | Contents |
 | --- | --- |
-| `engagement_absolute` | `use_share`: percent of runs with at least one workspace call; `calls_per_run`: workspace calls per run; `look_first_share`: percent of runs with an action in which a workspace call came in an earlier step than the first action; `gather_steps_per_run`: steps with workspace calls and no action, per run; `kb_per_run`: thousands of output characters the workspace printed, per run; `mixed_share`: percent of workspace calls made in a step that also acted. |
+| `engagement_absolute` | `use_share`: percent of runs with at least one workspace call; `calls_per_run`: workspace calls per run; `look_first_share`: percent of runs with an action in which a workspace call came in an earlier step than the first action; `steps_per_run`: model replies per run, the mean of each run's `run_steps` over the player's runs, counting replies that made no workspace call and runs that made none at all; `gather_steps_per_run`: steps with workspace calls and no action, per run; `kb_per_run`: thousands of output characters the workspace printed, per run; `mixed_share`: percent of workspace calls made in a step that also acted. |
 | `progress` | Table and figure that follow `use_share` and `calls_per_run` over the game, in `progress_bins` equal slices of each player's turns: per group and slice, the two metrics, their bootstrap CIs (`use_share_ci_lower`, `use_share_ci_upper`, `calls_per_run_ci_lower`, `calls_per_run_ci_upper`, from `bootstrap_n` and `ci_level`), plus `progress_start`, `progress_end`, `n_players`, and `n_games`. The figure's tooltip shows the average, the CI, and the player count. |
+
+`agentic.engagement` is the only module that reads the table's `run_steps` column (the run's reply count, stamped on every row of the run). An older table without it stops with the missing-column error naming `run_steps` and asking to re-run extract; the other three modules run without the column.
 
 **`agentic.foraging` ("What strategists read").** Which parts of the workspace strategists read, and how.
 

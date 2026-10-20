@@ -6,6 +6,8 @@ Per player per game, from the ``agentic`` table:
 * ``calls_per_run``: workspace calls per run;
 * ``look_first_share``: percent of runs with an action in which a workspace
   call came in an earlier step than the first action;
+* ``steps_per_run``: model replies per run, from the run's ``run_steps``,
+  counting replies that made no call and runs that made none at all;
 * ``gather_steps_per_run``: steps with workspace calls and no action, per run;
 * ``kb_per_run``: thousands of output characters the workspace printed, per run;
 * ``mixed_share``: percent of workspace calls made in a step that also acted.
@@ -33,20 +35,23 @@ NAMES = {
     "use_share": "Runs using the workspace",
     "calls_per_run": "Workspace calls per run",
     "look_first_share": "Looked before acting",
+    "steps_per_run": "Steps per run",
     "gather_steps_per_run": "Look-up steps per run",
     "kb_per_run": "Output read per run (thousand characters)",
     "mixed_share": "Calls made while acting",
 }
 SHORT = {
     "use_share": "Use", "calls_per_run": "Calls", "look_first_share": "Look first",
-    "gather_steps_per_run": "Look-up steps", "kb_per_run": "K chars read",
-    "mixed_share": "With action",
+    "steps_per_run": "Steps", "gather_steps_per_run": "Look-up steps",
+    "kb_per_run": "K chars read", "mixed_share": "With action",
 }
 TIPS = {
     "use_share": "Percent of decision runs with at least one workspace command.",
     "calls_per_run": "Workspace commands per decision run, counting runs without any.",
     "look_first_share": ("Among runs that took a game action: percent in which a workspace "
                          "command came in an earlier step than the first action."),
+    "steps_per_run": ("Model replies per decision run, counting replies that made no "
+                      "workspace call and runs that made none at all."),
     "gather_steps_per_run": "Steps that ran workspace commands and took no action, per run.",
     "kb_per_run": "Characters the workspace printed, in thousands, per run.",
     "mixed_share": ("Percent of workspace commands sent in the same reply as a game action, "
@@ -54,7 +59,7 @@ TIPS = {
 }
 SHARES = {"use_share", "look_first_share", "mixed_share"}
 DECIMALS = {"use_share": 0, "look_first_share": 0, "mixed_share": 0, "calls_per_run": 1,
-            "gather_steps_per_run": 1, "kb_per_run": 1}
+            "steps_per_run": 1, "gather_steps_per_run": 1, "kb_per_run": 1}
 DASHES = ("solid", "dash", "dot", "dashdot")
 # The progress figure's metrics: subplot title, tooltip unit, and tooltip decimals.
 PROGRESS = {
@@ -72,11 +77,13 @@ def engagement_metrics(grp: pd.DataFrame) -> dict:
     first_look = ws.groupby("run")["step"].min()
     looked = first_look.reindex(first_action.index)
     steps = grp.dropna(subset=["step"]).drop_duplicates(["run", "step"])
+    run_steps = pd.to_numeric(grp.drop_duplicates("run")["run_steps"], errors="coerce")
     return {
         "runs": runs,
         "use_share": share(ws["run"].nunique(), runs),
         "calls_per_run": ratio(len(ws), runs),
         "look_first_share": share(int((looked < first_action).sum()), len(first_action)),
+        "steps_per_run": float(run_steps.mean()),
         "gather_steps_per_run": ratio(int((steps["step_kind"] == GATHER).sum()), runs),
         "kb_per_run": ratio(ws["out_chars"].fillna(0).sum() / 1000.0, runs),
         "mixed_share": share(int((ws["step_kind"] == MIXED).sum()), len(ws)),
@@ -111,6 +118,7 @@ class AgenticEngagement(AgenticAnalysis):
         "Shows how often strategists with a workspace use it, how much they read, and "
         "whether they look things up before acting, over the whole game and by game stage."
     )
+    columns = ("run_steps",)
     report_defaults = {"tables": ["engagement_absolute"], "figures": ["progress"]}
 
     @property
