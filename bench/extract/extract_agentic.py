@@ -58,7 +58,7 @@ REFERENCE_COLUMNS = [f"ref_{c}" for c in REFERENCE_CATEGORIES]
 WRITE_COLUMNS = [f"writes_{p}" for p in WRITE_PLACEMENTS]
 
 AGENTIC_FIELDNAMES = [
-    "experiment", "game_id", "player_id", "player_type", "turn", "agent", "run", "step",
+    "experiment", "game_id", "player_id", "player_type", "turn", "agent", "run", "run_steps", "step",
     "call", "tool", "kind", "capability",
     "option", "action_ok", "grounded",
     "exit_code", "outcome", "out_chars", "truncated_chars", "duration_ms", "read_style",
@@ -324,6 +324,16 @@ def extract_player_agentic_rows(
         index = run_index[(agent["trace_id"], agent["span_id"])]
         calls_by_run.setdefault(index, []).append((number, span, step, agent))
 
+    # Step spans per run: one per model reply, including replies without calls.
+    steps_by_run: Dict[int, int] = {}
+    for span in spans:
+        if not STEP_SPAN.match(span["name"]):
+            continue
+        agent, _ = _agent_context(span, lookup)
+        if agent is not None:
+            index = run_index[(agent["trace_id"], agent["span_id"])]
+            steps_by_run[index] = steps_by_run.get(index, 0) + 1
+
     def base_row(agent: dict, turn, index: int) -> dict:
         row = {
             "experiment": experiment,
@@ -333,6 +343,7 @@ def extract_player_agentic_rows(
             "turn": "" if turn is None else int(turn),
             "agent": agent["name"][len("agent."):],
             "run": index,
+            "run_steps": steps_by_run.get(index, 0),
             "step": "",
             "call": "",
             "tool": "",

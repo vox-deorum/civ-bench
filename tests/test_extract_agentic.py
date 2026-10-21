@@ -332,6 +332,15 @@ def test_extract_keeps_runs_without_tool_calls(tmp_path):
     ]
 
 
+def test_run_steps_counts_every_reply(tmp_path):
+    trace = tmp_path / f"{GAME_ID}-player-1.db"
+    look = ("simple-tool.bash", _bash("ls /workspace/records"))
+    act = ("mcp-tool.keep-status-quo", _action({}, "true"))
+    # Run 2 has a reply without calls; run 1 made no calls at all.
+    _make_trace_db(trace, _turn("a", 4, [[]]) + _turn("b", 5, [[look], [], [act]]))
+    assert [(r["run"], r["run_steps"]) for r in _rows(trace)] == [(1, 1), (2, 3), (2, 3)]
+
+
 def test_extract_counts_only_the_latest_root_per_turn(tmp_path):
     trace = tmp_path / f"{GAME_ID}-player-1.db"
     retried = _turn("old", 5, [[("simple-tool.bash", _bash("ls /workspace/records"))]], status=2)
