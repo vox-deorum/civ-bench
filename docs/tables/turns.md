@@ -37,7 +37,7 @@
 | `turn`, `max_turn` | This turn and the game's last turn. |
 | `score`, `cities`, `population`, `territory`, `technologies`, `military_strength`, `military_units`, `military_supply`, `gold`, `gold_per_turn`, `happiness_percentage`, `culture_per_turn`, `science_per_turn`, `tourism_per_turn`, `faith_per_turn`, `votes` | Same-named `PlayerSummaries` columns from the latest row (highest `ID`) of each player and turn. Missing values are 0. |
 | `rank`, `max_score` | Rank by score among living players (ties share a rank; eliminated players all get the worst rank), and the best living score that turn. |
-| `production_per_turn`, `food_per_turn` | Summed over the player's cities (`CityInformations`). |
+| `production_per_turn`, `food_per_turn` | Summed over the player's cities (`CityInformations`), using the latest row (highest `ID`) for each city and turn before the sum. |
 | `policies` | Number of policies adopted, from `PlayerSummaries.PolicyBranches`. |
 | `religion_percentage` | Percent of all cities whose majority religion is the one this player founded; 0 when it founded none. |
 | `minor_allies` | City-states allied to this player. |

@@ -278,10 +278,17 @@ def extract_game_turn_data(db_path, catalog: Optional[Catalog] = None, issues=No
 
         placeholders = ",".join(["?"] * len(major_players))
         cursor.execute("""
+            WITH latest_cities AS (
+                SELECT Turn, Key, MAX(ID) as MaxID
+                FROM CityInformations
+                GROUP BY Turn, Key
+            )
             SELECT ci.Turn, pi.Key,
                    SUM(ci.ProductionPerTurn) as total_production,
                    SUM(ci.FoodPerTurn) as total_food
-            FROM CityInformations ci
+            FROM latest_cities lc
+            INNER JOIN CityInformations ci
+                ON lc.Turn = ci.Turn AND lc.Key = ci.Key AND lc.MaxID = ci.ID
             INNER JOIN PlayerInformations pi ON ci.Owner = pi.Civilization
             WHERE pi.Key IN ({})
             GROUP BY ci.Turn, pi.Key
