@@ -79,9 +79,8 @@ _FAMILY_PURPOSES = {
         "hidden."
     ),
     "world": (
-        "Describe what happened in each game, for the strategist's own civ and for "
-        "the whole world, against the in-game AI in the same seat and the AI-only "
-        "games on the same maps."
+        "Compare each strategist's growth with the other civs, and describe "
+        "conflict and endings across the whole game, against matched baseline games."
     ),
     "exploratory": (
         "Explore game patterns and strategy profiles across the dataset."

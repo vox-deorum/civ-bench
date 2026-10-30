@@ -4,19 +4,26 @@ A world module answers two questions side by side for every metric:
 
 * **Player**: what the strategist's own civ did, against the baseline in the
   same seat on the same map;
-* **World**: what happened in the whole game, against the baseline's games on
-  the same map (for the in-game AI baseline, the AI-only world).
+* **World**: what happened around it, against the matched baseline (for the
+  in-game AI baseline, the AI-only world).
 
-Every row of the analysis frame is one player in one game. Player values sit in
-``p__<metric>`` columns and the game's World values in ``w__<metric>``, copied
-onto every player of that game. :func:`bench.analyses.behavior.common.build_views`
-matches a ``p__`` column against the baseline pool's ``(seed, player_id)`` cell
-mean, seat by seat, and a ``w__`` column (passed as ``per_game``) against the
-mean over the pool's distinct games on the same seed, map by map. The
-completed-experiment pool holds only strategist seats, so a seat-level match
-would compare World values with whichever games put a strategist in that
-seat. Each metric becomes one column group with a Player and a World
-sub-column.
+Every row of the analysis frame is one player in one game, with Player values
+in ``p__<metric>`` columns and World values in ``w__<metric>``. World values
+come in two kinds:
+
+* **Per player**, such as World growth checkpoints, which describe the other
+  civs around each player. Like Player values, they are keyed by player and
+  match the baseline pool's ``(seed, player_id)`` cell mean, seat by seat.
+* **Per game**, such as conflict counts and endings, which describe the whole
+  game. They are keyed by game, copied onto every player of that game, and
+  match the mean over the pool's distinct games on the same seed, map by map.
+  The completed-experiment pool holds only strategist seats, so a seat-level
+  match would compare them with whichever games put a strategist in that seat.
+
+:meth:`WorldAnalysis.frame` decides the kind from the table a value comes in
+and returns the per-game set for
+:func:`bench.analyses.behavior.common.build_views`. Each metric becomes one
+column group with a Player and a World sub-column.
 """
 
 from __future__ import annotations
@@ -106,11 +113,6 @@ def paired_columns(catalog: dict, metrics, *, suffix: str = "", label: str = "")
     return out
 
 
-def world_columns(columns: Columns) -> frozenset:
-    """The World column ids of ``columns``, for ``build_views(per_game=...)``."""
-    return frozenset(m for m in columns.names if m.startswith(WORLD))
-
-
 def merge_columns(*parts: Columns) -> Columns:
     out = Columns()
     for part in parts:
@@ -164,12 +166,16 @@ class WorldAnalysis(BehaviorAnalysis):
 
     def frame(self, ctx: AnalysisContext, players: pd.DataFrame, player_values: pd.DataFrame,
               world_values: pd.DataFrame, metrics: list[str]):
-        """``(rows, pool, baseline)``: players joined with their own and their game's values.
+        """``(rows, pool, baseline, per_game)``: players joined with their values.
 
-        ``player_values`` is keyed by ``(game_id, player_id)`` and ``world_values``
-        by ``game_id``. Against the in-game AI, Vanilla players leave the rows
-        (the pinned row stands for them); the Null strategist stays.
+        ``player_values`` carries Player and per-player World columns, keyed by
+        ``(game_id, player_id)``. ``world_values`` carries whole-game columns,
+        keyed by ``game_id``. ``per_game`` lists the ``metrics`` not keyed by
+        player, for ``build_views(per_game=...)``. Against the in-game AI,
+        Vanilla players leave the rows (the pinned row stands for them); the
+        Null strategist stays.
         """
+        per_game = frozenset(m for m in metrics if m not in player_values.columns)
         full = players.merge(player_values, on=["game_id", "player_id"], how="left")
         full = full.merge(world_values, on="game_id", how="left")
         for column in metrics:
@@ -181,7 +187,7 @@ class WorldAnalysis(BehaviorAnalysis):
         if baseline is not None and baseline.in_game_ai:
             rows = rows[rows["player_type"].astype(str) != ctx.catalog.vanilla_label]
         pool = C.baseline_pool(ctx, full, baseline)
-        return rows, pool, baseline
+        return rows, pool, baseline, per_game
 
     def pinned_label(self, views: C.BehaviorViews) -> str:
         if views.baseline is None:
@@ -262,7 +268,7 @@ class WorldAnalysis(BehaviorAnalysis):
         )
 
     def world_headline(self, ctx: AnalysisContext, out: MetricViews, views: C.BehaviorViews,
-                       slugs, columns: Columns) -> str:
+                       slugs, columns: Columns, *, world_phrase: str = "the whole world") -> str:
         """The strongest World cell and the strongest Player cell, leaving out Null and Vanilla.
 
         Cells from fewer than 3 games count only when no other cell has more.
@@ -283,7 +289,7 @@ class WorldAnalysis(BehaviorAnalysis):
             if table.empty:
                 continue
             parts = []
-            for scope, phrase in ((WORLD, "the whole world"), (PLAYER, "its own civ")):
+            for scope, phrase in ((WORLD, world_phrase), (PLAYER, "its own civ")):
                 scoped = table[table["metric"].str.startswith(scope)]
                 if scoped.empty:
                     continue

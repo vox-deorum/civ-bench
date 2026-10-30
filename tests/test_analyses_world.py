@@ -11,6 +11,7 @@ and the treatment's Vanilla civ in seat 1 of T2 is eliminated at turn 3.
 from __future__ import annotations
 
 import json
+from html import unescape
 
 import numpy as np
 import pandas as pd
@@ -220,17 +221,74 @@ def test_progress_reads_percent_changes_at_each_checkpoint(world_env):
     assert _cell(t2, LLM, "p__population@2", "cell_text") == "+40%"
     assert _cell(t2, LLM, "p__population@2", "value_mean") == pytest.approx(17.5)
     assert _cell(t2, LLM, "p__population@2", "baseline_mean") == pytest.approx(12.5)
-    # Sums: 60 vs mean(30, 60) = 45, then 25 vs 30.
-    assert _cell(t2, LLM, "w__population@2") == pytest.approx(100 * (85 / 75 - 1))
+    # Other civs: 30 vs mean(20, 40) = 30, then 20 vs 20.
+    assert _cell(t2, LLM, "w__population@2") == pytest.approx(0.0)
+    assert _cell(t2, LLM, "w__population@2", "value_mean") == pytest.approx(25.0)
+    assert _cell(t2, LLM, "w__population@2", "baseline_mean") == pytest.approx(25.0)
     assert _cell(t2, "Null", "p__population@2") == pytest.approx(-100.0)
     t4 = _table(result, "world_progress_t4_relative")
     # B1b ended at turn 3, so seed 1 compares with B1a alone; the civ eliminated
     # in T2 counts as 0 there.
     assert _cell(t4, LLM, "p__population@4") == pytest.approx(75.0)
-    assert _cell(t4, LLM, "w__population@4") == pytest.approx(25.0)
+    assert _cell(t4, LLM, "w__population@4") == pytest.approx(0.0)
     assert _cell(t4, LLM, "w__civs_alive@4") == pytest.approx(-0.5)
-    # Techs average over surviving civs: 40/3 vs 10, then 15 vs 10.
-    assert _cell(t4, LLM, "w__technologies@4") == pytest.approx(100 * ((40 / 3 + 15) / 20 - 1))
+    # Both games' other surviving civs know 10 techs; the LLM's 20 is excluded.
+    assert _cell(t4, LLM, "w__technologies@4") == pytest.approx(0.0)
+
+
+def test_progress_excludes_only_the_focal_civ_and_handles_no_other_survivors():
+    from bench.analyses.world.progress import WorldProgress
+
+    turns = pd.DataFrame([
+        ("G", 0, 0, 100, 5, 4), ("G", 1, 0, 100, 10, 6), ("G", 2, 0, 100, 20, 8),
+        ("G", 0, 2, 100, 30, 12), ("G", 1, 2, 100, 15, 10),
+        # Seat 2 has no row at the checkpoint and counts as eliminated.
+        ("G", 0, 3, 100, 45, 14), ("G", 1, 3, 0, 15, 10),
+    ], columns=["game_id", "player_id", "turn", "score", "population", "technologies"])
+    metrics = ["population", "technologies", "civs_alive"]
+    player, world = WorldProgress._checkpoint_values(turns, metrics, 2)
+    world = world.set_index("player_id")
+    assert world["w__population@2"].to_dict() == {0: 15, 1: 30, 2: 45}
+    assert world["w__technologies@2"].to_dict() == {0: 10, 1: 12, 2: 11}
+    assert world["w__civs_alive@2"].to_dict() == {0: 1, 1: 1, 2: 2}
+    assert player.set_index("player_id")["p__population@2"].to_dict() == {0: 30, 1: 15, 2: 0}
+
+    _, world = WorldProgress._checkpoint_values(turns, metrics, 3)
+    world = world.set_index("player_id")
+    assert world.loc[0, "w__population@3"] == 0
+    assert world.loc[0, "w__civs_alive@3"] == 0
+    assert pd.isna(world.loc[0, "w__technologies@3"])
+    assert world.loc[1, "w__technologies@3"] == 14
+
+
+def test_progress_baseline_excludes_the_matching_seat(world_env):
+    cfg = world_env.make("world.progress", PROGRESS)
+    path = cfg.data["tables"]["turns"]
+    turns = pd.read_csv(path)
+    focal_baseline = turns["experiment"].eq(BASELINE) & turns["player_id"].eq(0)
+    turns.loc[focal_baseline, "population"] *= 10
+    turns.to_csv(path, index=False)
+
+    result = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
+    table = _table(result, "world_progress_t2_relative")
+    assert _cell(table, LLM, "w__population@2", "baseline_mean") == pytest.approx(25.0)
+    assert _cell(table, LLM, "w__population@2") == pytest.approx(0.0)
+
+
+def test_progress_keeps_each_players_other_civs_in_a_shared_game(world_env):
+    cfg = world_env.make("world.progress", PROGRESS)
+    path = cfg.data["tables"]["panel"]
+    panel = pd.read_csv(path)
+    panel.loc[panel["game_id"].eq("T1") & panel["player_id"].eq(1), "player_type"] = LLM
+    panel.to_csv(path, index=False)
+
+    result = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
+    table = _table(result, "world_progress_t2_relative")
+    # T1's two focal players see 30 and 45 population elsewhere; T2's sees 20.
+    # Their seat-matched baselines are 30, 30, and 20.
+    assert _cell(table, LLM, "w__population@2") == pytest.approx(18.75)
+    assert _cell(table, LLM, "w__population@2", "n_players") == 3
+    assert _cell(table, LLM, "w__population@2", "n_games") == 2
 
 
 def test_progress_endings_compare_win_shares_in_points(world_env):
@@ -265,6 +323,9 @@ def test_progress_views_nest_the_tabs_under_relative_and_absolute(world_env):
     assert heatmaps["world_progress_t2_relative"]["mark_significant"] is True
     assert heatmaps["world_progress_t2_absolute"]["mark_significant"] is False
     assert heatmaps["world_progress_by_seed"]["mark_significant"] is False
+    assert "excludes this player's civ" in heatmaps["world_progress_t2_relative"]["help"]
+    assert "whole game" in heatmaps["world_endings_relative"]["help"]
+    assert "count each game once" in heatmaps["world_endings_absolute"]["help"]
     spec = result.metadata["heatmaps"]["world_progress_overview_relative"]
     assert spec["column_order"][:4] == ["p__population@2", "w__population@2",
                                         "p__population@4", "w__population@4"]
@@ -358,7 +419,7 @@ def test_world_page_renders_both_sections_with_their_tabs(world_env):
     assert 'id="section-wld-progress-relative-view-turn-2"' in page
     assert 'id="section-wld-progress-absolute-view-turn-2"' in page
     assert ">AI-only world<" in page
-    assert ">+25%<" in page
+    assert "Population summed over the other civs." in unescape(page)
     # The No winner group is headed "None", which must not read back as missing.
     assert ">None<" in page and ">nan<" not in page
     # The Matched Maps tables are not drawn inline on the World page.

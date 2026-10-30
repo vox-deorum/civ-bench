@@ -30,7 +30,7 @@ from ..base import AnalysisContext, AnalysisResult
 from ..behavior import common as C
 from ..behavior.base import MetricViews
 from ..errors import AnalysisError
-from .base import PLAYER, WORLD, WorldAnalysis, metric_id, paired_columns, world_columns
+from .base import PLAYER, WORLD, WorldAnalysis, metric_id, paired_columns
 
 SLUG = "world_conflict"
 # Metrics read from the turns table for the Player side.
@@ -70,15 +70,14 @@ class WorldConflict(WorldAnalysis):
         player_values = self._player_values(ctx, metrics, turns)
         world_values = self._world_values(ctx, metrics, turns)
         columns = paired_columns(S.WORLD_CONFLICT_METRICS, metrics)
-        rows, pool, baseline = self.frame(ctx, players, player_values, world_values,
-                                          list(columns.names))
+        rows, pool, baseline, per_game = self.frame(ctx, players, player_values, world_values,
+                                                    list(columns.names))
         if rows.empty:
             return AnalysisResult(summary="No players remain after filtering.")
 
         cells = C.controlled_cells(ctx)
         views = C.build_views(rows, pool, list(columns.names), cells, baseline,
-                              percent=columns.percent, keep_baseline=True,
-                              per_game=world_columns(columns))
+                              percent=columns.percent, keep_baseline=True, per_game=per_game)
         out = MetricViews()
         player_base, world_base = self.baseline_words(views)
         pinned = self.pinned_label(views)

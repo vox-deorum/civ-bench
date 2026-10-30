@@ -477,35 +477,36 @@ WORLD_CONFLICT_EVENTS = (
     "capitals_captured", "city_state_cities_captured", "cities_razed", "nukes_built",
     "nukes_detonated",
 )
-# Read at each checkpoint turn from the turns table. World values are sums over
-# civs, except techs (the average over surviving civs) and civs alive (a count).
+# Read at each checkpoint turn from the turns table. A player's World values
+# leave out its own civ: sums over the other civs, except techs (the average
+# over surviving other civs) and civs alive (a count).
 WORLD_PROGRESS_METRICS = {
     "population": ("Population", "Pop", "The civ's population.",
-                   "Population summed over all civs.", "pct", "pct"),
+                   "Population summed over the other civs.", "pct", "pct"),
     "cities": ("Cities", "Cities", "Cities the civ owns.",
-               "Cities summed over all civs.", "pct", "pct"),
+               "Cities summed over the other civs.", "pct", "pct"),
     "territory": ("Territory", "Land", "Plots the civ owns.",
-                  "Plots owned, summed over all civs.", "pct", "pct"),
+                  "Plots owned, summed over the other civs.", "pct", "pct"),
     "technologies": ("Technologies", "Techs", "Technologies the civ knows.",
-                     "Technologies known, averaged over surviving civs.", "pct", "pct"),
+                     "Technologies known, averaged over surviving other civs.", "pct", "pct"),
     "science_per_turn": ("Science per turn", "Science", "The civ's science per turn.",
-                         "Science per turn summed over all civs.", "pct", "pct"),
+                         "Science per turn summed over the other civs.", "pct", "pct"),
     "production_per_turn": ("Production per turn", "Prod", "The civ's production per turn.",
-                            "Production per turn summed over all civs.", "pct", "pct"),
+                            "Production per turn summed over the other civs.", "pct", "pct"),
     "food_per_turn": ("Food per turn", "Food", "The civ's food per turn.",
-                      "Food per turn summed over all civs.", "pct", "pct"),
+                      "Food per turn summed over the other civs.", "pct", "pct"),
     "culture_per_turn": ("Culture per turn", "Culture", "The civ's culture per turn.",
-                         "Culture per turn summed over all civs.", "pct", "pct"),
+                         "Culture per turn summed over the other civs.", "pct", "pct"),
     "gold_per_turn": ("Gold per turn", "Gold", "The civ's gold per turn.",
-                      "Gold per turn summed over all civs.", "pct", "pct"),
+                      "Gold per turn summed over the other civs.", "pct", "pct"),
     "faith_per_turn": ("Faith per turn", "Faith", "The civ's faith per turn.",
-                       "Faith per turn summed over all civs.", "pct", "pct"),
+                       "Faith per turn summed over the other civs.", "pct", "pct"),
     "tourism_per_turn": ("Tourism per turn", "Tourism", "The civ's tourism per turn.",
-                         "Tourism per turn summed over all civs.", "pct", "pct"),
+                         "Tourism per turn summed over the other civs.", "pct", "pct"),
     "military_units": ("Military units", "Units", "The civ's military units.",
-                       "Military units summed over all civs.", "pct", "pct"),
+                       "Military units summed over the other civs.", "pct", "pct"),
     "civs_alive": ("Civs alive", "Alive", "Share of the civ's games in which it is still alive.",
-                   "Civs still alive.", "pts", "diff"),
+                   "Other civs still alive.", "pts", "diff"),
 }
 # Victory type (as the panel records it) → (name, short header), in column order.
 # Types not listed still show, after these.
