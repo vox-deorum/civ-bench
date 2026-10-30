@@ -36,14 +36,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from ..config import RunConfig
+from bench.config import RunConfig
 from bench.config.schema import DEFAULT_RUNS_DIR
 from bench.extract.errors import ExtractError
-from ..extract.issues import resolve_issues_path
+from bench.extract.issues import resolve_issues_path
 from bench.extract.runner import table_path
 from bench.extract.sources import SourceState, TierScan, scan_sources
-from .errors import FixError
-from .repair import SIDECAR_SUFFIXES, RepairReport, _remove, repair_database, source_quick_check
+from bench.fix.errors import FixError
+from bench.fix.repair import SIDECAR_SUFFIXES, RepairReport, _remove, repair_database, source_quick_check
 
 Status = Literal[
     "repaired", "healthy", "failed", "not-found", "ambiguous",

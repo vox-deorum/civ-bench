@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 from bench.extract.errors import ExtractError
@@ -21,14 +22,17 @@ class TierScan:
     available: bool
     files: list[str] = field(default_factory=list)
     databases: dict[str, str] = field(default_factory=dict)
+    duplicates: int = 0
     error: str = ""
 
 
 @dataclass
 class Inventory:
+    """Scans of each source tier. The views are cached, so treat scans as frozen."""
+
     tiers: dict[str, TierScan]
 
-    @property
+    @cached_property
     def selected(self) -> dict[str, str]:
         # Assign hot last so it wins independently of the snapshot timestamp.
         selected = {}
@@ -37,18 +41,18 @@ class Inventory:
                 selected.update(self.tiers[name].databases)
         return selected
 
-    @property
+    @cached_property
     def game_ids(self) -> set[str]:
         return set(self.selected)
 
-    @property
+    @cached_property
     def db_files(self) -> list[str]:
         hot = self.tiers["hot"].databases
         return sorted(hot.values()) + sorted(
             path for gid, path in self.selected.items() if gid not in hot
         )
 
-    @property
+    @cached_property
     def signature(self) -> str:
         payload = {
             name: {"available": scan.available, "databases": scan.databases}
@@ -58,6 +62,7 @@ class Inventory:
 
 
 def _scan(root: str) -> TierScan:
+    """Keep the newest ``{uuid}_{timestamp}.db`` per game; any walk error fails the scan."""
     scan = TierScan(str(root), False)
     best: dict[str, tuple[int, str]] = {}
 
@@ -82,25 +87,29 @@ def _scan(root: str) -> TierScan:
                 except ValueError:
                     continue
                 candidate = (timestamp, path)
+                if parts[0] in best:
+                    scan.duplicates += 1
                 if candidate > best.get(parts[0], (-1, "")):
                     best[parts[0]] = candidate
         scan.available = True
         scan.databases = {gid: path for gid, (_, path) in sorted(best.items())}
     except OSError as exc:
-        scan.files = []
-        scan.databases = {}
-        scan.error = str(exc)
+        scan = TierScan(scan.root, False, error=str(exc))
     return scan
 
 
-def scan_sources(extract_cfg: dict) -> Inventory:
-    """Discard a failed cold scan; an incomplete hot scan is an error."""
+def scan_sources(extract_cfg: dict, require_hot: bool = True) -> Inventory:
+    """Scan every configured root. A failed scan keeps no partial inventory.
+
+    An incomplete hot scan is an error unless ``require_hot`` is false, in which
+    case the hot tier is reported as unavailable with no databases.
+    """
     try:
         roots = resolve_source_roots(extract_cfg)
     except ConfigError as exc:
         raise ExtractError(str(exc)) from exc
     tiers = {name: _scan(str(root)) for name, root in roots.items()}
-    if not tiers["hot"].available:
+    if require_hot and not tiers["hot"].available:
         raise ExtractError(f"cannot scan runs_dir: {tiers['hot'].error}")
     return Inventory(tiers)
 
@@ -197,10 +206,16 @@ def csv_game_ids(path: str) -> set[str]:
     if not Path(path).exists():
         return set()
     with open(path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        if not reader.fieldnames or "game_id" not in reader.fieldnames:
+        reader = csv.reader(fh)
+        header = next(reader, [])
+        if "game_id" not in header:
             raise ExtractError(f"cannot identify cached games in {path}: missing game_id header")
-        return {row["game_id"] for row in reader if row.get("game_id") and row["game_id"] != "N/A"}
+        # Only the one column is needed, so skip building a dict per row.
+        column = header.index("game_id")
+        ids = {row[column] for row in reader if len(row) > column}
+    ids.discard("")
+    ids.discard("N/A")
+    return ids
 
 
 def prune_csv(path: str, removed: set[str]) -> None:

@@ -86,7 +86,27 @@ def test_offline_cold_retains_cached_rows_and_issues_but_hot_can_be_removed(stor
     assert result.protected_game_ids == {"archived"}
     assert csv_game_ids(cfg.data["tables"]["games"]) == {"archived"}
     assert csv_game_ids(cfg.data["extract"]["issues_path"]) == {"archived"}
-    assert result.tier_availability == {"hot": True, "cold": False}
+
+
+def test_skipped_run_reads_only_the_games_table(storage, monkeypatch):
+    from bench.extract import tiered
+
+    cfg, _, hot, cold = storage
+    database(hot, "active")
+    database(cold, "archived")
+    run(storage)
+
+    def unexpected(path):
+        raise AssertionError(f"a skipped run read {path}")
+
+    monkeypatch.setattr(tiered, "csv_game_ids", unexpected)
+    assert run(storage).skipped
+    cold.rename(cold.with_name("offline"))
+    monkeypatch.undo()
+    assert run(storage).protected_game_ids == {"archived"}
+    monkeypatch.setattr(tiered, "csv_game_ids", unexpected)
+    result = run(storage)
+    assert result.skipped and result.protected_game_ids == {"archived"}
 
 
 def test_move_observed_on_skipped_run_establishes_cold_ownership(storage):

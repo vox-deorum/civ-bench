@@ -33,21 +33,21 @@ from typing import Callable, Literal, Optional
 
 import pandas as pd
 
-from ..config import RunConfig
+from bench.config import RunConfig
 from bench.config.schema import DEFAULT_RUNS_DIR
-from ..config.behavior import resolve_behavior_spec
-from ..config.filters import resolve_filter_spec
-from ..data.failures import failed_game_ids_from_tokens
-from ..data.loading import drop_problem_games
-from ..data.repeats import controlled_rows, repeated_slots
-from ..extract import ExtractResult, run_extract
-from ..extract.errors import ExtractError
-from ..extract.issues import read_problem_game_ids, resolve_issues_path
-from ..extract.prune import PruneConfirm, PruneGate
-from ..extract.runner import DEFAULT_TABLE_PATHS, expected_fieldnames, table_path
-from bench.extract.sources import Inventory, SourceState, TierScan, scan_sources
-from ..extract.utilities import csv_header_matches
-from .errors import TrimError
+from bench.config.behavior import resolve_behavior_spec
+from bench.config.filters import resolve_filter_spec
+from bench.data.failures import failed_game_ids_from_tokens
+from bench.data.loading import drop_problem_games
+from bench.data.repeats import controlled_rows, repeated_slots
+from bench.extract import ExtractResult, run_extract
+from bench.extract.errors import ExtractError
+from bench.extract.issues import read_problem_game_ids, resolve_issues_path
+from bench.extract.prune import PruneConfirm, PruneGate
+from bench.extract.runner import DEFAULT_TABLE_PATHS, expected_fieldnames, table_path
+from bench.extract.sources import Inventory, SourceState, scan_sources
+from bench.extract.utilities import csv_header_matches
+from bench.trim.errors import TrimError
 
 Status = Literal[
     "trimmed", "not-found", "skipped-bak-exists", "skipped-keeper-missing", "failed",
@@ -204,12 +204,10 @@ def run_trim(
 
     tables = _prune_tables(cfg) if cfg.extract_enabled else []
     try:
+        # With one root, an unreadable runs_dir leaves no keepers, so every slot is
+        # skipped. With two, an unseen hot copy could survive the prune.
         tiered = extract_cfg.get("cold_runs_dir") is not None
-        if not tiered and not os.path.isdir(runs_dir):
-            # A legacy cached-only trim reports a missing keeper without writing.
-            inventory = Inventory({"hot": TierScan(str(Path(runs_dir).resolve()), False)})
-        else:
-            inventory = scan_sources(extract_cfg)
+        inventory = scan_sources(extract_cfg, require_hot=tiered)
         state = SourceState.load(games_path, inventory) if tiered else None
     except (ExtractError, OSError) as exc:
         raise TrimError(f"could not scan the game data sources or load ownership: {exc}") from exc

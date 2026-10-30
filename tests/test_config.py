@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from bench.config import ConfigError, OutputConfig, load_config
@@ -365,6 +367,21 @@ def test_extract_cold_runs_dir_normalizes_roots_before_comparison(
     dev_spec["data"]["extract"]["cold_runs_dir"] = "runs/./hot"
     with pytest.raises(ConfigError, match="overlap"):
         load_config(write_spec(dev_spec))
+
+
+def test_extract_cold_runs_dir_is_not_touched_while_loading(dev_spec, write_spec, monkeypatch):
+    """A disconnected cold drive must not stall commands that never read sources."""
+    resolve = Path.resolve
+
+    def guarded(self, *args, **kwargs):
+        if "unplugged-cold" in str(self):
+            raise AssertionError("config loading resolved the cold root")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", guarded)
+    dev_spec["data"]["extract"]["cold_runs_dir"] = "unplugged-cold"
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.data["extract"]["cold_runs_dir"] == "unplugged-cold"
 
 
 def test_report_page_fields_load(dev_spec, write_spec):

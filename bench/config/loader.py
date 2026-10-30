@@ -210,7 +210,7 @@ def _validate_data(data: dict, presets: dict) -> dict:
             if key in extract:
                 _check_type(extract[key], (str,), f"data.extract.{key}")
         if extract.get("cold_runs_dir") is not None:
-            resolve_source_roots(extract)
+            resolve_source_roots(extract, follow_links=False)
         max_dbs = extract.get("max_dbs")
         if max_dbs is not None:
             if isinstance(max_dbs, bool) or not isinstance(max_dbs, int) or max_dbs < 1:

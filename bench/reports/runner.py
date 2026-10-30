@@ -35,7 +35,9 @@ from typing import Optional
 
 import pandas as pd
 
+from bench.config.errors import ConfigError
 from bench.config.filters import resolve_filter_spec
+from bench.config.validation import SOURCE_ROOT_KEYS, resolve_source_roots
 from bench.plotting.interactive import PLOTLY_ASSET, plotly_javascript, share_plotly
 
 from ..config import RunConfig
@@ -663,34 +665,30 @@ def _front_page_catalog(cfg: RunConfig, context: ReportBuildContext) -> dict:
     }
 
 
-def _save_source_roots(cfg: RunConfig, extract_cfg: dict, warnings: list[str]) -> list[Path]:
-    """Search roots independently so unavailable hot storage cannot block cold."""
-    cold_authored = extract_cfg.get("cold_runs_dir")
-    hot_authored = extract_cfg.get("runs_dir", S.DEFAULT_RUNS_DIR if cold_authored else None)
-    if not hot_authored and not cold_authored:
-        warnings.append("report.replay: data.extract.runs_dir is missing; saves were skipped.")
+def _save_source_roots(extract_cfg: dict, warnings: list[str]) -> list[tuple[str, Path]]:
+    """Readable game-DB roots, hot first, each with its config key.
+
+    Roots are checked one by one, so an unavailable hot root does not block cold.
+    """
+    try:
+        roots = resolve_source_roots(extract_cfg)
+    except ConfigError as exc:
+        warnings.append(f"report.replay: {exc} Saves were skipped.")
         return []
-    roots: list[Path] = []
-    for name, authored in (("runs_dir", hot_authored), ("cold_runs_dir", cold_authored)):
-        if not authored:
-            continue
+    searchable, unreadable = [], []
+    for tier, root in roots.items():
+        key = SOURCE_ROOT_KEYS[tier]
         try:
-            # Keep the one-root path resolution used by existing reports. With
-            # two roots, match extraction's source paths as authored.
-            path = cfg.output.resolve(authored) if cold_authored is None else authored
-            root = Path(path).resolve()
             available = root.is_dir()
         except OSError:
             available = False
-        if not available:
-            if name == "runs_dir":
-                action = "searching cold sources" if cold_authored else "saves were skipped"
-                warnings.append(f"report.replay: runs_dir '{authored}' is missing or unreadable; {action}.")
-            continue
-        roots.append(root)
-    if not roots and cold_authored:
-        warnings.append("report.replay: no source root could be searched; saves were skipped.")
-    return roots
+        (searchable if available else unreadable).append((key, root))
+    if unreadable:
+        names = " and ".join(f"{key} '{root}'" for key, root in unreadable)
+        verb = "is" if len(unreadable) == 1 else "are"
+        action = "searching the other root" if searchable else "saves were skipped"
+        warnings.append(f"report.replay: {names} {verb} missing or unreadable; {action}.")
+    return searchable
 
 
 def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: list[str]) -> None:
@@ -698,7 +696,8 @@ def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: l
     if doc.replay is None or doc.games.empty:
         return
     extract_cfg = cfg.data.get("extract") or {}
-    roots = _save_source_roots(cfg, extract_cfg, warnings)
+    named_roots = _save_source_roots(extract_cfg, warnings)
+    roots = [root for _, root in named_roots]
     if not roots:
         return
     scope = (cfg.report.get("replay") or {}).get("saves", "all")
@@ -738,22 +737,27 @@ def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: l
             if source is None:
                 missing.append(game_id)
                 continue
+            # A published save keeps its source's size and mtime (hard link or
+            # copy2). On a match, link the previous copy, which shares the
+            # staging volume, instead of copying again from another drive.
             cached = previous / rel
-            if (cached.is_file() and previous in cached.resolve().parents
-                    and cached.samefile(source)):
-                source = cached
+            if cached.is_file() and previous in cached.resolve().parents:
+                cached_stat, source_stat = cached.stat(), source.stat()
+                if (cached_stat.st_size, cached_stat.st_mtime_ns) == (
+                        source_stat.st_size, source_stat.st_mtime_ns):
+                    source = cached
             destination.parent.mkdir(parents=True, exist_ok=True)
             try:
                 os.link(source, destination)
             except OSError:
-                shutil.copyfile(source, destination)
+                shutil.copy2(source, destination)
             doc.replay.save_paths[game_id] = rel.as_posix()
         except OSError as exc:
             warnings.append(f"report.replay: could not copy save for game '{game_id}': {exc}")
     if missing:
-        searched = ", ".join(str(root) for root in roots)
+        searched = " or ".join(f"{key} '{root}'" for key, root in named_roots)
         warnings.append(f"report.replay: {len(missing)} of {len(games)} saves not found under "
-                        f"runs_dir '{searched}': {', '.join(missing[:5])}.")
+                        f"{searched}: {', '.join(missing[:5])}.")
 
 
 def run_report(cfg: RunConfig) -> ReportRunResult:

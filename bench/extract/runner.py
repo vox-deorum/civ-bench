@@ -10,23 +10,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..catalog import Catalog
-from ..config import RunConfig
-from ..config.behavior import resolve_behavior_spec
+from bench.catalog import Catalog
+from bench.config import RunConfig
+from bench.config.behavior import resolve_behavior_spec
 from bench.config.schema import DEFAULT_RUNS_DIR
-from .errors import ExtractError
-from .extract_agentic import AGENTIC_FIELDNAMES, export_agentic_data
-from .extract_behavior import behavior_fieldnames, export_behavior_data
-from .extract_games import GAME_FIELDNAMES, export_game_data
-from .extract_model_tokens import MODEL_TOKEN_FIELDNAMES, export_model_token_data
-from .extract_panel import PANEL_FIELD_MAPPINGS, export_panel_data
-from .extract_turns import TURN_FIELD_MAPPINGS, export_turn_data
-from .extract_world import WORLD_FIELDNAMES, export_world_data
-from .issues import DEFAULT_ISSUES_PATH, ImportIssueLog
-from .prune import PruneGate, read_game_rows
+from bench.extract.errors import ExtractError
+from bench.extract.extract_agentic import AGENTIC_FIELDNAMES, export_agentic_data
+from bench.extract.extract_behavior import behavior_fieldnames, export_behavior_data
+from bench.extract.extract_games import GAME_FIELDNAMES, export_game_data
+from bench.extract.extract_model_tokens import MODEL_TOKEN_FIELDNAMES, export_model_token_data
+from bench.extract.extract_panel import PANEL_FIELD_MAPPINGS, export_panel_data
+from bench.extract.extract_turns import TURN_FIELD_MAPPINGS, export_turn_data
+from bench.extract.extract_world import WORLD_FIELDNAMES, export_world_data
+from bench.extract.issues import DEFAULT_ISSUES_PATH, ImportIssueLog
+from bench.extract.prune import PruneGate, read_game_rows
 from bench.extract.sources import scan_sources
 from bench.extract.tiered import TieredExtraction
-from .utilities import csv_header_matches, find_all_databases, outputs_are_fresh
+from bench.extract.utilities import csv_header_matches, outputs_are_fresh
 
 
 # Canonical table key → default CSV path (used when `data.tables` omits a key).
@@ -70,8 +70,9 @@ class ExtractResult:
     # declined (or, on a skipped run, never reviewed).
     pruned_game_ids: set = field(default_factory=set)
     kept_missing_game_ids: set = field(default_factory=set)
+    # Cached games without a selected source that may have copies in offline cold
+    # storage, so they are kept and never offered for pruning.
     protected_game_ids: set = field(default_factory=set)
-    tier_availability: dict = field(default_factory=dict)
 
 
 def table_path(cfg: RunConfig, key: str) -> str:
@@ -127,28 +128,26 @@ def run_extract(
     print(f"runs_dir: {runs_dir}")
     print(f"outputs:  {outputs}")
 
-    tiered = None
-    if extract_cfg.get("cold_runs_dir") is not None:
-        inventory = scan_sources(extract_cfg)
-        db_files, available_game_ids = inventory.db_files, inventory.game_ids
-        all_paths = {key: table_path(cfg, key) for key in DEFAULT_TABLE_PATHS}
-        tiered = TieredExtraction.prepare(inventory, table_path(cfg, "games"), all_paths, issues_path)
-        tier_availability = {name: scan.available for name, scan in inventory.tiers.items()}
-        print(f"cold_runs_dir: {inventory.tiers['cold'].root} "
-              f"({'available' if tier_availability['cold'] else 'unavailable'})")
-        if tiered.protected:
-            print(f"Protecting {len(tiered.protected)} cached game(s) while cold storage is unavailable")
-    else:
-        db_files, available_game_ids = find_all_databases(runs_dir)
-        db_files = sorted(db_files)
-        tier_availability = {}
+    inventory = scan_sources(extract_cfg)
+    db_files, available_game_ids = inventory.db_files, inventory.game_ids
+    games_path = table_path(cfg, "games")
+    cold = inventory.tiers.get("cold")
+    tiered = TieredExtraction.load(inventory, games_path) if cold else None
+    if cold:
+        print(f"cold_runs_dir: {cold.root} ({'available' if cold.available else 'unavailable'})")
+    duplicates = sum(scan.duplicates for scan in inventory.tiers.values())
+    if duplicates:
+        print(f"  Note: Found {duplicates} duplicate database(s), keeping latest per game")
     print(f"Found {len(db_files)} database files with {len(available_game_ids)} unique games")
 
     # game_data is small, so read it up front: it names the games that would be
     # pruned (with experiment and seed for the prompt) before any big table is read.
-    games_path = table_path(cfg, "games")
     game_rows = read_game_rows(games_path)
-    missing_game_ids = tiered.missing if tiered else set(game_rows) - available_game_ids
+    protected_game_ids = set()
+    if tiered:
+        protected_game_ids, missing_game_ids = tiered.split_absent(set(game_rows))
+    else:
+        missing_game_ids = set(game_rows) - available_game_ids
 
     selected_db_files = db_files
     capped = max_dbs is not None and max_dbs < len(db_files)
@@ -173,24 +172,20 @@ def run_extract(
     )
     if not force_rebuild and not prune_only and not capped and headers_current \
             and outputs_are_fresh(freshness_paths, db_files) \
-            and (tiered is None or (tiered.checkpoints_current(checkpoint_paths)
-                                    and not (tiered.state.pending_removals & tiered.missing))):
+            and (tiered is None or tiered.is_current(checkpoint_paths)):
         reason = ("all outputs exist and are newer than the source DBs "
                   "(pass force_rebuild to override).")
         if missing_game_ids:
             # Removing a DB does not make the outputs stale, so say how to drop its rows.
             reason += (f" {len(missing_game_ids)} game(s) in {games_path} have no "
                        f"database file; pass --prune-missing to review and remove them.")
-        if tiered:
-            tiered.state.save()
         return ExtractResult(
             skipped=True,
             reason=reason,
             output_paths=output_paths,
             issues_path=issues_path,
             kept_missing_game_ids=missing_game_ids,
-            protected_game_ids=set(tiered.protected) if tiered else set(),
-            tier_availability=tier_availability,
+            protected_game_ids=protected_game_ids,
         )
 
     prune_gate = prune_gate or PruneGate()
@@ -198,6 +193,12 @@ def run_extract(
     removed = set()
     retained_game_ids = available_game_ids
     if tiered:
+        # Removals cover every table on disk, so every cached id is needed now.
+        all_paths = {key: table_path(cfg, key) for key in DEFAULT_TABLE_PATHS}
+        tiered.read_tables(all_paths, issues_path)
+        protected_game_ids = tiered.protected
+        if protected_game_ids:
+            print(f"Protecting {len(protected_game_ids)} cached game(s) while cold storage is unavailable")
         prune_gate.add_details(read_game_rows(issues_path))
         prune_gate.add_details({
             gid: {"game_id": gid, "experiment": entry["experiment"]}
@@ -206,7 +207,8 @@ def run_extract(
         removed = tiered.review(prune_gate)
         fields = {key: expected_fieldnames(key, behavior_spec) for key in DEFAULT_TABLE_PATHS}
         tiered.preflight(output_paths, all_paths, fields, selected_db_files, prune_only, removed)
-        tiered.begin(removed, all_paths, checkpoint_paths)
+        tiered.journal(removed, all_paths, checkpoint_paths)
+        tiered.prune(removed, all_paths)
         retained_game_ids = available_game_ids | tiered.protected | (tiered.missing - removed)
     elif "games" in outputs and missing_game_ids:
         # Ask about every game the games table already knows is missing in one go;
@@ -280,6 +282,5 @@ def run_extract(
         issues_path=issues_path,
         pruned_game_ids=set(prune_gate.approved),
         kept_missing_game_ids=set(prune_gate.declined),
-        protected_game_ids=set(tiered.protected) if tiered else set(),
-        tier_availability=tier_availability,
+        protected_game_ids=set(protected_game_ids),
     )

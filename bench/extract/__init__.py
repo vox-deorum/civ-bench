@@ -15,7 +15,6 @@ from .runner import ExtractResult, run_extract
 from .utilities import (
     SeedingInfo,
     extract_seeding_fields,
-    find_all_databases,
     invert_seating_map,
     outputs_are_fresh,
 )
@@ -28,7 +27,6 @@ __all__ = [
     "SeedingInfo",
     "compose_identities",
     "extract_seeding_fields",
-    "find_all_databases",
     "invert_seating_map",
     "outputs_are_fresh",
     "run_extract",

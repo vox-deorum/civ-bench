@@ -339,7 +339,7 @@ def test_trim_scanner_failure_is_a_trim_error(env, monkeypatch):
     files = _repeated_slot(env)
     import bench.trim.runner as trim_runner
 
-    def boom(_extract_cfg):
+    def boom(_extract_cfg, require_hot=True):
         raise ExtractError("hot source is unavailable")
 
     monkeypatch.setattr(trim_runner, "scan_sources", boom)

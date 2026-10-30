@@ -562,6 +562,21 @@ def test_run_extract_prune_asks_once_and_drops_approved_games(tmp_path, catalog)
     assert _read_game_ids(out) == {"keep"}
 
 
+def test_run_extract_unreadable_runs_dir_stops_before_pruning(tmp_path, catalog):
+    out = tmp_path / "game_data.csv"
+    out.write_text(_GAMES_WITH_GONE, encoding="utf-8")
+    cfg = _run_config(
+        tmp_path,
+        {"enabled": True, "runs_dir": str(tmp_path / "unplugged"), "outputs": ["games"]},
+        {"games": str(out)},
+    )
+    asked = []
+    with pytest.raises(ExtractError, match="cannot scan runs_dir"):
+        run_extract(cfg, catalog=catalog, prune_gate=PruneGate(lambda games: asked.append(games) or True))
+    assert asked == []
+    assert out.read_text(encoding="utf-8") == _GAMES_WITH_GONE
+
+
 def test_run_extract_declined_prune_keeps_rows_and_issues(tmp_path, catalog):
     runs = tmp_path / "runs"
     _make_game_db(runs / "exp" / "keep_100.db", {"gameId": "keep"})

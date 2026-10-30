@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from html.parser import HTMLParser
@@ -249,7 +250,8 @@ def test_replay_scope_and_absolute_base_url(replay_env):
 def test_replay_missing_runs_dir_warns(replay_env, runs_dir):
     replay_env.data["extract"]["runs_dir"] = runs_dir
     result = run_report(replay_env)
-    assert any("runs_dir" in warning and "missing" in warning for warning in result.warnings)
+    assert any("runs_dir" in warning and "saves were skipped" in warning.lower()
+               for warning in result.warnings)
     assert "no replay" in (report_dir(replay_env) / "games.html").read_text(encoding="utf-8")
 
 
@@ -310,6 +312,33 @@ def test_replay_offline_cold_source_is_not_fatal(replay_env):
     assert (out / "saves/private-experiment-name/game-new.Civ5Save").is_file()
     assert any("1 of 3 saves not found" in warning and "game-missing" in warning
                for warning in result.warnings)
+    assert any("cold_runs_dir" in warning and "missing or unreadable" in warning
+               for warning in result.warnings)
+
+
+def test_replay_reuses_published_saves_when_sources_cannot_be_linked(replay_env, monkeypatch):
+    import bench.reports.runner as report_runner
+
+    out = report_dir(replay_env).resolve()
+    real_link = os.link
+
+    def link_within_report(source, destination):
+        # Saves on another volume cannot be hard-linked into the report.
+        if out not in Path(source).resolve().parents:
+            raise OSError("cross-device link")
+        real_link(source, destination)
+
+    copies = []
+    real_copy = report_runner.shutil.copy2
+    monkeypatch.setattr(report_runner.os, "link", link_within_report)
+    monkeypatch.setattr(report_runner.shutil, "copy2",
+                        lambda source, destination: copies.append(source) or real_copy(source, destination))
+    run_report(replay_env)
+    assert len(copies) == 2
+    copies.clear()
+    run_report(replay_env)
+    assert copies == []
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
 
 
 def test_replay_without_latest_card_and_disabled(replay_env):

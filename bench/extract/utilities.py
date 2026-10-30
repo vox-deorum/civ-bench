@@ -153,50 +153,6 @@ def extract_seeding_fields(metadata: dict, where: str = "game") -> SeedingInfo:
     return SeedingInfo(seed=seed, seating_rotation=seating_rotation, config_slots=config_slots)
 
 
-# ── DB discovery (ported) ────────────────────────────────────────────────────
-def find_all_databases(root_dir):
-    """Find game ``*.db`` files under ``root_dir``, keeping the latest per game.
-
-    Game files follow ``{uuid}_{timestamp_ms}.db``; player-trace exports
-    (``*-player-*.db``) and non-game files are skipped. Returns
-    ``(db_files, game_ids)``.
-    """
-    best_per_game = {}
-    duplicates_found = 0
-
-    for root, _dirs, files in os.walk(root_dir):
-        for file in files:
-            if not file.endswith(".db"):
-                continue
-            if "-player-" in file:
-                continue
-
-            parts = file[:-3].split("_")
-            if len(parts) < 2:
-                continue
-
-            game_id = parts[0]
-            try:
-                timestamp = int(parts[1])
-            except (ValueError, IndexError):
-                continue
-
-            full_path = os.path.join(root, file)
-            if game_id in best_per_game:
-                duplicates_found += 1
-                if timestamp > best_per_game[game_id][0]:
-                    best_per_game[game_id] = (timestamp, full_path)
-            else:
-                best_per_game[game_id] = (timestamp, full_path)
-
-    if duplicates_found > 0:
-        print(f"  Note: Found {duplicates_found} duplicate database(s), keeping latest per game")
-
-    db_files = [path for _, path in best_per_game.values()]
-    game_ids = set(best_per_game.keys())
-    return db_files, game_ids
-
-
 def get_player_info_cache(cursor):
     """Cache ``player_id → {civilization, is_major}`` from ``PlayerInformations``."""
     cursor.execute("SELECT Key, Civilization, IsMajor FROM PlayerInformations")
