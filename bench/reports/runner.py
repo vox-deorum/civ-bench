@@ -663,17 +663,43 @@ def _front_page_catalog(cfg: RunConfig, context: ReportBuildContext) -> dict:
     }
 
 
+def _save_source_roots(cfg: RunConfig, extract_cfg: dict, warnings: list[str]) -> list[Path]:
+    """Search roots independently so unavailable hot storage cannot block cold."""
+    cold_authored = extract_cfg.get("cold_runs_dir")
+    hot_authored = extract_cfg.get("runs_dir", S.DEFAULT_RUNS_DIR if cold_authored else None)
+    if not hot_authored and not cold_authored:
+        warnings.append("report.replay: data.extract.runs_dir is missing; saves were skipped.")
+        return []
+    roots: list[Path] = []
+    for name, authored in (("runs_dir", hot_authored), ("cold_runs_dir", cold_authored)):
+        if not authored:
+            continue
+        try:
+            # Keep the one-root path resolution used by existing reports. With
+            # two roots, match extraction's source paths as authored.
+            path = cfg.output.resolve(authored) if cold_authored is None else authored
+            root = Path(path).resolve()
+            available = root.is_dir()
+        except OSError:
+            available = False
+        if not available:
+            if name == "runs_dir":
+                action = "searching cold sources" if cold_authored else "saves were skipped"
+                warnings.append(f"report.replay: runs_dir '{authored}' is missing or unreadable; {action}.")
+            continue
+        roots.append(root)
+    if not roots and cold_authored:
+        warnings.append("report.replay: no source root could be searched; saves were skipped.")
+    return roots
+
+
 def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: list[str]) -> None:
     """Publish the available saves before rendering links to them."""
     if doc.replay is None or doc.games.empty:
         return
-    runs_dir = (cfg.data.get("extract") or {}).get("runs_dir")
-    if not runs_dir:
-        warnings.append("report.replay: data.extract.runs_dir is missing; saves were skipped.")
-        return
-    root = Path(cfg.output.resolve(runs_dir)).resolve()
-    if not root.is_dir():
-        warnings.append(f"report.replay: runs_dir '{root}' is missing; saves were skipped.")
+    extract_cfg = cfg.data.get("extract") or {}
+    roots = _save_source_roots(cfg, extract_cfg, warnings)
+    if not roots:
         return
     scope = (cfg.report.get("replay") or {}).get("saves", "all")
     games = doc.games
@@ -689,22 +715,32 @@ def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: l
                or any(ch in name for ch in '/\\:<>"|?*') for name in (experiment, game_id)):
             warnings.append(f"report.replay: unsafe save path for game '{game_id}'; skipped.")
             continue
-        directory = (root / experiment).resolve()
         rel = Path("saves") / experiment / f"{game_id}.Civ5Save"
         destination = staging / rel
-        if root not in directory.parents or destination_root not in destination.resolve().parents:
+        directories: list[tuple[Path, Path]] = []
+        for root in roots:
+            directory = (root / experiment).resolve()
+            if root in directory.parents:
+                directories.append((directory, root))
+        if not directories or destination_root not in destination.resolve().parents:
             warnings.append(f"report.replay: save path for game '{game_id}' escapes its root; skipped.")
             continue
         try:
-            matches = sorted(path for path in directory.glob(f"{glob_escape(game_id)}_*.Civ5Save")
-                             if path.is_file() and root in path.resolve().parents)
-            if not matches:
+            source = None
+            for directory, root in directories:
+                matches = sorted(
+                    path for path in directory.glob(f"{glob_escape(game_id)}_*.Civ5Save")
+                    if path.is_file() and root in path.resolve().parents
+                )
+                if matches:
+                    source = matches[-1]
+                    break
+            if source is None:
                 missing.append(game_id)
                 continue
-            source = matches[-1]
             cached = previous / rel
             if (cached.is_file() and previous in cached.resolve().parents
-                    and cached.stat().st_size == source.stat().st_size):
+                    and cached.samefile(source)):
                 source = cached
             destination.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -715,8 +751,9 @@ def _copy_saves(cfg: RunConfig, doc: GameLogDocument, staging: Path, warnings: l
         except OSError as exc:
             warnings.append(f"report.replay: could not copy save for game '{game_id}': {exc}")
     if missing:
+        searched = ", ".join(str(root) for root in roots)
         warnings.append(f"report.replay: {len(missing)} of {len(games)} saves not found under "
-                        f"runs_dir '{root}': {', '.join(missing[:5])}.")
+                        f"runs_dir '{searched}': {', '.join(missing[:5])}.")
 
 
 def run_report(cfg: RunConfig) -> ReportRunResult:

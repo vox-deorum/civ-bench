@@ -165,6 +165,15 @@
       "pricing": { "input_per_million": 0.3, "output_per_million": 1.2 }
     },
     {
+      "id": "MiniMax-M3",
+      "aliases": [
+        "minimax-m3",
+        "openai-compatible/minimax-m3"
+      ],
+      "color": "#984EA3",
+      "pricing": { "input_per_million": 0.3, "output_per_million": 1.2 }
+    },
+    {
       "id": "MiniMax-M3.1-Flash",
       "aliases": [
         "minimax-m3.1-flash",

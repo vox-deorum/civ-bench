@@ -14,6 +14,7 @@ import pytest
 
 from bench.config.models import OutputConfig, RunConfig
 from bench.extract import export_common
+from bench.extract.errors import ExtractError
 from bench.extract.extract_panel import PANEL_FIELD_MAPPINGS
 from bench.extract.issues import ISSUE_FIELDNAMES
 from bench.extract.runner import DEFAULT_TABLE_PATHS
@@ -72,20 +73,20 @@ def env(tmp_path, configs_dir):
     panel = Path(tables["panel"])
     issues = tmp_path / "import_issues.csv"
 
-    def make_cfg(enabled: bool = True) -> RunConfig:
+    def make_cfg(enabled: bool = True, cold_runs_dir: Path | None = None) -> RunConfig:
+        extract = {
+            "enabled": enabled, "runs_dir": str(runs), "outputs": ["games"],
+            "issues_path": str(issues),
+        }
+        if cold_runs_dir is not None:
+            extract["cold_runs_dir"] = str(cold_runs_dir)
         return RunConfig(
             name="test",
             seed=1,
             config_path=configs_dir / "benchmark.json",
             raw={},
             output=OutputConfig(),
-            data={
-                "extract": {
-                    "enabled": enabled, "runs_dir": str(runs), "outputs": ["games"],
-                    "issues_path": str(issues),
-                },
-                "tables": tables,
-            },
+            data={"extract": extract, "tables": tables},
         )
 
     return {
@@ -305,6 +306,57 @@ def test_disabled_extract_renames_without_pruning(env):
 def test_missing_games_table_is_an_error(env):
     with pytest.raises(TrimError, match="games table not found"):
         run_trim(env["cfg"]())
+
+
+def test_trim_renames_matching_files_in_both_tiers(env):
+    files = _repeated_slot(env)
+    cold = env["runs"].parent / "cold"
+    cold_b = _touch(cold / "exp" / "b_175.db")
+    cold_b_trace = _touch(cold / "exp" / "b-player-2.db")
+    cold_c_save = _touch(cold / "exp" / "c.Civ5Save")
+
+    result = run_trim(env["cfg"](enabled=False, cold_runs_dir=cold))
+
+    assert sorted(o.game_id for o in result.trimmed) == ["b", "c"]
+    assert _baks(files["b"] + files["c"] + [cold_b, cold_b_trace, cold_c_save])
+    assert _untouched(files["a"] + files["d"])
+
+
+def test_trim_keeper_may_exist_only_in_cold(env):
+    files = _repeated_slot(env)
+    files["a"][0].unlink()  # the keeper's game DB lives only in the cold tier
+    cold = env["runs"].parent / "cold"
+    _touch(cold / "exp" / "a_100.db")
+
+    result = run_trim(env["cfg"](enabled=False, cold_runs_dir=cold))
+
+    assert sorted(o.game_id for o in result.trimmed) == ["b", "c"]
+    assert _baks(files["b"] + files["c"])
+    assert _untouched(files["d"])
+
+
+def test_trim_scanner_failure_is_a_trim_error(env, monkeypatch):
+    files = _repeated_slot(env)
+    import bench.trim.runner as trim_runner
+
+    def boom(_extract_cfg):
+        raise ExtractError("hot source is unavailable")
+
+    monkeypatch.setattr(trim_runner, "scan_sources", boom)
+
+    with pytest.raises(TrimError, match="could not scan"):
+        run_trim(env["cfg"]())
+
+    assert all(_untouched(f) for f in files.values())
+
+
+def test_legacy_trim_with_missing_root_keeps_cached_games(env):
+    _repeated_slot(env)
+    original = env["games"].read_bytes()
+    env["runs"].rename(env["runs"].with_name("unavailable"))
+    result = run_trim(env["cfg"]())
+    assert {o.status for o in result.outcomes} == {"skipped-keeper-missing"}
+    assert env["games"].read_bytes() == original
 
 
 def test_cli_trim_short_circuits_before_dag(tmp_path, dev_spec, write_spec, capsys):

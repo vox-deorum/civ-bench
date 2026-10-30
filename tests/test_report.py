@@ -253,6 +253,65 @@ def test_replay_missing_runs_dir_warns(replay_env, runs_dir):
     assert "no replay" in (report_dir(replay_env) / "games.html").read_text(encoding="utf-8")
 
 
+def test_replay_searches_cold_source_for_missing_saves(replay_env):
+    extract = replay_env.data["extract"]
+    cold = Path(extract["runs_dir"]).parent / "cold-source"
+    experiment = cold / "private-experiment-name"
+    experiment.mkdir(parents=True)
+    (experiment / "game-missing_333.Civ5Save").write_bytes(b"cold save")
+    extract["cold_runs_dir"] = str(cold)
+
+    result = run_report(replay_env)
+
+    out = report_dir(replay_env)
+    assert (out / "saves/private-experiment-name/game-missing.Civ5Save").read_bytes() == b"cold save"
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
+    assert not any("saves not found" in warning for warning in result.warnings)
+
+
+def test_replay_prefers_new_hot_save_over_same_size_cached_cold_save(replay_env):
+    extract = replay_env.data["extract"]
+    hot = Path(extract["runs_dir"])
+    cold = hot.parent / "cold-source"
+    directory = cold / "private-experiment-name"
+    directory.mkdir(parents=True)
+    (directory / "game-missing_999.Civ5Save").write_bytes(b"cold save")
+    extract["cold_runs_dir"] = str(cold)
+    run_report(replay_env)
+    (hot / "private-experiment-name/game-missing_1.Civ5Save").write_bytes(b"hot  save")
+    run_report(replay_env)
+    published = report_dir(replay_env) / "saves/private-experiment-name/game-missing.Civ5Save"
+    assert published.read_bytes() == b"hot  save"
+
+
+def test_replay_searches_cold_when_hot_root_is_missing(replay_env):
+    extract = replay_env.data["extract"]
+    hot = Path(extract["runs_dir"])
+    cold = hot.parent / "cold-source"
+    hot.rename(cold)
+    extract["runs_dir"] = str(hot)  # the hot root is now absent
+    extract["cold_runs_dir"] = str(cold)
+
+    result = run_report(replay_env)
+
+    out = report_dir(replay_env)
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").read_bytes() == b"latest save"
+    assert (out / "saves/private-experiment-name/game-free.Civ5Save").is_file()
+    assert not any("saves were skipped" in warning for warning in result.warnings)
+
+
+def test_replay_offline_cold_source_is_not_fatal(replay_env):
+    extract = replay_env.data["extract"]
+    extract["cold_runs_dir"] = str(Path(extract["runs_dir"]).parent / "offline-cold")
+
+    result = run_report(replay_env)
+
+    out = report_dir(replay_env)
+    assert (out / "saves/private-experiment-name/game-new.Civ5Save").is_file()
+    assert any("1 of 3 saves not found" in warning and "game-missing" in warning
+               for warning in result.warnings)
+
+
 def test_replay_without_latest_card_and_disabled(replay_env):
     replay_env.report["replay"]["latest_game"] = False
     run_report(replay_env)

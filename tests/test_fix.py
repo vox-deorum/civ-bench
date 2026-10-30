@@ -64,17 +64,22 @@ def _write_issues(path: Path, rows: list[dict]) -> None:
             writer.writerow({field: row.get(field, "") for field in ISSUE_FIELDNAMES})
 
 
-def _cfg(tmp_path: Path, runs_dir: Path, issues_path: Path) -> RunConfig:
+def _cfg(
+    tmp_path: Path,
+    runs_dir: Path,
+    issues_path: Path,
+    cold_runs_dir: Path | None = None,
+) -> RunConfig:
+    extract = {"runs_dir": str(runs_dir), "issues_path": str(issues_path)}
+    if cold_runs_dir is not None:
+        extract["cold_runs_dir"] = str(cold_runs_dir)
     return RunConfig(
         name="test",
         seed=1,
         config_path=tmp_path / "benchmark.json",
         raw={},
         output=OutputConfig(),
-        data={
-            "extract": {"runs_dir": str(runs_dir), "issues_path": str(issues_path)},
-            "tables": {},
-        },
+        data={"extract": extract, "tables": {}},
     )
 
 
@@ -565,6 +570,83 @@ def test_run_fix_repairs_every_corrupt_related_db(tmp_path):
     assert sorted(o.status for o in result.outcomes) == ["repaired", "repaired"]
     assert main.with_suffix(".db.bak").exists() and _quick_check_ok(main)
     assert trace.with_suffix(".db.bak").exists() and _quick_check_ok(trace)
+
+
+def test_run_fix_repairs_same_basename_in_both_tiers(tmp_path):
+    # The same snapshot name in hot and cold is two independent files, not an
+    # ambiguous match. Both are examined and repaired in their own tier.
+    hot = tmp_path / "runs"
+    cold = tmp_path / "cold"
+    hot_db = hot / "exp" / "abc_111.db"
+    cold_db = cold / "exp" / "abc_111.db"
+    _make_corrupt_db(hot_db, n_rows=12)
+    _make_corrupt_db(cold_db, n_rows=14)
+    issues = tmp_path / "import_issues.csv"
+    _write_issues(issues, [{"db_name": "abc_111.db", "game_id": "abc"}])
+
+    result = run_fix(_cfg(tmp_path, hot, issues, cold_runs_dir=cold))
+
+    by_path = {Path(o.path).resolve(): o.status for o in result.outcomes}
+    assert by_path == {hot_db.resolve(): "repaired", cold_db.resolve(): "repaired"}
+    assert hot_db.with_suffix(".db.bak").exists() and _quick_check_ok(hot_db)
+    assert cold_db.with_suffix(".db.bak").exists() and _quick_check_ok(cold_db)
+
+
+def test_run_fix_duplicate_basename_within_one_tier_stays_ambiguous(tmp_path):
+    # A duplicate inside hot is still ambiguous, even while one cold copy of the
+    # same name is repaired independently.
+    hot = tmp_path / "runs"
+    cold = tmp_path / "cold"
+    _make_db(hot / "expA" / "dup_1.db", n_rows=5)
+    _make_db(hot / "expB" / "dup_1.db", n_rows=5)
+    cold_db = cold / "exp" / "dup_1.db"
+    _make_corrupt_db(cold_db, n_rows=6)
+    issues = tmp_path / "import_issues.csv"
+    _write_issues(issues, [{"db_name": "dup_1.db", "game_id": "dup"}])
+
+    result = run_fix(_cfg(tmp_path, hot, issues, cold_runs_dir=cold))
+
+    assert [o.status for o in result.outcomes] == ["ambiguous", "repaired"]
+    assert Path(result.outcomes[1].path).resolve() == cold_db.resolve()
+    assert cold_db.with_suffix(".db.bak").exists() and _quick_check_ok(cold_db)
+    assert not (hot / "expA" / "dup_1.db.bak").exists()
+    assert not (hot / "expB" / "dup_1.db.bak").exists()
+
+
+def test_run_fix_offline_cold_leaves_issue_unresolved(tmp_path):
+    # A repaired hot copy does not settle the issue while cached cold copies
+    # cannot be checked. The outcome reports the offline source.
+    hot = tmp_path / "runs"
+    cold = tmp_path / "offline-cold"  # never created, so the cold scan fails
+    db = hot / "exp" / "abc_111.db"
+    _make_corrupt_db(db, n_rows=10)
+    issues = tmp_path / "import_issues.csv"
+    _write_issues(issues, [{"db_name": "abc_111.db", "game_id": "abc"}])
+
+    result = run_fix(_cfg(tmp_path, hot, issues, cold_runs_dir=cold))
+
+    statuses = sorted(o.status for o in result.outcomes)
+    assert statuses == ["repaired", "unresolved"]
+    unresolved = next(o for o in result.outcomes if o.status == "unresolved")
+    assert unresolved.game_id == "abc" and "cold source" in unresolved.detail
+    assert unresolved in result.unresolved
+    assert db.with_suffix(".db.bak").exists() and _quick_check_ok(db)
+
+
+def test_run_fix_repairs_cold_only_game(tmp_path):
+    hot = tmp_path / "runs"
+    cold = tmp_path / "cold"
+    hot.mkdir()
+    db = cold / "exp" / "abc_111.db"
+    _make_corrupt_db(db, n_rows=9)
+    issues = tmp_path / "import_issues.csv"
+    _write_issues(issues, [{"db_name": "abc_111.db", "game_id": "abc"}])
+
+    result = run_fix(_cfg(tmp_path, hot, issues, cold_runs_dir=cold))
+
+    assert [o.status for o in result.outcomes] == ["repaired"]
+    assert Path(result.outcomes[0].path).resolve() == db.resolve()
+    assert db.with_suffix(".db.bak").exists() and _quick_check_ok(db)
 
 
 # ── CLI wiring ───────────────────────────────────────────────────────────────

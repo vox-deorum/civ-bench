@@ -3,9 +3,14 @@
 Reads the malformed-DB ledger written by the extract stage. A flagged game is rarely
 a single corrupt file: the same interrupted write that broke the main game DB can
 also break the player-level telemetry DBs saved alongside it. So for each flagged
-game ``fix`` examines **every related ``.db``**: the game DB (``{uuid}_{ts}.db``) and
-its trace exports (``{uuid}-player-*.db``), matched by the game's uuid prefix (the
-non-SQLite ``.Civ5Save``/``.Civ5Replay`` siblings are excluded by extension).
+game ``fix`` examines **every related ``.db``** in each available source tier: the
+game DB (``{uuid}_{ts}.db``) and its trace exports (``{uuid}-player-*.db``), matched
+by the game's uuid prefix (the non-SQLite ``.Civ5Save``/``.Civ5Replay`` siblings are
+excluded by extension). The same basename in hot and cold storage is two files and
+both are repaired. A game that may have copies in an offline cold tier stays
+``unresolved`` because those copies could not be checked.
+The hot root must be available. A dry run lists available files and also reports
+unchecked offline copies as unresolved.
 
 Each related DB is checked with ``PRAGMA quick_check``:
 
@@ -32,16 +37,20 @@ from pathlib import Path
 from typing import Literal
 
 from ..config import RunConfig
+from bench.config.schema import DEFAULT_RUNS_DIR
+from bench.extract.errors import ExtractError
 from ..extract.issues import resolve_issues_path
+from bench.extract.runner import table_path
+from bench.extract.sources import SourceState, TierScan, scan_sources
 from .errors import FixError
 from .repair import SIDECAR_SUFFIXES, RepairReport, _remove, repair_database, source_quick_check
 
 Status = Literal[
     "repaired", "healthy", "failed", "not-found", "ambiguous",
-    "skipped-bak-exists", "dry-run",
+    "skipped-bak-exists", "dry-run", "unresolved",
 ]
 # Statuses that mean a recorded game's DB was not resolved (drives the CLI exit code).
-_UNRESOLVED = {"failed", "not-found", "ambiguous"}
+_UNRESOLVED = {"failed", "not-found", "ambiguous", "unresolved"}
 
 
 @dataclass
@@ -72,7 +81,7 @@ class FixResult:
 
     @property
     def unresolved(self) -> list[FixOutcome]:
-        """Recorded DBs left unresolved (failed / not-found / ambiguous)."""
+        """Recorded DBs left unresolved (failed, not-found, ambiguous, unresolved)."""
         return [o for o in self.outcomes if o.status in _UNRESOLVED]
 
 
@@ -103,18 +112,29 @@ def _read_issue_rows(path: str) -> list[dict]:
     return rows
 
 
-def _index_db_basenames(runs_dir: str) -> dict[str, list[str]]:
-    """Map every ``*.db`` basename under ``runs_dir`` to its full path(s).
+def _tier_db_index(tier: TierScan) -> dict[str, list[str]]:
+    """Map every ``*.db`` basename in one tier to its full path(s).
 
-    Keeps *every* ``.db`` (no latest-per-game collapse, no ``-player-`` filtering): we
-    need the game DB and its trace DBs alike, and the exact files to repair.
+    Uses the tier's complete file list, not its latest-per-game ``databases``
+    map: ``fix`` repairs the game DB and every related trace DB, so it needs
+    every snapshot. Duplicate basenames inside one tier stay ambiguous; the
+    same basename in another tier is a separate file and is handled
+    independently.
     """
     index: dict[str, list[str]] = {}
-    for root, _dirs, files in os.walk(runs_dir):
-        for file in files:
-            if file.endswith(".db"):
-                index.setdefault(file, []).append(os.path.join(root, file))
+    for path in tier.files:
+        name = os.path.basename(path)
+        if name.endswith(".db"):
+            index.setdefault(name, []).append(path)
     return index
+
+
+def _cold_offline_detail(tier: TierScan) -> str:
+    """Explain that cached cold copies could not be checked for this game."""
+    return (
+        f"cold source '{tier.root}' is offline, so this game's cold copies could "
+        "not be checked"
+    )
 
 
 def _related_basenames(index: dict[str, list[str]], game_id: str, db_name: str) -> list[str]:
@@ -125,6 +145,30 @@ def _related_basenames(index: dict[str, list[str]], game_id: str, db_name: str) 
     if game_id:
         return sorted(b for b in index if b.startswith(game_id))
     return [db_name] if db_name in index else []
+
+
+def _examine_related(
+    index: dict[str, list[str]],
+    related: list[str],
+    game_id: str,
+    *,
+    dry_run: bool,
+    force: bool,
+) -> list[FixOutcome]:
+    """Examine one tier's related DBs. A duplicate basename in that tier stays ambiguous."""
+    outcomes: list[FixOutcome] = []
+    for basename in related:
+        paths = index[basename]
+        if len(paths) > 1:
+            outcomes.append(FixOutcome(
+                basename, game_id, "ambiguous",
+                detail=f"{len(paths)} files share this name within one source tier",
+            ))
+        else:
+            outcomes.append(
+                _process_one(paths[0], basename, game_id, dry_run=dry_run, force=force)
+            )
+    return outcomes
 
 
 def _clear_sidecars(db_path: str) -> None:
@@ -216,7 +260,7 @@ def run_fix(
     repair only the games that failed *this* run, not the whole carried-forward ledger.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
-    runs_dir = extract_cfg.get("runs_dir", "runs/")
+    runs_dir = extract_cfg.get("runs_dir", DEFAULT_RUNS_DIR)
     issues_path = resolve_issues_path(cfg.data)
 
     print("=" * 60)
@@ -233,32 +277,58 @@ def run_fix(
         print("No problem databases recorded: nothing to fix.")
         return result
 
-    if not os.path.isdir(runs_dir):
-        raise FixError(
-            f"runs_dir does not exist or is not a directory: {runs_dir!r} "
-            f"(cannot locate the {len(rows)} recorded problem game(s))."
-        )
-
     print(f"Problem games recorded: {len(rows)}")
-    index = _index_db_basenames(runs_dir)
+    try:
+        inventory = scan_sources(extract_cfg)
+    except ExtractError as exc:
+        raise FixError(
+            f"runs_dir {runs_dir!r} is unavailable, so the {len(rows)} recorded "
+            f"problem game(s) cannot be located: {exc}"
+        ) from exc
+
+    hot = inventory.tiers["hot"]
+    cold = inventory.tiers.get("cold")
+    cold_offline = cold is not None and not cold.available
+    offline_game_ids = set()
+    if cold_offline:
+        try:
+            state = SourceState.load(table_path(cfg, "games"), inventory)
+        except ExtractError as exc:
+            raise FixError(str(exc)) from exc
+        offline_game_ids = state.unavailable_copies(
+            {row["game_id"] or row["db_name"] for row in rows}, inventory
+        )
+    hot_index = _tier_db_index(hot)
+    cold_index = _tier_db_index(cold) if cold is not None and cold.available else {}
 
     for row in rows:
         game_id, db_name = row["game_id"], row["db_name"]
-        related = _related_basenames(index, game_id, db_name)
-        if not related:
+        unresolved_cold = (game_id or db_name) in offline_game_ids
+        related_hot = _related_basenames(hot_index, game_id, db_name)
+        related_cold = _related_basenames(cold_index, game_id, db_name)
+        if not related_hot and not related_cold and not unresolved_cold:
             outcome = FixOutcome(db_name, game_id, "not-found")
             result.outcomes.append(outcome)
             _print_outcome(outcome)
             continue
-        for basename in related:
-            paths = index[basename]
-            if len(paths) > 1:
-                outcome = FixOutcome(
-                    basename, game_id, "ambiguous",
-                    detail=f"{len(paths)} files share this name under runs_dir",
-                )
-            else:
-                outcome = _process_one(paths[0], basename, game_id, dry_run=dry_run, force=force)
+
+        outcomes = _examine_related(
+            hot_index, related_hot, game_id, dry_run=dry_run, force=force
+        )
+        outcomes += _examine_related(
+            cold_index, related_cold, game_id, dry_run=dry_run, force=force
+        )
+        for outcome in outcomes:
+            result.outcomes.append(outcome)
+            _print_outcome(outcome)
+
+        if unresolved_cold:
+            # The hot copies may be healthy or repaired, but the issue is not
+            # resolved while a cached cold copy cannot be checked.
+            outcome = FixOutcome(
+                db_name, game_id, "unresolved",
+                detail=_cold_offline_detail(cold),
+            )
             result.outcomes.append(outcome)
             _print_outcome(outcome)
 
@@ -308,7 +378,7 @@ def _print_summary(result: FixResult) -> None:
     print("FIX COMPLETE")
     print("=" * 60)
     for status in (
-        "repaired", "healthy", "dry-run", "failed",
+        "repaired", "healthy", "dry-run", "failed", "unresolved",
         "not-found", "ambiguous", "skipped-bak-exists",
     ):
         if counts[status]:

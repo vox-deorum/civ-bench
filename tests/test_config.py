@@ -309,6 +309,64 @@ def test_extract_issues_path_override_loads(dev_spec, write_spec):
     assert cfg.data["extract"]["issues_path"] == "runs/custom_issues.csv"
 
 
+def test_extract_cold_runs_dir_defaults_to_null(dev_spec, write_spec):
+    """Omitting cold_runs_dir keeps the hot root as the only game-DB root."""
+    dev_spec["data"]["extract"].pop("cold_runs_dir", None)
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.data["extract"].get("cold_runs_dir") is None
+
+
+@pytest.mark.parametrize("cold", [None, "cold-runs/"])
+def test_extract_cold_runs_dir_accepts_null_or_path(dev_spec, write_spec, cold):
+    dev_spec["data"]["extract"]["cold_runs_dir"] = cold
+    cfg = load_config(write_spec(dev_spec))
+    assert cfg.data["extract"]["cold_runs_dir"] == cold
+
+
+@pytest.mark.parametrize("cold", ["", "   ", 5, True])
+def test_extract_cold_runs_dir_rejects_invalid(dev_spec, write_spec, cold):
+    dev_spec["data"]["extract"]["cold_runs_dir"] = cold
+    with pytest.raises(ConfigError, match="non-empty string"):
+        load_config(write_spec(dev_spec))
+
+
+@pytest.mark.parametrize(
+    "hot,cold",
+    [
+        ("runs/", "runs"),
+        ("runs/", "runs/cold"),
+        ("runs/hot", "runs"),
+    ],
+)
+def test_extract_cold_runs_dir_rejects_overlapping_roots(
+    dev_spec, write_spec, hot, cold
+):
+    dev_spec["data"]["extract"]["runs_dir"] = hot
+    dev_spec["data"]["extract"]["cold_runs_dir"] = cold
+    with pytest.raises(ConfigError, match="overlap"):
+        load_config(write_spec(dev_spec))
+
+
+def test_extract_cold_runs_dir_uses_default_hot_root(dev_spec, write_spec):
+    """With runs_dir omitted, the hot root is runs/ and cannot contain the cold root."""
+    extract = dev_spec["data"]["extract"]
+    extract.pop("runs_dir", None)
+    extract["cold_runs_dir"] = "runs/cold"
+    with pytest.raises(ConfigError, match="overlap"):
+        load_config(write_spec(dev_spec))
+
+
+def test_extract_cold_runs_dir_normalizes_roots_before_comparison(
+    dev_spec, write_spec, tmp_path, monkeypatch
+):
+    """Relative roots resolve against the working directory and normalize dot segments."""
+    monkeypatch.chdir(tmp_path)
+    dev_spec["data"]["extract"]["runs_dir"] = "runs/hot"
+    dev_spec["data"]["extract"]["cold_runs_dir"] = "runs/./hot"
+    with pytest.raises(ConfigError, match="overlap"):
+        load_config(write_spec(dev_spec))
+
+
 def test_report_page_fields_load(dev_spec, write_spec):
     """Report page settings accept string ids and named artifact lists."""
     dev_spec["report"]["overview_sections"] = ["bt_main", "pred_metrics"]

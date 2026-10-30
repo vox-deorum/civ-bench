@@ -6,15 +6,21 @@ trimmed, using the same rule as the ``repeated_games`` coverage table. Games exc
 for decision failures or recorded in ``import_issues.csv`` are left alone: they are
 never counted, kept, or trimmed.
 
-A slot whose keep candidate has no game DB under ``runs_dir`` is skipped, since
-trimming it would leave the slot empty once the prune drops the keeper's rows too.
+A slot whose keep candidate has no game DB in any available source tier is skipped,
+since trimming it would leave the slot empty once the prune drops the keeper's rows
+too. A slot is also deferred when an extra may still be owned by an offline cold
+tier: neither its hot copies nor its extras are renamed, because the missing source
+might hold the only remaining copy.
 
-Trimming a game renames every file under ``runs_dir`` whose name starts with its uuid
-(game DBs of any timestamp, player trace DBs, saves, replays) to ``<name>.bak``. A
+Trimming a game renames every file in the available hot and cold roots whose name
+starts with its uuid (game DBs of any timestamp, player trace DBs, saves, replays)
+to ``<name>.bak``. A
 prune-only extract then drops the trimmed games' rows from every canonical table on
 disk, not only ``data.extract.outputs``. The ``games`` table is pruned last: if
 another table fails, the slot still shows as repeated, and re-running trim finds the
 already-renamed extras as ``not-found`` and finishes the prune.
+If an affected tier is offline, the retry waits for it to return, even when the
+earlier removal was approved. A two-tier trim requires a complete hot scan.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from typing import Callable, Literal, Optional
 import pandas as pd
 
 from ..config import RunConfig
+from bench.config.schema import DEFAULT_RUNS_DIR
 from ..config.behavior import resolve_behavior_spec
 from ..config.filters import resolve_filter_spec
 from ..data.failures import failed_game_ids_from_tokens
@@ -38,12 +45,13 @@ from ..extract.errors import ExtractError
 from ..extract.issues import read_problem_game_ids, resolve_issues_path
 from ..extract.prune import PruneConfirm, PruneGate
 from ..extract.runner import DEFAULT_TABLE_PATHS, expected_fieldnames, table_path
-from ..extract.utilities import csv_header_matches, find_all_databases
+from bench.extract.sources import Inventory, SourceState, TierScan, scan_sources
+from ..extract.utilities import csv_header_matches
 from .errors import TrimError
 
 Status = Literal[
     "trimmed", "not-found", "skipped-bak-exists", "skipped-keeper-missing", "failed",
-    "would-trim",
+    "would-trim", "skipped-source-unavailable",
 ]
 # Receives the repeated-slot rows about to be trimmed and returns True to go ahead.
 TrimConfirm = Callable[[list[dict]], bool]
@@ -85,13 +93,19 @@ def _excluded_game_ids(cfg: RunConfig) -> set[str]:
     )
 
 
-def _index_files(runs_dir: str) -> list[str]:
-    """Every file under ``runs_dir`` except existing backups, in a stable order."""
-    paths = []
-    for root, _dirs, files in os.walk(runs_dir):
-        for name in files:
-            if not name.endswith(".bak"):
-                paths.append(os.path.join(root, name))
+def _index_files(inventory: Inventory) -> list[str]:
+    """Every file in the available source tiers except backups, in stable order.
+
+    Renames follow the game prefix across both roots, so duplicate snapshots,
+    traces, replays, and saves in either tier are trimmed together.
+    """
+    paths = {
+        path
+        for tier in inventory.tiers.values()
+        if tier.available
+        for path in tier.files
+        if not os.path.basename(path).endswith(".bak")
+    }
     return sorted(paths)
 
 
@@ -167,7 +181,7 @@ def run_trim(
     a table could not be pruned, and after renaming when the prune fails.
     """
     extract_cfg = cfg.data.get("extract", {}) or {}
-    runs_dir = extract_cfg.get("runs_dir", "runs/")
+    runs_dir = extract_cfg.get("runs_dir", DEFAULT_RUNS_DIR)
     games_path = table_path(cfg, "games")
 
     print("=" * 60)
@@ -189,9 +203,19 @@ def run_trim(
         return result
 
     tables = _prune_tables(cfg) if cfg.extract_enabled else []
-    has_dir = os.path.isdir(runs_dir)
-    paths = _index_files(runs_dir) if has_dir else []
-    db_game_ids = find_all_databases(runs_dir)[1] if has_dir else set()
+    try:
+        tiered = extract_cfg.get("cold_runs_dir") is not None
+        if not tiered and not os.path.isdir(runs_dir):
+            # A legacy cached-only trim reports a missing keeper without writing.
+            inventory = Inventory({"hot": TierScan(str(Path(runs_dir).resolve()), False)})
+        else:
+            inventory = scan_sources(extract_cfg)
+        state = SourceState.load(games_path, inventory) if tiered else None
+    except (ExtractError, OSError) as exc:
+        raise TrimError(f"could not scan the game data sources or load ownership: {exc}") from exc
+    # Reading the state sidecar validates it but never writes. Dry runs take the
+    # same path, so neither a dry run nor a deferred slot changes ownership.
+    paths = _index_files(inventory)
     plan: list[tuple[str, list[str]]] = []
     active_slots: list[dict] = []
     for slot in result.slots:
@@ -199,11 +223,24 @@ def run_trim(
         extras = slot["extra_game_ids"].split(",")
         print(f"\n{slot['experiment']}  seed={slot['seed']}  "
               f"rotation={slot['seating_rotation']}  keep {keeper}")
-        if keeper not in db_game_ids:
-            print(f"  skip: {keeper} has no game DB under runs_dir, so trimming would "
-                  f"empty the slot")
+        if keeper not in inventory.game_ids:
+            print(f"  skip: {keeper} has no game DB in any available source tier, so "
+                  f"trimming would empty the slot")
             result.outcomes += [
                 TrimOutcome(g, "skipped-keeper-missing", detail=f"keeper {keeper} has no game DB")
+                for g in extras
+            ]
+            continue
+        extra_ids = set(extras)
+        blocked = sorted(state.unavailable_copies(extra_ids, inventory)) if state else []
+        if blocked:
+            detail = (
+                "cold source is offline and owns or may own cached copies for "
+                f"{', '.join(blocked)}; the whole slot was deferred"
+            )
+            print(f"  skip: {detail}")
+            result.outcomes += [
+                TrimOutcome(g, "skipped-source-unavailable", detail=detail)
                 for g in extras
             ]
             continue
@@ -260,6 +297,6 @@ def _print_summary(result: TrimResult) -> None:
     print("=" * 60)
     print(f"  repeated slots: {len(result.slots)}")
     for status in ("trimmed", "would-trim", "not-found", "skipped-bak-exists",
-                   "skipped-keeper-missing", "failed"):
+                   "skipped-keeper-missing", "skipped-source-unavailable", "failed"):
         if counts[status]:
             print(f"  {status}: {counts[status]}")

@@ -28,3 +28,4 @@ venv/
 
 # Optuna study DBs / local scratch
 *.db
+*.sources.json

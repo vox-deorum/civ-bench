@@ -47,6 +47,7 @@ DATA_KEYS = {"extract", "tables", "filter"}
 EXTRACT_KEYS = {
     "enabled",
     "runs_dir",
+    "cold_runs_dir",
     "outputs",
     "max_dbs",
     "prune_missing",
@@ -55,6 +56,9 @@ EXTRACT_KEYS = {
     "issues_path",
     "behavior",
 }
+# The hot game-DB root when ``data.extract.runs_dir`` is omitted. Roots are
+# resolved relative to the repository working directory.
+DEFAULT_RUNS_DIR = "runs/"
 TABLE_NAMES = ("turns", "panel", "games", "tokens", "behavior", "world", "agentic")
 
 # ── data.extract.behavior (§3.0) ───────────────────────────────────────────

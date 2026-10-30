@@ -27,6 +27,7 @@
     "extract": {
       "enabled": true,
       "runs_dir": "runs/",
+      "cold_runs_dir": null,
       "outputs": ["turns", "panel", "games", "tokens", "behavior"],
       "max_dbs": null,
       "prune_missing": false,

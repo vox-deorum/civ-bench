@@ -24,7 +24,7 @@ from .filters import (
     validate_filter_object,
 )
 from .models import OutputConfig, RunConfig, Stage
-from .validation import coerce_bool
+from .validation import coerce_bool, resolve_source_roots
 from . import schema as S
 
 
@@ -209,6 +209,8 @@ def _validate_data(data: dict, presets: dict) -> dict:
         for key in ("runs_dir", "issues_path"):
             if key in extract:
                 _check_type(extract[key], (str,), f"data.extract.{key}")
+        if extract.get("cold_runs_dir") is not None:
+            resolve_source_roots(extract)
         max_dbs = extract.get("max_dbs")
         if max_dbs is not None:
             if isinstance(max_dbs, bool) or not isinstance(max_dbs, int) or max_dbs < 1:

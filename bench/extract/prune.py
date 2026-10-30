@@ -27,6 +27,12 @@ class PruneGate:
         self._details: dict = {}
         self.approved: set = set()
         self.declined: set = set()
+        self.protected: set = set()
+
+    def protect(self, game_ids: Iterable[str]) -> None:
+        """Block removal even when a caller previously approved the game."""
+        self.protected = set(game_ids)
+        self.approved.difference_update(self.protected)
 
     def add_details(self, rows: dict) -> None:
         """Remember ``game_id → game_data row`` so the prompt can describe each game."""
@@ -35,11 +41,11 @@ class PruneGate:
 
     def approve(self, game_ids: Iterable[str]) -> None:
         """Pre-approve games the caller already confirmed, so they are never asked about."""
-        self.approved.update(game_ids)
+        self.approved.update(set(game_ids) - self.protected)
 
     def review(self, game_ids: Iterable[str]) -> set:
         """Return the subset of ``game_ids`` approved for pruning, asking about new ones."""
-        game_ids = set(game_ids)
+        game_ids = set(game_ids) - self.protected
         pending = sorted(game_ids - self.approved - self.declined)
         if pending:
             if self._confirm is None or self._confirm(
