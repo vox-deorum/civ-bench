@@ -106,14 +106,18 @@ def _build_csvs(tmp_path, uncontrolled_only: bool = False) -> dict[str, str]:
     for game in games_rows:
         gid, experiment = game["game_id"], game["experiment"]
         seed, rot = game["seed"], game["seating_rotation"]
-        for pid, player_type in _seats(experiment).items():
+        seats = _seats(experiment)
+        for pid, player_type in seats.items():
             values = IDENTITY_VALUES[player_type]
+            # The runner seats config slot s of rotation r at seat (s + r) % N
+            # (identity basePerm).
+            slot = (pid - rot) % len(seats) if rot >= 0 else pid
             # The kimi game's seat 0 uses a second civilization so one seed-player
             # pair carries a comparability warning.
             civ = "Egypt" if (gid == "ki-s1-r1" and pid == 0) else CIVS[pid]
             row = {"experiment": experiment, "game_id": gid, "player_id": pid,
                    "player_type": player_type, "civilization": civ,
-                   "is_winner": int(pid == 1), "config_slot": pid}
+                   "is_winner": int(pid == 1), "config_slot": slot}
             panel_rows.append({**row, **values["ratios"]})
             strength_rows.append({**row, "seed": seed, "seating_rotation": rot,
                                   "controlled": seed != -1,

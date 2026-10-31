@@ -350,8 +350,12 @@ def _load_and_filter(
                 f"data.filter.min_condition_completeness needs the controlled grid. "
                 f"Run extract first."
             )
+        from bench.extract.issues import read_problem_game_ids, resolve_issues_path
+
         incomplete = incomplete_experiments_from_games(
-            games_csv, global_spec, decision_failure_ids=failure_ids,
+            games_csv, global_spec,
+            read_problem_game_ids(resolve_issues_path(cfg.data)), failure_ids,
+            _table_path(cfg, "panel"),
         )
     predict_spec = dict(global_spec)
     predict_spec.pop("min_condition_completeness", None)

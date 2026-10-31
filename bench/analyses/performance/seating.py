@@ -15,6 +15,12 @@ file's cells (so it plays only the open ones) iff the header
 those are reconstructed from the data here. ``seatingSeed`` is the one field absent
 from civ-bench data; it is emitted as ``0`` (correct for ``randomizeSeating`` in
 ``{true, 0, false}``) and the assumption is flagged inline in each file's ``_comment``.
+
+The runner keeps the file's ``basePerm`` as is and seats rotation ``r`` from it, so
+``basePerm`` must be the one the existing games were played under. It is inferred
+from their seats (:func:`bench.data.repeats.align_rotations`), and each completed
+cell is the rotation of a game's seats, not its recorded label. A game whose seats
+fit no rotation (off-cycle) completes no cell.
 """
 
 from __future__ import annotations
@@ -23,8 +29,7 @@ import json
 
 import pandas as pd
 
-from bench.data.loading import drop_problem_games
-from bench.data.repeats import controlled_rows, ordered_game_ids
+from bench.data.repeats import align_rotations, controlled_rows, ordered_game_ids
 from .strength_panel import _reference_slots
 
 # Not in civ-bench data; correct for ``randomizeSeating`` in {true, 0, false}. Flagged
@@ -42,17 +47,10 @@ def _comment(experiment: str) -> str:
         f"'{experiment}' from extracted game data. 'completed' cells are games already "
         f"accepted by the decision failure filter; absent cells are OPEN (to be played). "
         f"seatingSeed is assumed 0; verify/adjust if the source config used a nonzero "
-        f"numeric randomizeSeating. basePerm/consumeOrder order is arbitrary (only the "
-        f"set of open games matters)."
+        f"numeric randomizeSeating. basePerm is inferred from the seats of the games "
+        f"already played; do not change it, or open cells get seats that do not match "
+        f"the completed ones. consumeOrder order is arbitrary."
     )
-
-
-def _config_slots(exp_df: pd.DataFrame) -> list[int]:
-    """The pre-rotation configured slots (vox-deorum ``llmPlayers`` keys) for one experiment."""
-    if "config_slot" not in exp_df.columns:
-        return []
-    slots = exp_df["config_slot"].dropna()
-    return sorted({int(s) for s in slots if int(s) != -1})
 
 
 def _present_slots(exp_df: pd.DataFrame, games: pd.DataFrame | None) -> dict[tuple[int, int], str]:
@@ -75,12 +73,15 @@ def build_seating_state(
     config_slots: list[int],
     design_seeds: list[int],
     present: dict[tuple[int, int], str],
+    base_perm: list[int] | None = None,
 ) -> dict:
     """Assemble the vox-deorum ``seating.json`` schema for one experiment.
 
     ``present`` maps ``(seating_rotation, seed) -> game_id`` for games already in the
     dataset; cells absent from it are omitted (= pending = open). ``design_seeds`` is
     the sorted design seed set; a seed's index in it is its ``seedIndex``.
+    ``base_perm`` defaults to the identity, which is right only when no game has
+    been played yet.
     """
     seed_count = len(design_seeds)
     seed_to_index = {int(seed): idx for idx, seed in enumerate(design_seeds)}
@@ -104,7 +105,8 @@ def build_seating_state(
         "configSlots": [int(s) for s in config_slots],
         "seedCount": int(seed_count),
         "seatingSeed": ASSUMED_SEATING_SEED,
-        "basePerm": list(range(int(total_seats))),
+        "basePerm": [int(s) for s in base_perm] if base_perm is not None
+        else list(range(int(total_seats))),
         "consumeOrder": consume_order,
         "cells": cells,
         "completedCycles": 0,
@@ -183,6 +185,7 @@ def generate_seating_files(
     games: pd.DataFrame | None = None,
     baseline_experiment: str | None = None,
     excluded_game_ids=None,
+    seats: pd.DataFrame | None = None,
 ) -> tuple[dict[str, str], list[dict], list[str]]:
     """Build ``seating/<exp>.seating.json`` text per *incomplete* controlled experiment.
 
@@ -202,21 +205,31 @@ def generate_seating_files(
     if not design_seeds:
         return artifacts, index_rows, warnings
     design_seed_set = set(design_seeds)
+    aligned, off_cycle, cycles = align_rotations(
+        controlled, panel if seats is None else seats, games, excluded_game_ids,
+    )
 
     for experiment, exp_df in controlled.groupby("experiment", sort=True):
-        config_slots = _config_slots(exp_df)
-        if not config_slots:
+        cycle = cycles.get(str(experiment))
+        if cycle is None:
             warnings.append(
                 f"seating '{experiment}': no configured slots (config_slot all -1); skipped."
             )
             continue
-        total_seats = max(config_slots) + 1
+        config_slots = list(cycle.config_slots)
+        total_seats = cycle.total_seats
+        n_off_cycle = int((off_cycle["experiment"] == experiment).sum())
+        if n_off_cycle:
+            warnings.append(
+                f"seating '{experiment}': {n_off_cycle} game(s) were played on seats outside "
+                f"the inferred cycle and complete no cell; `civ-bench trim` removes them."
+            )
 
         bad_rot = sorted({int(r) for r in exp_df["seating_rotation"].unique() if int(r) >= total_seats})
         if bad_rot:
             warnings.append(
                 f"seating '{experiment}': seating_rotation(s) {bad_rot} >= totalSeats "
-                f"{total_seats}; those games are omitted from the cycle."
+                f"{total_seats}; their seats decide their cell, and off-cycle ones fill none."
             )
         unknown_seeds = sorted({int(s) for s in exp_df["seed"].unique()} - design_seed_set)
         if unknown_seeds:
@@ -228,7 +241,7 @@ def generate_seating_files(
         present = {
             (rot, seed): gid
             for (rot, seed), gid in _present_slots(
-                drop_problem_games(exp_df, excluded_game_ids), games,
+                aligned[aligned["experiment"] == experiment], games,
             ).items()
             if rot < total_seats and seed in design_seed_set
         }
@@ -238,7 +251,9 @@ def generate_seating_files(
         if open_cells <= 0:
             continue  # complete (or over-complete), nothing to open
 
-        state = build_seating_state(experiment, total_seats, config_slots, design_seeds, present)
+        state = build_seating_state(
+            experiment, total_seats, config_slots, design_seeds, present, list(cycle.base_perm),
+        )
         problems = validate_seating_state(state)
         if problems:
             # Never ship a structurally-unconsumable file; by construction this is

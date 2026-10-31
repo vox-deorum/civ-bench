@@ -22,14 +22,16 @@ import numpy as np
 import pandas as pd
 
 from bench.data.loading import drop_problem_games
-from bench.data.repeats import REPEATED_GAMES_COLUMNS, controlled_rows, repeated_slots
+from bench.data.repeats import (
+    REPEATED_GAMES_COLUMNS, SeatingCycle, align_rotations, controlled_rows, repeated_slots,
+)
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 
 
 COMPLETENESS_COLUMNS = [
     "experiment", "required_games", "present_games", "missing_games",
-    "completeness_pct", "repeated_slots", "excluded_games", "warning",
+    "completeness_pct", "repeated_slots", "off_cycle_games", "excluded_games", "warning",
 ]
 COMPLETENESS_GAPS_COLUMNS = [
     "experiment", "seed", "missing_rotations", "n_missing",
@@ -112,11 +114,17 @@ def build_experiment_completeness(
     games: pd.DataFrame | None = None,
     baseline_experiment: str | None = None,
     excluded_game_ids=None,
+    seats: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Compact controlled-design game completeness diagnostics.
 
     The summary counts distinct games, while completeness is based on occupied
-    seed/rotation slots so repeated game ids in one slot cannot mask gaps.
+    seed/rotation slots so repeated game ids in one slot cannot mask gaps. Slots
+    come from the seats each game was played in (:func:`align_rotations`), so a
+    game whose recorded rotation names other seats is placed where it belongs, or
+    listed in ``off_cycle_games`` when it fits no rotation.
+    ``seats`` is the frame configured seats are read from; it defaults to
+    ``panel`` and should be the unfiltered panel, so a player filter cannot hide seats.
     """
     controlled = controlled_rows(panel)
     if controlled.empty:
@@ -126,7 +134,10 @@ def build_experiment_completeness(
     if not reference_slots:
         return {}
     reference_set = set(reference_slots)
-    expected_per_cell = len({rot for _, rot in reference_slots})
+    accepted_all = drop_problem_games(controlled, excluded_game_ids)
+    aligned_all, off_cycle, cycles = align_rotations(
+        controlled, panel if seats is None else seats, games, excluded_game_ids,
+    )
 
     summary_rows: list[dict] = []
     repeated_rows: list[dict] = []
@@ -134,14 +145,15 @@ def build_experiment_completeness(
     cell_issue_rows: list[dict] = []
 
     for experiment, exp_df in controlled.groupby("experiment", sort=True):
-        accepted = drop_problem_games(exp_df, excluded_game_ids)
+        accepted = accepted_all[accepted_all["experiment"] == experiment]
         excluded_games = exp_df["game_id"].nunique() - accepted["game_id"].nunique()
-        exp_df = accepted
+        aligned = aligned_all[aligned_all["experiment"] == experiment]
+        n_off_cycle = int((off_cycle["experiment"] == experiment).sum())
         present_slots = {
             (int(seed), int(rot))
-            for seed, rot in exp_df[["seed", "seating_rotation"]].drop_duplicates().itertuples(index=False)
+            for seed, rot in aligned[["seed", "seating_rotation"]].drop_duplicates().itertuples(index=False)
         }
-        repeats = repeated_slots(exp_df, games)
+        repeats = repeated_slots(aligned, games)
         repeated_rows.extend(repeats)
         n_repeated = len(repeats)
 
@@ -156,33 +168,23 @@ def build_experiment_completeness(
                 "n_missing": int(len(rotations)),
             })
 
-        cell_counts = (
-            exp_df.groupby(["seed", "player_id"], sort=True)["game_id"]
-            .nunique()
-            .reset_index(name="n_games")
-        )
-        for seed, seed_counts in cell_counts.groupby("seed", sort=True):
-            bad = seed_counts[seed_counts["n_games"] != expected_per_cell]
-            if bad.empty:
-                continue
-            observed = ", ".join(
-                f"{int(r.player_id)}:{int(r.n_games)}"
-                for r in bad.itertuples(index=False)
-            )
+        # A full cycle seats each config slot once in every seat per seed, so each
+        # seat holds a treatment player in exactly len(config_slots) games.
+        cycle = cycles.get(str(experiment))
+        expected_per_cell = len(cycle.config_slots) if cycle else 0
+        seat_issues = _seat_balance_issues(accepted, cycle) if cycle else []
+        for seed, bad in seat_issues:
             cell_issue_rows.append({
                 "experiment": experiment,
                 "seed": int(seed),
                 "expected_games_per_cell": int(expected_per_cell),
-                "observed_counts": observed,
-                "affected_player_ids": ",".join(str(int(v)) for v in bad["player_id"]),
+                "observed_counts": ", ".join(f"{pid}:{n}" for pid, n in bad.items()),
+                "affected_player_ids": ",".join(str(pid) for pid in bad),
             })
 
         required = int(len(reference_slots))
-        present_games = int(exp_df["game_id"].nunique())
+        present_games = int(accepted["game_id"].nunique())
         missing_games = int(len(reference_set - present_slots))
-        cell_repeat_issue = bool(not cell_counts.empty and (
-            cell_counts["n_games"] != expected_per_cell
-        ).any())
         warnings = []
         if excluded_games:
             warnings.append(f"{excluded_games} game(s) excluded by decision failure cutoff")
@@ -190,9 +192,11 @@ def build_experiment_completeness(
             warnings.append(f"{missing_games} missing slot(s)")
         if n_repeated:
             warnings.append(f"{n_repeated} repeated slot(s)")
-        if cell_repeat_issue:
+        if n_off_cycle:
+            warnings.append(f"{n_off_cycle} off-cycle game(s)")
+        if seat_issues:
             warnings.append(
-                f"cell repeat counts differ from expected {expected_per_cell}"
+                f"treatment seat counts differ from expected {expected_per_cell}"
             )
         summary_rows.append({
             "experiment": experiment,
@@ -202,6 +206,7 @@ def build_experiment_completeness(
             "completeness_pct": round((required - missing_games) / required, 4)
             if required else float("nan"),
             "repeated_slots": int(n_repeated),
+            "off_cycle_games": n_off_cycle,
             "excluded_games": int(excluded_games),
             "warning": "; ".join(warnings) if warnings else "ok",
         })
@@ -209,11 +214,35 @@ def build_experiment_completeness(
     return {
         "experiment_completeness": pd.DataFrame(summary_rows, columns=COMPLETENESS_COLUMNS),
         "repeated_games": pd.DataFrame(repeated_rows, columns=REPEATED_GAMES_COLUMNS),
+        "off_cycle_games": off_cycle.reset_index(drop=True),
         "experiment_completeness_gaps": pd.DataFrame(
             gap_rows, columns=COMPLETENESS_GAPS_COLUMNS
         ),
         "cell_repeat_issues": pd.DataFrame(cell_issue_rows, columns=CELL_REPEAT_ISSUES_COLUMNS),
     }
+
+
+def _seat_balance_issues(accepted: pd.DataFrame, cycle: SeatingCycle) -> list[tuple[int, dict]]:
+    """Per seed, the seats whose treatment-game count is not ``len(config_slots)``.
+
+    Counts every accepted game as played, including repeats and off-cycle games,
+    so it shows the imbalance the analyses currently see. A seed is listed only
+    when some seat is over-filled; seats that are merely short belong to slots
+    the gap table already reports.
+    """
+    if "config_slot" not in accepted.columns:
+        return []
+    slots = pd.to_numeric(accepted["config_slot"], errors="coerce")
+    treatment = accepted[slots >= 0]
+    expected = len(cycle.config_slots)
+    issues = []
+    for seed, rows in treatment.groupby("seed", sort=True):
+        counts = rows.groupby("player_id")["game_id"].nunique()
+        counts = counts.reindex(range(cycle.total_seats), fill_value=0)
+        bad = {int(pid): int(n) for pid, n in counts.items() if n != expected}
+        if (counts > expected).any():
+            issues.append((int(seed), bad))
+    return issues
 
 
 class PerformanceStrengthPanel(Analysis):

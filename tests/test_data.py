@@ -201,6 +201,23 @@ def test_completeness_excludes_failed_games_and_keeps_design_reference_grid():
     assert incomplete_experiments(games, 1.0, excluded_game_ids={"g0", "g1"}) == {"gone"}
 
 
+def test_completeness_reads_slots_from_seats():
+    from bench.data import condition_completeness
+
+    # Two seats, so rotation 1 swaps them. "rerun" is labelled rotation 1 but was
+    # played on rotation 0's seats, so the experiment still lacks rotation 1.
+    games = pd.DataFrame([
+        {"experiment": "e", "game_id": "first", "seed": 1, "seating_rotation": 0, "timestamp": 1},
+        {"experiment": "e", "game_id": "rerun", "seed": 1, "seating_rotation": 1, "timestamp": 2},
+    ])
+    seats = pd.DataFrame([
+        {"game_id": g, "config_slot": slot, "player_id": slot}
+        for g in ("first", "rerun") for slot in (0, 1)
+    ])
+    assert condition_completeness(games) == {"e": 1.0}
+    assert condition_completeness(games, seats=seats) == {"e": 0.5}
+
+
 def test_precomputed_failure_ids_filter_gridless_tables_before_min_games():
     tokens = pd.DataFrame({
         "experiment": ["exp", "exp", "exp"],

@@ -150,13 +150,16 @@ def completed_experiments(ctx: AnalysisContext) -> tuple[str, ...]:
     Problem games and decision-failure games do not count, as in
     ``performance.experiment_completeness``.
     """
-    from ...data.loading import condition_completeness
+    from ...data.loading import condition_completeness, read_seats
 
-    path = (ctx.config.data.get("tables") or {}).get("games")
+    tables = ctx.config.data.get("tables") or {}
+    path = tables.get("games")
     if not path or not Path(path).exists():
         return ()
     games = ctx.load_table("games")
-    shares = condition_completeness(games, "experiment", ctx.decision_failure_ids())
+    shares = condition_completeness(
+        games, "experiment", ctx.decision_failure_ids(), read_seats(tables.get("panel")),
+    )
     return tuple(sorted(name for name, share in shares.items() if share >= 1.0))
 
 

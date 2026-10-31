@@ -22,7 +22,8 @@ asks. ``--prune-missing`` runs a prune-only extract (no new games) for this
 invocation; a run that is skipped because its outputs are fresh never prunes.
 
 ``trim`` keeps the earliest game in each repeated controlled slot, renames the
-extra games' source files to ``.bak``, and prunes their rows from the tables.
+source files of the extra games and of games played off their seating cycle to
+``.bak``, and prunes their rows from the tables.
 """
 
 from __future__ import annotations
@@ -116,8 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     trim = sub.add_parser(
         "trim",
-        help="rename extra games in repeated controlled slots to .bak and prune them "
-             "from the tables",
+        help="rename extra games in repeated controlled slots, and games played off "
+             "their seating cycle, to .bak and prune them from the tables",
     )
     trim.add_argument(
         "--config", required=True,

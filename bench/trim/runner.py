@@ -2,7 +2,12 @@
 
 A controlled experiment needs one game per ``(seed, seating_rotation)`` slot. When a
 slot holds several accepted games, the earliest by timestamp stays and the rest are
-trimmed, using the same rule as the ``repeated_games`` coverage table. Games excluded
+trimmed, using the same rule as the ``repeated_games`` coverage table. Slots come
+from the seats each game was played in (read from the ``panel`` table), so two games
+on the same seats share a slot even when their recorded rotations differ. A game
+whose seats fit no rotation of its experiment's cycle (``off_cycle_games``) is
+trimmed too: it unbalances the seats and fills no slot, so a rerun of the open slot
+replaces it. Games excluded
 for decision failures or recorded in ``import_issues.csv`` are left alone: they are
 never counted, kept, or trimmed.
 
@@ -17,8 +22,9 @@ starts with its uuid (game DBs of any timestamp, player trace DBs, saves, replay
 to ``<name>.bak``. A
 prune-only extract then drops the trimmed games' rows from every canonical table on
 disk, not only ``data.extract.outputs``. The ``games`` table is pruned last: if
-another table fails, the slot still shows as repeated, and re-running trim finds the
-already-renamed extras as ``not-found`` and finishes the prune.
+another table fails, the trimmed games keep their ``games`` rows, and re-running
+trim finds them by their ``.bak`` files, without needing their seats, and finishes
+the prune.
 If an affected tier is offline, the retry waits for it to return, even when the
 earlier removal was approved. A two-tier trim requires a complete hot scan.
 """
@@ -39,7 +45,7 @@ from bench.config.behavior import resolve_behavior_spec
 from bench.config.filters import resolve_filter_spec
 from bench.data.failures import failed_game_ids_from_tokens
 from bench.data.loading import drop_problem_games
-from bench.data.repeats import controlled_rows, repeated_slots
+from bench.data.repeats import align_rotations, controlled_rows, repeated_slots
 from bench.extract import ExtractResult, run_extract
 from bench.extract.errors import ExtractError
 from bench.extract.issues import read_problem_game_ids, resolve_issues_path
@@ -54,6 +60,7 @@ Status = Literal[
     "would-trim", "skipped-source-unavailable",
 ]
 # Receives the repeated-slot rows about to be trimmed and returns True to go ahead.
+# An off-cycle game comes as a row with no ``keep_candidate_game_id``.
 TrimConfirm = Callable[[list[dict]], bool]
 
 
@@ -72,6 +79,7 @@ class TrimOutcome:
 @dataclass
 class TrimResult:
     slots: list[dict] = field(default_factory=list)
+    off_cycle: list[dict] = field(default_factory=list)
     outcomes: list[TrimOutcome] = field(default_factory=list)
     declined: bool = False
     prune: Optional[ExtractResult] = None
@@ -85,12 +93,43 @@ class TrimResult:
         return [o for o in self.outcomes if o.status == "failed"]
 
 
-def _excluded_game_ids(cfg: RunConfig) -> set[str]:
-    """Malformed-DB games plus games over the global decision-failure cutoff."""
+def _failed_game_ids(cfg: RunConfig) -> set[str]:
+    """Games over the global decision-failure cutoff."""
     resolved = resolve_filter_spec(cfg.data.get("filter"), cfg.filters, "data.filter")
-    return read_problem_game_ids(resolve_issues_path(cfg.data)) | failed_game_ids_from_tokens(
-        table_path(cfg, "tokens"), resolved
-    )
+    return failed_game_ids_from_tokens(table_path(cfg, "tokens"), resolved)
+
+
+def _read_seats(cfg: RunConfig) -> pd.DataFrame | None:
+    """The panel's configured seats, or ``None`` when the panel table is missing."""
+    path = table_path(cfg, "panel")
+    if not Path(path).exists():
+        print(f"panel table not found at {path!r}: slots use the recorded rotations.")
+        return None
+    return pd.read_csv(path, dtype={"game_id": str})
+
+
+def _pending_game_ids(controlled: pd.DataFrame, failed: set[str], inventory: Inventory) -> set[str]:
+    """Accepted games an earlier trim renamed whose rows the prune has not removed yet.
+
+    A prune that fails partway can drop a game's panel rows, and with them the seats
+    that made it an extra or off-cycle, so these games are finished from their
+    ``.bak`` files instead of from the slots.
+    """
+    backups = [
+        os.path.basename(path)
+        for tier in inventory.tiers.values() if tier.available
+        for path in tier.files if path.endswith(".bak")
+    ]
+    candidates = set(controlled["game_id"].astype(str)) - failed - inventory.game_ids
+    return {g for g in candidates if any(name.startswith(g) for name in backups)}
+
+
+def _off_cycle_entry(row: dict) -> dict:
+    """An off-cycle game in the shape of a repeated slot with no keeper."""
+    return {
+        "experiment": row["experiment"], "seed": row["seed"], "seats": row["seats"],
+        "keep_candidate_game_id": None, "extra_game_ids": row["game_id"],
+    }
 
 
 def _index_files(inventory: Inventory) -> list[str]:
@@ -195,14 +234,6 @@ def run_trim(
             f"games table not found at {games_path!r}; run `civ-bench extract` first."
         )
     games = pd.read_csv(games_path, dtype={"game_id": str})
-    accepted = drop_problem_games(controlled_rows(games), _excluded_game_ids(cfg))
-
-    result = TrimResult(slots=repeated_slots(accepted, games))
-    if not result.slots:
-        print("No repeated controlled slots: nothing to trim.")
-        return result
-
-    tables = _prune_tables(cfg) if cfg.extract_enabled else []
     try:
         # With one root, an unreadable runs_dir leaves no keepers, so every slot is
         # skipped. With two, an unseen hot copy could survive the prune.
@@ -211,17 +242,48 @@ def run_trim(
         state = SourceState.load(games_path, inventory) if tiered else None
     except (ExtractError, OSError) as exc:
         raise TrimError(f"could not scan the game data sources or load ownership: {exc}") from exc
+    # As in the analyses, malformed games are dropped before the cycle is inferred,
+    # while decision-failure games inform it but fill no slot.
+    controlled = drop_problem_games(
+        controlled_rows(games), read_problem_game_ids(resolve_issues_path(cfg.data)),
+    )
+    failed = _failed_game_ids(cfg)
+    pending = _pending_game_ids(controlled, failed, inventory)
+    aligned, off_cycle, _ = align_rotations(controlled, _read_seats(cfg), games, failed | pending)
+    result = TrimResult(
+        slots=repeated_slots(aligned, games), off_cycle=off_cycle.to_dict("records"),
+    )
+    if not result.slots and not result.off_cycle and not pending:
+        print("No repeated controlled slots or off-cycle games: nothing to trim.")
+        return result
+
+    tables = _prune_tables(cfg) if cfg.extract_enabled else []
     # Reading the state sidecar validates it but never writes. Dry runs take the
     # same path, so neither a dry run nor a deferred slot changes ownership.
     paths = _index_files(inventory)
     plan: list[tuple[str, list[str]]] = []
     active_slots: list[dict] = []
-    for slot in result.slots:
+    if pending:
+        print(f"\n{len(pending)} game(s) renamed by an earlier trim still have table rows")
+        blocked = state.unavailable_copies(pending, inventory) if state else set()
+        for game_id in sorted(pending):
+            if game_id in blocked:
+                detail = "cold source is offline and owns or may own cached copies; deferred"
+                print(f"  skip {game_id}: {detail}")
+                result.outcomes.append(TrimOutcome(game_id, "skipped-source-unavailable", detail=detail))
+            else:
+                print(f"  trim {game_id} (no files left, rows only)")
+                plan.append((game_id, []))
+    for slot in [*result.slots, *map(_off_cycle_entry, result.off_cycle)]:
         keeper = slot["keep_candidate_game_id"]
         extras = slot["extra_game_ids"].split(",")
-        print(f"\n{slot['experiment']}  seed={slot['seed']}  "
-              f"rotation={slot['seating_rotation']}  keep {keeper}")
-        if keeper not in inventory.game_ids:
+        if keeper is None:
+            print(f"\n{slot['experiment']}  seed={slot['seed']}  "
+                  f"off-cycle seats {slot['seats']}")
+        else:
+            print(f"\n{slot['experiment']}  seed={slot['seed']}  "
+                  f"rotation={slot['seating_rotation']}  keep {keeper}")
+        if keeper is not None and keeper not in inventory.game_ids:
             print(f"  skip: {keeper} has no game DB in any available source tier, so "
                   f"trimming would empty the slot")
             result.outcomes += [
@@ -258,7 +320,7 @@ def run_trim(
     if not plan:
         _print_summary(result)
         return result
-    if confirm is not None and not confirm(active_slots):
+    if confirm is not None and active_slots and not confirm(active_slots):
         result.declined = True
         print("Trim declined: nothing was renamed.")
         return result
@@ -294,6 +356,8 @@ def _print_summary(result: TrimResult) -> None:
     print("TRIM COMPLETE")
     print("=" * 60)
     print(f"  repeated slots: {len(result.slots)}")
+    if result.off_cycle:
+        print(f"  off-cycle games: {len(result.off_cycle)}")
     for status in ("trimmed", "would-trim", "not-found", "skipped-bak-exists",
                    "skipped-keeper-missing", "skipped-source-unavailable", "failed"):
         if counts[status]:

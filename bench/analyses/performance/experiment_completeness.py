@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bench.data.loading import drop_problem_games
-from bench.data.repeats import controlled_rows
+from bench.data.repeats import align_rotations, controlled_rows
 from ..base import Analysis, AnalysisContext, AnalysisResult
 from ..errors import AnalysisError
 from .seating import SEATING_INDEX_COLUMNS, generate_seating_files
@@ -35,6 +34,7 @@ def build_condition_progress(
     excluded_game_ids,
     vanilla_label: str,
     null_label: str,
+    seats: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return controlled condition progress and completion timestamps.
 
@@ -42,7 +42,10 @@ def build_condition_progress(
     repeated game can occupy only one reference slot, so ``present_games`` is
     not a completion count. Completion time is experiment-wide: it uses the
     earliest valid accepted game in each reference slot, which keeps later
-    reruns from moving it when player identities vary by slot.
+    reruns from moving it when player identities vary by slot. Slots come from
+    the seats each game was played in, as in the completeness table.
+    ``seats`` is the frame configured seats are read from; it defaults to
+    ``panel`` and should be the unfiltered panel, so a player filter cannot hide seats.
     """
     controlled = controlled_rows(panel)
     required_columns = {"experiment", "player_type"}
@@ -80,6 +83,9 @@ def build_condition_progress(
 
     comp_by_experiment = completeness.set_index("experiment")
     excluded = {str(game_id) for game_id in (excluded_game_ids or ())}
+    aligned, _, _ = align_rotations(
+        controlled, panel if seats is None else seats, games, excluded,
+    )
     baseline_labels = {str(vanilla_label), str(null_label)}
     rows: list[dict] = []
     condition_rows = controlled[
@@ -97,8 +103,7 @@ def build_condition_progress(
         completed_at = ""
 
         if completed_games == required_games:
-            experiment_rows = controlled[controlled["experiment"] == experiment]
-            accepted = drop_problem_games(experiment_rows, excluded)
+            accepted = aligned[aligned["experiment"] == experiment]
             slot_times: list[pd.Timestamp] = []
             for seed, rotation in reference_slots:
                 slot_ids = accepted.loc[
@@ -258,10 +263,15 @@ class PerformanceExperimentCompleteness(Analysis):
                 games[["game_id", "seed", "seating_rotation"]].drop_duplicates("game_id"),
                 on="game_id", how="left", validate="many_to_one",
             )
+        # Seats come from the unfiltered panel, so a player filter cannot hide a
+        # configured seat and change the inferred cycle.
+        seats = panel
         panel = ctx.apply_filter(panel, include_quality=False)
         excluded_ids = ctx.decision_failure_ids()
 
-        tables = build_experiment_completeness(panel, games, baseline_experiment, excluded_ids)
+        tables = build_experiment_completeness(
+            panel, games, baseline_experiment, excluded_ids, seats,
+        )
         if not tables:
             return AnalysisResult(
                 summary="No controlled experiment coverage is available.",
@@ -275,6 +285,7 @@ class PerformanceExperimentCompleteness(Analysis):
             excluded_ids,
             ctx.catalog.vanilla_label,
             ctx.catalog.null_label,
+            seats,
         )
 
         tokens = self._load_tokens(ctx)
@@ -313,7 +324,7 @@ class PerformanceExperimentCompleteness(Analysis):
         artifacts: dict[str, str] = {}
         if bool(self.params.get("emit_seating", True)):
             artifacts, index_rows, warnings = generate_seating_files(
-                panel, games, baseline_experiment, excluded_ids,
+                panel, games, baseline_experiment, excluded_ids, seats,
             )
             if index_rows:
                 out["seating_index"] = pd.DataFrame(index_rows, columns=SEATING_INDEX_COLUMNS)

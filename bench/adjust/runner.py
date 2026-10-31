@@ -113,7 +113,7 @@ def run_adjust(
     # Unfinished conditions stay in the table (so their games can be ranked) but
     # do not shape the fits; analyses drop them downstream.
     incomplete = incomplete_experiments_from_games(
-        games_path, global_spec, malformed_ids, failure_ids,
+        games_path, global_spec, malformed_ids, failure_ids, panel_path,
     ) or set()
 
     artifacts = builder(

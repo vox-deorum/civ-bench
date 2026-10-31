@@ -153,6 +153,69 @@ def test_excluded_games_are_neither_kept_nor_trimmed(env):
     assert _untouched(files["a"] + files["b"] + files["c"])
 
 
+def _write_seats(path: Path, seats: dict[str, dict[int, int]]) -> None:
+    """A panel table with one row per configured seat: ``game_id -> {config_slot: player_id}``."""
+    fields = list(PANEL_FIELD_MAPPINGS)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for game_id, slots in seats.items():
+            for slot, player_id in slots.items():
+                writer.writerow({f: "" for f in fields} | {
+                    "game_id": game_id, "player_id": player_id, "config_slot": slot,
+                })
+
+
+def _mixed_seats(env) -> dict[str, list[Path]]:
+    """Config slots 0 and 3 make a 4-seat cycle, played as the identity by ``a``, ``c``
+    and ``e``. ``b`` repeats ``a``'s seats under another recorded rotation, and ``d``'s
+    seats fit no rotation of that cycle."""
+    stamps = [("a", 100), ("c", 110), ("e", 120), ("b", 200), ("d", 300)]
+    files = {g: _game_files(env["runs"], g, ts) for g, ts in stamps}
+    _write_games(env["games"], [
+        "a,100,exp,1,0", "c,110,exp,1,1", "e,120,exp,1,2", "b,200,exp,1,1", "d,300,exp,1,3",
+    ])
+    _write_seats(env["panel"], {
+        "a": {0: 0, 3: 1}, "c": {0: 1, 3: 2}, "e": {0: 2, 3: 3},
+        "b": {0: 0, 3: 1}, "d": {0: 3, 3: 1},
+    })
+    return files
+
+
+def test_slots_follow_the_seats_each_game_was_played_in(env):
+    files = _mixed_seats(env)
+
+    result = run_trim(env["cfg"]())
+
+    assert [(s["keep_candidate_game_id"], s["extra_game_ids"]) for s in result.slots] == [("a", "b")]
+    assert [g["game_id"] for g in result.off_cycle] == ["d"]
+    assert sorted(o.game_id for o in result.trimmed) == ["b", "d"]
+    assert _untouched(files["a"] + files["c"] + files["e"]) and _baks(files["b"] + files["d"])
+    assert _game_ids(env["games"]) == {"a", "c", "e"}
+
+
+def test_malformed_games_do_not_choose_the_cycle(env):
+    """Flagged games ``f1``..``f3`` were seated by the identity cycle and ``g`` by
+    [1, 0, 3, 2]. Only ``g`` is accepted, so its own cycle holds and nothing is trimmed,
+    matching the report, which never loads flagged games."""
+    stamps = [("f1", 100), ("f2", 110), ("f3", 120), ("g", 200)]
+    files = {gid: _game_files(env["runs"], gid, ts) for gid, ts in stamps}
+    _write_games(env["games"], ["f1,100,exp,1,0", "f2,110,exp,1,1", "f3,120,exp,1,2", "g,200,exp,1,0"])
+    _write_seats(env["panel"], {
+        "f1": {0: 0, 3: 1}, "f2": {0: 1, 3: 2}, "f3": {0: 2, 3: 3}, "g": {0: 1, 3: 0},
+    })
+    with open(env["issues"], "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=ISSUE_FIELDNAMES)
+        writer.writeheader()
+        for gid, ts in stamps[:3]:
+            writer.writerow({f: "" for f in ISSUE_FIELDNAMES} | {"game_id": gid, "db_name": f"{gid}_{ts}.db"})
+
+    result = run_trim(env["cfg"]())
+
+    assert result.slots == [] and result.off_cycle == []
+    assert all(_untouched(f) for f in files.values())
+
+
 def test_uncontrolled_games_are_ignored(env):
     files = _game_files(env["runs"], "a", 100) + _game_files(env["runs"], "b", 200)
     _write_games(env["games"], ["a,100,exp,-1,-1", "b,200,exp,-1,-1"])
@@ -279,6 +342,31 @@ def test_retry_finishes_a_prune_that_failed_partway(env, monkeypatch):
     assert sorted(o.status for o in result.outcomes) == ["not-found", "not-found"]
     assert _game_ids(env["games"]) == {"a", "d"}
     assert _game_ids(env["panel"]) == {"a", "d"}
+
+
+def test_retry_finishes_the_prune_after_the_seats_were_pruned(env, monkeypatch):
+    """The prune removed ``b``'s and ``d``'s panel rows, then failed on ``games``. The
+    retry has no seats left for them, yet still finishes their removal."""
+    files = _mixed_seats(env)
+    real_write = export_common.write_csv_file
+
+    def locked_games(path, fieldnames, rows):
+        return False if path == str(env["games"]) else real_write(path, fieldnames, rows)
+
+    monkeypatch.setattr(export_common, "write_csv_file", locked_games)
+    with pytest.raises(TrimError, match="run `civ-bench trim` again"):
+        run_trim(env["cfg"]())
+    assert _game_ids(env["panel"]) == {"a", "c", "e"}
+    assert _game_ids(env["games"]) == {"a", "b", "c", "d", "e"}
+
+    monkeypatch.setattr(export_common, "write_csv_file", real_write)
+    result = run_trim(env["cfg"]())
+
+    assert sorted((o.game_id, o.status) for o in result.outcomes) == [
+        ("b", "not-found"), ("d", "not-found"),
+    ]
+    assert _game_ids(env["games"]) == {"a", "c", "e"}
+    assert _untouched(files["a"] + files["c"] + files["e"])
 
 
 def test_other_missing_games_still_go_through_the_prune_prompt(env):

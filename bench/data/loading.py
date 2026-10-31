@@ -21,6 +21,7 @@ import pandas as pd
 
 from ..catalog import Catalog
 from ..config.filters import intersect_filter_specs, resolve_filter_spec
+from .repeats import align_rotations, controlled_rows
 
 
 def apply_filter_spec(
@@ -125,6 +126,7 @@ def _as_list(value):
 
 def condition_completeness(
     df: pd.DataFrame, cond_col: Optional[str] = None, excluded_game_ids=None,
+    seats: Optional[pd.DataFrame] = None,
 ) -> dict[str, float]:
     """Per-condition fraction of controlled ``(seed, seating_rotation)`` slots it
     occupies, evaluated against the union of controlled slots as the reference grid
@@ -134,6 +136,10 @@ def condition_completeness(
     grid yields ``{}``. Rows with the ``-1`` uncontrolled sentinel for either field
     never count as occupied slots. ``cond_col`` defaults to ``"condition"`` when the
     frame carries it, else ``"experiment"``.
+
+    With ``seats`` (a panel-like frame with ``config_slot`` and ``player_id``; ``df``
+    itself when it has them), a game's slot comes from the seats it was played in, as
+    in ``performance.experiment_completeness``, and an off-cycle game fills no slot.
     """
     cond = cond_col or _cond_col(df)
     needed = {cond, "seed", "seating_rotation"}
@@ -153,9 +159,15 @@ def condition_completeness(
     }
     if not reference:
         return {}
+    # The design grid comes from the recorded labels; occupied slots from the seats.
+    occupied = controlled
+    if seats is None and {"config_slot", "player_id"} <= set(df.columns):
+        seats = df
+    if seats is not None and {"experiment", "game_id"} <= set(controlled.columns):
+        occupied, _, _ = align_rotations(controlled_rows(controlled), seats, df)
     out: dict[str, float] = {}
-    for exp, grp in controlled.groupby(cond, sort=True):
-        grp = drop_problem_games(grp, excluded_game_ids)
+    for exp in sorted(controlled[cond].unique(), key=str):
+        grp = drop_problem_games(occupied[occupied[cond] == exp], excluded_game_ids)
         present = {
             (int(s), int(r))
             for s, r in grp[["seed", "seating_rotation"]].itertuples(index=False, name=None)
@@ -166,11 +178,11 @@ def condition_completeness(
 
 def incomplete_experiments(
     df: pd.DataFrame, threshold: float, cond_col: Optional[str] = None,
-    excluded_game_ids=None,
+    excluded_game_ids=None, seats: Optional[pd.DataFrame] = None,
 ) -> set[str]:
     """Condition names whose slot completeness is below ``threshold`` (in ``(0, 1]``)."""
     return {
-        exp for exp, frac in condition_completeness(df, cond_col, excluded_game_ids).items()
+        exp for exp, frac in condition_completeness(df, cond_col, excluded_game_ids, seats).items()
         if frac < threshold
     }
 
@@ -180,18 +192,35 @@ def incomplete_experiments_from_games(
     resolved_filter: Optional[dict],
     problem_ids=None,
     decision_failure_ids=None,
+    panel_path=None,
 ) -> Optional[set[str]]:
     """Incomplete-condition names computed once from the canonical ``games`` table.
 
     Returns ``None`` when the global filter sets no ``min_condition_completeness``
     (so callers skip a needless file read). ``problem_ids`` are malformed-DB
     ``game_id``s to exclude before the grid is computed (matching the loaders).
+    When ``panel_path`` exists, slots come from the seats in the panel.
     """
     mcc = (resolved_filter or {}).get("min_condition_completeness")
     if mcc is None:
         return None
     games = drop_problem_games(pd.read_csv(games_path), problem_ids)
-    return incomplete_experiments(games, mcc, excluded_game_ids=decision_failure_ids)
+    return incomplete_experiments(
+        games, mcc, excluded_game_ids=decision_failure_ids, seats=read_seats(panel_path),
+    )
+
+
+def read_seats(panel_path) -> Optional[pd.DataFrame]:
+    """The panel's ``game_id, config_slot, player_id`` columns, or ``None`` when absent."""
+    if not panel_path:
+        return None
+    try:
+        return pd.read_csv(
+            panel_path, dtype={"game_id": str},
+            usecols=["game_id", "config_slot", "player_id"],
+        )
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _cond_col(df: pd.DataFrame) -> str:

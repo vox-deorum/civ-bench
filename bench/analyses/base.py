@@ -209,6 +209,7 @@ class AnalysisContext:
                 cached = incomplete_experiments_from_games(
                     str(self._games_for_filter()), spec,
                     self._problem_game_ids(), self.decision_failure_ids(),
+                    (self.config.data.get("tables") or {}).get("panel"),
                 )
             self._incomplete_conditions = cached
         return cached

@@ -45,6 +45,8 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
         # strength of each seat increases with player index (winner = last seat)
         base = {"Vanilla": 0.18, "GPT-OSS-120B": 0.22, "Kimi-K2.5": 0.30}
         for pid, pt in enumerate(PLAYER_TYPES):
+            # The runner seats config slot s of rotation r at seat (s + r) % N.
+            slot = (pid - rot) % len(PLAYER_TYPES) if controlled else pid
             civ = CIVS[(pid + g) % len(CIVS)]
             p = float(np.clip(base[pt] + rng.normal(0, 0.02), 0.02, 0.95))
             win = int(pt == "Kimi-K2.5")
@@ -53,7 +55,7 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
                       "culture_ratio": 0.1, "diplomatic_ratio": 0.1,
                       "science_ratio": 0.4 if pt != "Kimi-K2.5" else 0.1}
             panel.append({"experiment": exp, "game_id": gid, "turn": MAX_TURN, "player_id": pid,
-                          "player_type": pt, "model": model, "strategist": "s", "config_slot": pid,
+                          "player_type": pt, "model": model, "strategist": "s", "config_slot": slot,
                           "civilization": civ, "score_ratio": p, "is_winner": win, **ratios})
             tokens.append({"experiment": exp, "game_id": gid, "player_id": pid, "player_type": pt,
                            "model_name": model, "model_base": model,
@@ -71,7 +73,7 @@ def _build_csvs(tmp_path, n_games=12, controlled=False):
             logit = float(np.log(p / (1 - p)))
             strength.append({"experiment": exp, "game_id": gid, "player_id": pid, "player_type": pt,
                              "civilization": civ, "seed": seed, "seating_rotation": rot,
-                             "config_slot": pid, "controlled": controlled, "is_winner": win,
+                             "config_slot": slot, "controlled": controlled, "is_winner": win,
                              "weighted_strength": p, "relative_strength": p, "logit_strength": logit,
                              "adjusted_strength": p,
                              "adjust_method": "cell" if controlled else "civ"})
@@ -705,16 +707,22 @@ def test_emit_seating_param_allowed(dev_spec, write_spec):
     assert cfg.analyses[0].raw["params"]["emit_seating"] is False
 
 
-def _seating_rows(experiment, game_id, seed, rotation, config_slots=(0, 1)):
-    """Controlled strength rows carrying ``config_slot`` (needed for seating headers)."""
+def _seating_rows(experiment, game_id, seed, rotation, config_slots=(0, 1), base_perm=None):
+    """Controlled strength rows carrying ``config_slot``, seated as the runner would.
+
+    The i-th config slot of ``rotation`` sits at ``base_perm[(rotation + i) % N]``.
+    """
+    n = max(config_slots) + 1
+    perm = base_perm or list(range(n))
     return [
         {
-            "experiment": experiment, "game_id": game_id, "player_id": pid,
-            "player_type": "Vanilla" if pid == 0 else "TestLLM",
-            "seed": seed, "seating_rotation": rotation, "config_slot": pid,
+            "experiment": experiment, "game_id": game_id,
+            "player_id": perm[(rotation + i) % n],
+            "player_type": "Vanilla" if slot == 0 else "TestLLM",
+            "seed": seed, "seating_rotation": rotation, "config_slot": slot,
             "controlled": True, "adjusted_strength": 0.5,
         }
-        for pid in config_slots
+        for i, slot in enumerate(config_slots)
     ]
 
 
@@ -763,6 +771,119 @@ def test_generate_seating_skips_complete_experiment():
 
     artifacts, index_rows, _ = generate_seating_files(pd.DataFrame(rows))
     assert artifacts == {} and index_rows == []  # full grid -> nothing to open
+
+
+# A 4-seat cycle with config slots 0 and 3: rotation r seats slot 0 at
+# SHUFFLED[r] and slot 3 at SHUFFLED[r + 1].
+SHUFFLED = [2, 0, 3, 1]
+
+
+def _mixed_cycle_rows():
+    """Seed 1 played under SHUFFLED, then two games from an identity basePerm.
+
+    ``late-r1`` sits on seats (1, 2), which is SHUFFLED's rotation 3 although its
+    recorded rotation is 1. ``late-r3`` sits on seats (3, 0), which no SHUFFLED
+    rotation produces.
+    """
+    rows, stamps = [], []
+    played = [
+        ("s1-r0", 1, 0, SHUFFLED), ("s1-r1", 1, 1, SHUFFLED), ("s1-r2", 1, 2, SHUFFLED),
+        ("late-r1", 1, 1, None), ("late-r3", 1, 3, None),
+    ]
+    for ts, (game_id, seed, rot, perm) in enumerate(played):
+        rows.extend(_seating_rows("ctrl", game_id, seed, rot, (0, 3), perm))
+        stamps.append({"game_id": game_id, "timestamp": ts})
+    return rows, stamps
+
+
+def test_completeness_reads_slots_from_seats_not_recorded_rotation():
+    from bench.analyses.performance.strength_panel import build_experiment_completeness
+
+    rows, stamps = _mixed_cycle_rows()
+    out = build_experiment_completeness(pd.DataFrame(rows), pd.DataFrame(stamps))
+
+    comp = out["experiment_completeness"].iloc[0]
+    # late-r1 fills rotation 3 on its seats; it does not repeat rotation 1.
+    assert comp["missing_games"] == 0
+    assert comp["repeated_slots"] == 0
+    assert comp["off_cycle_games"] == 1
+    assert out["off_cycle_games"]["game_id"].tolist() == ["late-r3"]
+    assert "1 off-cycle game(s)" in comp["warning"]
+    # Seats 0 and 3 each held a treatment player 3 times, not the expected 2.
+    issues = out["cell_repeat_issues"].iloc[0]
+    assert issues["expected_games_per_cell"] == 2
+    assert issues["observed_counts"] == "0:3, 3:3"
+
+
+def test_completeness_flags_same_seats_under_another_label_as_repeat():
+    from bench.analyses.performance.strength_panel import build_experiment_completeness
+
+    rows, stamps = _mixed_cycle_rows()
+    # Seats (2, 0) again, recorded as rotation 2: a rerun of rotation 0.
+    rows.extend(_seating_rows("ctrl", "again", 1, 0, (0, 3), SHUFFLED))
+    for row in rows[-2:]:
+        row["seating_rotation"] = 2
+    stamps.append({"game_id": "again", "timestamp": 99})
+
+    out = build_experiment_completeness(pd.DataFrame(rows), pd.DataFrame(stamps))
+
+    repeats = out["repeated_games"]
+    assert repeats[["seating_rotation", "keep_candidate_game_id", "extra_game_ids"]].values.tolist() == [
+        [0, "s1-r0", "again"],
+    ]
+
+
+def test_one_stray_early_game_does_not_choose_the_cycle():
+    from bench.analyses.performance.strength_panel import build_experiment_completeness
+
+    # "stray" (second game) fits the first identity game's partial basePerm but
+    # was played under [0, 1, 3, 2]; the identity cycle keeps more games.
+    played = [("r0", 0, None), ("stray", 1, [0, 1, 3, 2]), ("r1", 1, None), ("r2", 2, None)]
+    rows, stamps = [], []
+    for ts, (game_id, rot, perm) in enumerate(played):
+        rows.extend(_seating_rows("ctrl", game_id, 1, rot, (0, 3), perm))
+        stamps.append({"game_id": game_id, "timestamp": ts})
+
+    out = build_experiment_completeness(pd.DataFrame(rows), pd.DataFrame(stamps))
+
+    assert out["off_cycle_games"]["game_id"].tolist() == ["stray"]
+
+
+def test_game_from_another_base_perm_fills_the_slot_its_seats_match():
+    from bench.analyses.performance.strength_panel import build_experiment_completeness
+
+    # Each game ran from a different seating file. Under [1, 3, 2, 0], "a" sits at
+    # rotation 3 and "b" at rotation 0 although "b" was recorded as rotation 2;
+    # no cycle keeps all three games.
+    played = [("a", 1, 3, [1, 2, 3, 0]), ("b", 2, 2, [0, 2, 1, 3]), ("c", 1, 2, [2, 3, 1, 0])]
+    rows, stamps = [], []
+    for ts, (game_id, seed, rot, perm) in enumerate(played):
+        rows.extend(_seating_rows("ctrl", game_id, seed, rot, (2, 3), perm))
+        stamps.append({"game_id": game_id, "timestamp": ts})
+
+    out = build_experiment_completeness(pd.DataFrame(rows), pd.DataFrame(stamps))
+
+    assert out["off_cycle_games"]["game_id"].tolist() == ["c"]
+
+
+def test_generate_seating_keeps_the_played_base_perm():
+    from bench.analyses.performance.seating import generate_seating_files
+
+    rows, stamps = _mixed_cycle_rows()
+    rows = [r for r in rows if r["game_id"] != "s1-r2"]
+    rows.extend(_seating_rows("ctrl", "s2-r0", 2, 0, (0, 3), SHUFFLED))
+    stamps.append({"game_id": "s2-r0", "timestamp": 99})
+
+    artifacts, _, warnings = generate_seating_files(pd.DataFrame(rows), pd.DataFrame(stamps))
+
+    state = json.loads(artifacts["seating/ctrl.seating.json"])
+    assert state["basePerm"] == SHUFFLED
+    completed = {
+        (int(r), int(s)): cell["gameID"]
+        for r, inner in state["cells"].items() for s, cell in inner.items()
+    }
+    assert completed == {(0, 0): "s1-r0", (1, 0): "s1-r1", (3, 0): "late-r1", (0, 1): "s2-r0"}
+    assert any("1 game(s) were played on seats outside" in w for w in warnings)
 
 
 def test_generated_state_passes_validator():
