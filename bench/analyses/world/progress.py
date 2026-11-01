@@ -2,9 +2,10 @@
 
 For each metric of :data:`bench.config.schema.WORLD_PROGRESS_METRICS`, read at
 each checkpoint turn of the ``turns`` table, the Player column is the
-strategist's own civ and the World column the other civs in the game (a sum,
-except techs, the average over surviving other civs, and civs alive, a count).
-Both columns match the baseline in the same seat on the same map:
+strategist's own civ and the World column the average over the N-1 other civs
+in the game (except techs, the average over surviving other civs; civs alive
+is then the share of other civs alive). Both columns match the baseline in the
+same seat on the same map:
 
 * a civ eliminated by the checkpoint counts as 0 there;
 * a game with no turn at the checkpoint (it ended earlier) is left out of it.
@@ -41,13 +42,13 @@ from bench.analyses.base import AnalysisContext, AnalysisResult
 from bench.analyses.behavior import common as C
 from bench.analyses.behavior.base import MetricViews
 from bench.analyses.world.base import (
-    PLAYER, WORLD, WorldAnalysis, merge_columns, metric_id, paired_columns,
+    PLAYER, WORLD, WorldAnalysis, merge_columns, metric_id, others_mean, paired_columns,
 )
 
 SLUG = "world_progress"
 OVERVIEW = "overview"
 ENDINGS = "endings"
-# World values averaged over the other civs alive instead of summed.
+# World values averaged over the other civs alive instead of all other civs.
 AVERAGED = {"technologies"}
 NO_WINNER = "no_winner"
 GAME_LENGTH = "game_length"
@@ -160,18 +161,17 @@ class WorldProgress(WorldAnalysis):
 
         shared = "It excludes this player's civ and includes every other civ, including other strategists."
         counting = (
-            "Techs are averaged over surviving other civs, and are blank when none survive. "
-            "Other World values are sums, with eliminated civs contributing 0. "
-            "Games that ended before turn N are left out."
+            "World values are averages over all other civs, with eliminated civs counting 0. "
+            "Techs are averaged over surviving other civs instead, and are blank when none "
+            "survive. Games that ended before turn N are left out."
         )
         stock_help = help_texts(
-            f"World: all other civs, compared with those around {player_base}. {shared}",
+            f"World: the average other civ, compared with those around {player_base}. {shared}",
             "Each cell: the average across players' games, as measured.",
-            "World: the other civs. " + shared,
-            {C.RELATIVE: ["Sizes, yields, and armies: % change. Civs alive: pts (Player) or "
-                          "civs (World).", counting],
-             C.ABSOLUTE: ["Civs alive: % of games the civ was still alive (Player) or civs "
-                          "(World).", counting]},
+            "World: the average other civ. " + shared,
+            {C.RELATIVE: ["Sizes, yields, and armies: % change. Civs alive: pts.", counting],
+             C.ABSOLUTE: ["Civs alive: % of games the civ was still alive (Player) or % of "
+                          "other civs still alive (World).", counting]},
         )
         ending_help = help_texts(
             f"World: the whole game, vs. {world_base}.",
@@ -221,7 +221,7 @@ class WorldProgress(WorldAnalysis):
             title=f"World growth at turn {last}",
             help_text="\n".join([
                 "Each cell: the strategist's average on this map (and seat), as measured.",
-                "Player: its own civ. World: the other civs, excluding this player's civ.",
+                "Player: its own civ. World: the average other civ, excluding this player's civ.",
                 f"Top row: the {pinned} on the same map (and seat).",
                 "Hover a cell to see its difference from the top row.",
             ]),
@@ -252,16 +252,17 @@ class WorldProgress(WorldAnalysis):
         values = at[keys].copy()
         for metric in stocks:
             values[metric] = at[metric].where(alive, 0.0).fillna(0.0)
-        values["civs_alive"] = alive.astype(float)
-        grouped = values.groupby("game_id")
-        other_alive = grouped["civs_alive"].transform("sum") - values["civs_alive"]
-        world = values[keys].copy()
-        for metric in metrics:
-            others = grouped[metric].transform("sum") - values[metric]
-            world[metric_id(WORLD, metric, f"@{t}")] = (
-                others / other_alive.where(other_alive > 0) if metric in AVERAGED else others
-            )
-        values["civs_alive"] *= 100.0
+        values["civs_alive"] = alive.astype(float) * 100.0
+        # Eliminated civs count as 0, so the mean is over all N-1 other civs.
+        world = others_mean(values, metrics)
+        averaged = [m for m in metrics if m in AVERAGED]
+        if averaged:
+            grouped = values.groupby("game_id")
+            other_alive = (grouped["civs_alive"].transform("sum") - values["civs_alive"]) / 100.0
+            for metric in averaged:
+                others = grouped[metric].transform("sum") - values[metric]
+                world[metric] = others / other_alive.where(other_alive > 0)
+        world = world.rename(columns={m: metric_id(WORLD, m, f"@{t}") for m in metrics})
         player = values[keys].copy()
         for metric in metrics:
             player[metric_id(PLAYER, metric, f"@{t}")] = values[metric]

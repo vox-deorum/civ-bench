@@ -161,41 +161,76 @@ PROGRESS = {"checkpoints": CHECKPOINTS}
 
 
 # ── wars and conquest ──────────────────────────────────────────────────────────
-def test_conflict_pairs_the_civ_with_its_seat_and_the_world_with_its_map(world_env):
+def test_conflict_pairs_the_civ_and_its_other_civs_with_their_seat(world_env):
     result = world_env("world.conflict")
     table = _table(result, "world_conflict_relative")
     # Seat 0 on seed 1: (5 - 1 on city-states) - mean(1, 3) = +2; on seed 2: 2 - 2 = 0.
     assert _cell(table, LLM, "p__wars_declared") == pytest.approx(1.0)
     assert _cell(table, LLM, "p__wars_declared", "cell_text") == "+1.0"
-    # Seed 1: 10 - mean(3, 5) = +6; seed 2: 6 - 6 = 0.
-    assert _cell(table, LLM, "w__wars_declared") == pytest.approx(3.0)
-    # At war on 3 of 5 turns against never; the world: 3 of 15 and 3 of 13 civ-turns.
+    # World: the other two civs' average. Seed 1: mean(1, 2) = 1.5 against seat
+    # 0's 1.0 in both baseline games; seed 2: 2 - 2 = 0.
+    assert _cell(table, LLM, "w__wars_declared") == pytest.approx(0.25)
+    # At war on 3 of 5 turns against never. The other civs never are, so the
+    # World column leaves out the strategist's own wars.
     assert _cell(table, LLM, "p__at_war_share") == pytest.approx(60.0)
     assert _cell(table, LLM, "p__at_war_share", "cell_text") == "+60 pts"
-    assert _cell(table, LLM, "w__at_war_share") == pytest.approx((20.0 + 300 / 13) / 2)
-    # Elimination of a Vanilla civ in T2 shows in the World column only.
+    assert _cell(table, LLM, "w__at_war_share") == pytest.approx(0.0)
+    # One of the two other civs in T2 is eliminated: 50% against 0% on seed 2.
     assert _cell(table, LLM, "p__eliminated") == pytest.approx(0.0)
-    assert _cell(table, LLM, "w__eliminated") == pytest.approx(0.5)
+    assert _cell(table, LLM, "w__eliminated") == pytest.approx(25.0)
+    assert _cell(table, LLM, "w__eliminated", "cell_text") == "+25 pts"
     # Vanilla rows leave (the pinned row stands for them); Null stays.
     assert set(table["player_type"]) == {"AI-only world", LLM, "Null"}
     pinned = table[table["row_kind"] == "baseline"]
-    assert _cell(pinned, "AI-only world", "w__wars_declared") == pytest.approx(14 / 3)
+    # The AI-only games' 3, 5, and 6 wars, over their 9 civs.
+    assert _cell(pinned, "AI-only world", "w__wars_declared") == pytest.approx(14 / 9)
     assert _cell(pinned, "AI-only world", "p__at_war_share", "cell_text") == "0%"
 
 
 def test_conflict_heatmap_pairs_player_and_world_columns(world_env):
-    result = world_env("world.conflict", {"metrics": ["wars_declared", "at_war_share"]})
+    result = world_env("world.conflict", {"metrics": ["wars_declared", "peak_wars"]})
     spec = result.metadata["heatmaps"]["world_conflict_relative"]
     assert spec["column_order"] == ["p__wars_declared", "w__wars_declared",
-                                    "p__at_war_share", "w__at_war_share"]
+                                    "p__peak_wars", "w__peak_wars"]
     assert spec["column_labels"]["w__wars_declared"] == "World"
     assert spec["text_column"] == "cell_text"
     assert spec["baseline_rows"] == ["AI-only world"]
-    assert spec["game_columns"] == ["w__wars_declared", "w__at_war_share"]
+    # Only peak wars describes the whole game; wars declared is per player.
+    assert spec["game_columns"] == ["w__peak_wars"]
     assert list(result.metadata["views"]) == ["relative", "absolute"]
     assert result.metadata["matched_maps"]["label"] == "World: conflict"
     assert {"world_conflict_by_seed", "world_conflict_by_seat"} <= set(result.table_paths)
-    assert "the whole world" in result.summary
+    assert "the world" in result.summary
+
+
+def test_others_mean_leaves_out_only_the_focal_civ():
+    from bench.analyses.world.base import others_mean
+
+    values = pd.DataFrame({"game_id": ["G", "G", "G", "H", "K", "K"],
+                           "player_id": [0, 1, 2, 0, 0, 1],
+                           "wars": [4.0, 0.0, 2.0, 7.0, 3.0, float("nan")]})
+    out = others_mean(values, ["wars"]).set_index(["game_id", "player_id"])["wars"]
+    # A civ with no events still counts; a blank civ does not.
+    assert out[("G", 0)] == 1.0 and out[("G", 1)] == 3.0 and out[("G", 2)] == 2.0
+    assert out[("K", 1)] == 3.0
+    # No other civ (H) or only blank ones (K, seat 0): blank.
+    assert pd.isna(out[("H", 0)]) and pd.isna(out[("K", 0)])
+
+
+def test_conflict_keeps_each_players_other_civs_in_a_shared_game(world_env):
+    cfg = world_env.make("world.conflict", {"metrics": ["wars_declared"]})
+    path = cfg.data["tables"]["panel"]
+    panel = pd.read_csv(path)
+    panel.loc[panel["game_id"].eq("T1") & panel["player_id"].eq(1), "player_type"] = LLM
+    panel.to_csv(path, index=False)
+
+    result = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
+    table = _table(result, "world_conflict_relative")
+    # T1's seat 0 sees mean(1, 2) = 1.5 wars per other civ and seat 1 sees
+    # mean(4, 2) = 3; T2's seat 0 sees 2. Their seat-matched baselines are 1,
+    # 2 (mean of B1a's 1.5 and B1b's 2.5), and 2.
+    assert _cell(table, LLM, "w__wars_declared") == pytest.approx((0.5 + 1.0 + 0.0) / 3)
+    assert _cell(table, LLM, "w__wars_declared", "n_players") == 3
 
 
 def test_conflict_needs_a_world_table(world_env):
@@ -221,17 +256,18 @@ def test_progress_reads_percent_changes_at_each_checkpoint(world_env):
     assert _cell(t2, LLM, "p__population@2", "cell_text") == "+40%"
     assert _cell(t2, LLM, "p__population@2", "value_mean") == pytest.approx(17.5)
     assert _cell(t2, LLM, "p__population@2", "baseline_mean") == pytest.approx(12.5)
-    # Other civs: 30 vs mean(20, 40) = 30, then 20 vs 20.
+    # The average other civ: 15 vs mean(10, 20) = 15, then 10 vs 10.
     assert _cell(t2, LLM, "w__population@2") == pytest.approx(0.0)
-    assert _cell(t2, LLM, "w__population@2", "value_mean") == pytest.approx(25.0)
-    assert _cell(t2, LLM, "w__population@2", "baseline_mean") == pytest.approx(25.0)
+    assert _cell(t2, LLM, "w__population@2", "value_mean") == pytest.approx(12.5)
+    assert _cell(t2, LLM, "w__population@2", "baseline_mean") == pytest.approx(12.5)
     assert _cell(t2, "Null", "p__population@2") == pytest.approx(-100.0)
     t4 = _table(result, "world_progress_t4_relative")
     # B1b ended at turn 3, so seed 1 compares with B1a alone; the civ eliminated
     # in T2 counts as 0 there.
     assert _cell(t4, LLM, "p__population@4") == pytest.approx(75.0)
     assert _cell(t4, LLM, "w__population@4") == pytest.approx(0.0)
-    assert _cell(t4, LLM, "w__civs_alive@4") == pytest.approx(-0.5)
+    # Other civs alive: 100% vs 100% on seed 1, 50% vs 100% on seed 2.
+    assert _cell(t4, LLM, "w__civs_alive@4") == pytest.approx(-25.0)
     # Both games' other surviving civs know 10 techs; the LLM's 20 is excluded.
     assert _cell(t4, LLM, "w__technologies@4") == pytest.approx(0.0)
 
@@ -248,9 +284,11 @@ def test_progress_excludes_only_the_focal_civ_and_handles_no_other_survivors():
     metrics = ["population", "technologies", "civs_alive"]
     player, world = WorldProgress._checkpoint_values(turns, metrics, 2)
     world = world.set_index("player_id")
-    assert world["w__population@2"].to_dict() == {0: 15, 1: 30, 2: 45}
+    # Averages over both other civs, the eliminated one counting 0; techs over
+    # surviving other civs only.
+    assert world["w__population@2"].to_dict() == {0: 7.5, 1: 15, 2: 22.5}
     assert world["w__technologies@2"].to_dict() == {0: 10, 1: 12, 2: 11}
-    assert world["w__civs_alive@2"].to_dict() == {0: 1, 1: 1, 2: 2}
+    assert world["w__civs_alive@2"].to_dict() == {0: 50, 1: 50, 2: 100}
     assert player.set_index("player_id")["p__population@2"].to_dict() == {0: 30, 1: 15, 2: 0}
 
     _, world = WorldProgress._checkpoint_values(turns, metrics, 3)
@@ -271,7 +309,7 @@ def test_progress_baseline_excludes_the_matching_seat(world_env):
 
     result = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
     table = _table(result, "world_progress_t2_relative")
-    assert _cell(table, LLM, "w__population@2", "baseline_mean") == pytest.approx(25.0)
+    assert _cell(table, LLM, "w__population@2", "baseline_mean") == pytest.approx(12.5)
     assert _cell(table, LLM, "w__population@2") == pytest.approx(0.0)
 
 
@@ -284,8 +322,8 @@ def test_progress_keeps_each_players_other_civs_in_a_shared_game(world_env):
 
     result = run_analysis(cfg, cfg.analyses[0].raw, catalog=Catalog.from_run_config(cfg))
     table = _table(result, "world_progress_t2_relative")
-    # T1's two focal players see 30 and 45 population elsewhere; T2's sees 20.
-    # Their seat-matched baselines are 30, 30, and 20.
+    # T1's two focal players see 15 and 22.5 population per other civ; T2's
+    # sees 10. Their seat-matched baselines are 15, 15, and 10.
     assert _cell(table, LLM, "w__population@2") == pytest.approx(18.75)
     assert _cell(table, LLM, "w__population@2", "n_players") == 3
     assert _cell(table, LLM, "w__population@2", "n_games") == 2
@@ -419,7 +457,7 @@ def test_world_page_renders_both_sections_with_their_tabs(world_env):
     assert 'id="section-wld-progress-relative-view-turn-2"' in page
     assert 'id="section-wld-progress-absolute-view-turn-2"' in page
     assert ">AI-only world<" in page
-    assert "Population summed over the other civs." in unescape(page)
+    assert "Population, averaged over the other civs." in unescape(page)
     # The No winner group is headed "None", which must not read back as missing.
     assert ">None<" in page and ">nan<" not in page
     # The Matched Maps tables are not drawn inline on the World page.

@@ -11,11 +11,12 @@ Every row of the analysis frame is one player in one game, with Player values
 in ``p__<metric>`` columns and World values in ``w__<metric>``. World values
 come in two kinds:
 
-* **Per player**, such as World growth checkpoints, which describe the other
-  civs around each player. Like Player values, they are keyed by player and
-  match the baseline pool's ``(seed, player_id)`` cell mean, seat by seat.
-* **Per game**, such as conflict counts and endings, which describe the whole
-  game. They are keyed by game, copied onto every player of that game, and
+* **Per player**, such as World growth checkpoints and conflict counts, which
+  describe the other civs around each player (:func:`others_mean`). Like
+  Player values, they are keyed by player and match the baseline pool's
+  ``(seed, player_id)`` cell mean, seat by seat.
+* **Per game**, such as peak wars, game length, and endings, which describe the
+  whole game. They are keyed by game, copied onto every player of that game, and
   match the mean over the pool's distinct games on the same seed, map by map.
   The completed-experiment pool holds only strategist seats, so a seat-level
   match would compare them with whichever games put a strategist in that seat.
@@ -57,6 +58,23 @@ ABSOLUTE_LEGEND = [[0.0, "2 SD below the average row"], [0.25, "1 SD below"], [0
 
 def metric_id(scope: str, metric: str, suffix: str = "") -> str:
     return f"{scope}{metric}{suffix}"
+
+
+def others_mean(values: pd.DataFrame, columns) -> pd.DataFrame:
+    """Per player: each column's mean over the other civs of its game.
+
+    ``values`` has one row per civ, keyed by ``game_id`` and ``player_id``. A
+    blank value leaves that civ out of the mean; a player whose other civs are
+    all blank gets a blank.
+    """
+    grouped = values.groupby("game_id")
+    out = values[["game_id", "player_id"]].copy()
+    for column in columns:
+        own = values[column]
+        total = grouped[column].transform("sum") - own.fillna(0)
+        count = grouped[column].transform("count") - own.notna()
+        out[column] = total / count.where(count > 0)
+    return out
 
 
 @dataclass

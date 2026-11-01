@@ -621,7 +621,7 @@ def _validate_world_tables(analyses: list[Stage], data: dict) -> None:
         missing = [m for m in needed if m not in kinds]
         if missing:
             raise ConfigError(
-                f"{where}: the Player columns need behavior events {missing}; select them in "
+                f"{where}: the selected metrics need behavior events {missing}; select them in "
                 "data.extract.behavior.events."
             )
 

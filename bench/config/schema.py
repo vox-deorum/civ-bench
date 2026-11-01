@@ -422,91 +422,97 @@ AGENTIC_PREFIX = "agentic."
 
 # ── world.* (§6.2) ────────────────────────────────────────────────────────────
 # Every world metric has a Player column (the strategist's own civ, matched to
-# the baseline in the same seat on the same map) and a World column (the whole
-# game, matched to the baseline's games on the same map). Each entry is
+# the baseline in the same seat on the same map) and a World column: the
+# average over the other civs of the game, matched seat by seat like Player, or
+# for peak wars, game length, and endings the whole game, matched to the
+# baseline's games on the same map. Each entry is
 # (name, short header, player tip, world tip, player unit, world unit), where a
 # unit is how the relative view compares: "diff" (a difference), "pts" (a
 # difference of percents, in percentage points), or "pct" (a percent change).
 WORLD_CONFLICT_METRICS = {
     "wars_declared": ("Wars declared", "Wars on civs",
                       "Wars the civ declared on other civs.",
-                      "Wars declared between civs.", "diff", "diff"),
+                      "Wars declared on civs, averaged over the other civs.", "diff", "diff"),
     "wars_on_city_states": ("Wars on city-states", "Wars on city-states",
                             "Wars the civ declared on city-states.",
-                            "Wars declared on city-states by any civ.", "diff", "diff"),
+                            "Wars declared on city-states, averaged over the other civs.",
+                            "diff", "diff"),
     "peak_wars": ("Peak wars", "Peak wars",
                   "The most wars the civ was in at once, city-states included.",
                   "The most wars between civs open at once.", "diff", "diff"),
     "at_war_share": ("At war", "At war",
                      "Share of the civ's turns alive spent at war with anyone.",
-                     "Share of all civ-turns alive spent at war with anyone.", "pts", "pts"),
+                     "Share of turns alive spent at war with anyone, averaged over the other civs.",
+                     "pts", "pts"),
     "units_lost": ("Units lost", "Units lost",
                    "The civ's units killed in combat.",
-                   "Civ units killed in combat, on every side.", "diff", "diff"),
+                   "Units lost in combat, averaged over the other civs.", "diff", "diff"),
     "units_killed": ("Units killed", "Units killed",
                      "Units the civ killed in combat, city-state and barbarian units included.",
-                     "Units killed in combat by any civ.", "diff", "diff"),
+                     "Units killed in combat, averaged over the other civs.", "diff", "diff"),
     "cities_captured": ("Cities captured", "Cities taken",
                         "Civ cities the civ conquered.",
-                        "Civ cities conquered by any civ.", "diff", "diff"),
+                        "Civ cities conquered, averaged over the other civs.", "diff", "diff"),
     "capitals_captured": ("Capitals captured", "Capitals taken",
                           "Capitals the civ conquered (the capital at the time of capture).",
-                          "Capitals conquered by any civ.", "diff", "diff"),
+                          "Capitals conquered, averaged over the other civs.", "diff", "diff"),
     "city_state_cities_captured": ("City-state cities captured", "City-states taken",
                                    "City-state cities the civ conquered.",
-                                   "City-state cities conquered by any civ.", "diff", "diff"),
+                                   "City-state cities conquered, averaged over the other civs.",
+                                   "diff", "diff"),
     "eliminated": ("Eliminated", "Eliminated",
                    "Share of the civ's games in which it was eliminated.",
-                   "Civs eliminated per game.", "pts", "diff"),
+                   "Share of the other civs eliminated.", "pts", "pts"),
     "cities_razed": ("Cities razed", "Razed",
                      "Cities the civ razed.",
-                     "Cities razed by any civ.", "diff", "diff"),
+                     "Cities razed, averaged over the other civs.", "diff", "diff"),
     "nukes_built": ("Nukes built", "Nukes built",
                     "Nuclear weapons the civ built.",
-                    "Nuclear weapons built by any civ.", "diff", "diff"),
+                    "Nuclear weapons built, averaged over the other civs.", "diff", "diff"),
     "nukes_detonated": ("Nukes used", "Nukes used",
                         "Nuclear weapons the civ detonated.",
-                        "Nuclear weapons detonated by any civ.", "diff", "diff"),
+                        "Nuclear weapons detonated, averaged over the other civs.",
+                        "diff", "diff"),
     "turns": ("Turns", "Turns alive / length",
               "Turns the civ survived (its last turn with a positive score).",
               "Game length in turns.", "diff", "diff"),
 }
-# Behavior event columns behind the Player side of world.conflict.
+# Behavior event columns behind world.conflict's event metrics (Player and World).
 WORLD_CONFLICT_EVENTS = (
     "wars_declared", "wars_on_city_states", "units_lost", "units_killed", "cities_captured",
     "capitals_captured", "city_state_cities_captured", "cities_razed", "nukes_built",
     "nukes_detonated",
 )
 # Read at each checkpoint turn from the turns table. A player's World values
-# leave out its own civ: sums over the other civs, except techs (the average
-# over surviving other civs) and civs alive (a count).
+# leave out its own civ: averages over all other civs (eliminated civs count
+# 0), except techs (the average over surviving other civs).
 WORLD_PROGRESS_METRICS = {
     "population": ("Population", "Pop", "The civ's population.",
-                   "Population summed over the other civs.", "pct", "pct"),
+                   "Population, averaged over the other civs.", "pct", "pct"),
     "cities": ("Cities", "Cities", "Cities the civ owns.",
-               "Cities summed over the other civs.", "pct", "pct"),
+               "Cities, averaged over the other civs.", "pct", "pct"),
     "territory": ("Territory", "Land", "Plots the civ owns.",
-                  "Plots owned, summed over the other civs.", "pct", "pct"),
+                  "Plots owned, averaged over the other civs.", "pct", "pct"),
     "technologies": ("Technologies", "Techs", "Technologies the civ knows.",
                      "Technologies known, averaged over surviving other civs.", "pct", "pct"),
     "science_per_turn": ("Science per turn", "Science", "The civ's science per turn.",
-                         "Science per turn summed over the other civs.", "pct", "pct"),
+                         "Science per turn, averaged over the other civs.", "pct", "pct"),
     "production_per_turn": ("Production per turn", "Prod", "The civ's production per turn.",
-                            "Production per turn summed over the other civs.", "pct", "pct"),
+                            "Production per turn, averaged over the other civs.", "pct", "pct"),
     "food_per_turn": ("Food per turn", "Food", "The civ's food per turn.",
-                      "Food per turn summed over the other civs.", "pct", "pct"),
+                      "Food per turn, averaged over the other civs.", "pct", "pct"),
     "culture_per_turn": ("Culture per turn", "Culture", "The civ's culture per turn.",
-                         "Culture per turn summed over the other civs.", "pct", "pct"),
+                         "Culture per turn, averaged over the other civs.", "pct", "pct"),
     "gold_per_turn": ("Gold per turn", "Gold", "The civ's gold per turn.",
-                      "Gold per turn summed over the other civs.", "pct", "pct"),
+                      "Gold per turn, averaged over the other civs.", "pct", "pct"),
     "faith_per_turn": ("Faith per turn", "Faith", "The civ's faith per turn.",
-                       "Faith per turn summed over the other civs.", "pct", "pct"),
+                       "Faith per turn, averaged over the other civs.", "pct", "pct"),
     "tourism_per_turn": ("Tourism per turn", "Tourism", "The civ's tourism per turn.",
-                         "Tourism per turn summed over the other civs.", "pct", "pct"),
+                         "Tourism per turn, averaged over the other civs.", "pct", "pct"),
     "military_units": ("Military units", "Units", "The civ's military units.",
-                       "Military units summed over the other civs.", "pct", "pct"),
+                       "Military units, averaged over the other civs.", "pct", "pct"),
     "civs_alive": ("Civs alive", "Alive", "Share of the civ's games in which it is still alive.",
-                   "Other civs still alive.", "pts", "diff"),
+                   "Share of the other civs still alive.", "pts", "pts"),
 }
 # Victory type (as the panel records it) → (name, short header), in column order.
 # Types not listed still show, after these.
