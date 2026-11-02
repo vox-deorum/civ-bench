@@ -2,20 +2,17 @@
 
 For each metric of :data:`bench.config.schema.WORLD_CONFLICT_METRICS`, the
 Player column counts what the strategist's own civ did and the World column
-what the other civs did (counts are per game, not per turn):
-
-* event counts come from the behavior table, and the share of turns at war and
-  elimination from the turns table. The World value is the average over the
-  N-1 other civs of the game (:func:`bench.analyses.world.base.others_mean`),
-  so it leaves out the strategist's own civ (other civs still respond to it);
-* peak wars and game length describe the whole game: Player values from the
-  turns table, World values from the world table.
+what the average other civ did (counts are per game, not per turn). Event
+counts come from the behavior table, and the rest from the turns table. The
+World value is the average over the N-1 other civs of the game
+(:func:`bench.analyses.world.base.others_mean`), so it leaves out the
+strategist's own civ (other civs still respond to it).
 
 Views:
 
-* **relative** (default): Player cells minus the baseline in the same seat on
-  the same map, World cells minus the baseline's games on the same map, with
-  the baseline itself pinned as the top row in absolute values;
+* **relative** (default): Player and World cells minus the baseline's in the
+  same seat on the same map, with the baseline itself pinned as the top row in
+  absolute values;
 * **absolute**: the values as measured.
 
 In controlled runs the module also writes ``world_conflict_by_seed`` and
@@ -36,12 +33,6 @@ from .base import PLAYER, WORLD, WorldAnalysis, metric_id, others_mean, paired_c
 SLUG = "world_conflict"
 # Metrics read per civ from the turns table.
 TURN_METRICS = ("peak_wars", "at_war_share", "eliminated", "turns")
-# World columns read as they are from the world table, by metric. Every other
-# metric's World value is the average over the other civs.
-WORLD_TABLE_COLUMNS = {
-    "peak_wars": "peak_wars",
-    "turns": "final_turn",
-}
 
 
 class WorldConflict(WorldAnalysis):
@@ -68,9 +59,9 @@ class WorldConflict(WorldAnalysis):
         if any(m in TURN_METRICS for m in metrics):
             turns = self.turns(ctx, ["active_wars"])
         player_values = self._player_values(ctx, metrics, turns)
-        world_values = self._world_values(ctx, metrics)
         columns = paired_columns(S.WORLD_CONFLICT_METRICS, metrics)
-        rows, pool, baseline, per_game = self.frame(ctx, players, player_values, world_values,
+        rows, pool, baseline, per_game = self.frame(ctx, players, player_values,
+                                                    pd.DataFrame(columns=["game_id"]),
                                                     list(columns.names))
         if rows.empty:
             return AnalysisResult(summary="No players remain after filtering.")
@@ -79,7 +70,7 @@ class WorldConflict(WorldAnalysis):
         views = C.build_views(rows, pool, list(columns.names), cells, baseline,
                               percent=columns.percent, keep_baseline=True, per_game=per_game)
         out = MetricViews()
-        player_base, world_base = self.baseline_words(views)
+        player_base = self.baseline_words(views)[0]
         pinned = self.pinned_label(views)
         versus = self.versus_words(views)
         self.add_paired_views(
@@ -93,7 +84,6 @@ class WorldConflict(WorldAnalysis):
                     f"World: the average other civ, compared with those around {player_base}. "
                     "It excludes this player's civ and includes every other civ, including "
                     "other strategists.",
-                    f"Peak wars and game length cover the whole game, vs. {world_base}.",
                     f"Top row: the {pinned}'s actual values, for scale.",
                     "Blue is higher, red is lower; full color at 2 baseline SDs.",
                     "Counts are per game; shares are in percentage points.",
@@ -102,7 +92,6 @@ class WorldConflict(WorldAnalysis):
                     "Each cell: the average per game, with nothing subtracted.",
                     "Player: the strategist's own civ. World: the average other civ, excluding "
                     "this player's civ.",
-                    "Peak wars and game length cover the whole game.",
                     "Color: distance from the average row; full color at 2 SDs.",
                     "Counts are per game; shares are in %.",
                 ]),
@@ -121,8 +110,7 @@ class WorldConflict(WorldAnalysis):
             title="Wars and conquest per game",
             help_text="\n".join([
                 "Each cell: the strategist's average on this map (and seat), as measured.",
-                "Player: its own civ. World: the average other civ, excluding this player's "
-                "civ; peak wars and game length cover the whole game.",
+                "Player: its own civ. World: the average other civ, excluding this player's civ.",
                 f"Top row: the {pinned} on the same map (and seat).",
                 "Hover a cell to see its difference from the top row.",
             ]),
@@ -132,7 +120,7 @@ class WorldConflict(WorldAnalysis):
         return AnalysisResult(
             tables=out.tables,
             summary=self.world_headline(ctx, out, views, [SLUG], columns,
-                                        world_phrase="the world"),
+                                        world_phrase="the other civs"),
             metadata=metadata,
         )
 
@@ -157,11 +145,10 @@ class WorldConflict(WorldAnalysis):
                 # The behavior counter includes wars on city-states; this
                 # metric counts wars on civs only.
                 per_civ["wars_declared"] = behavior["wars_declared"] - behavior["wars_on_city_states"]
-            frames.append(_paired(per_civ, events, events))
+            frames.append(_paired(per_civ, events))
         if any(m in TURN_METRICS for m in metrics):
             chosen = [m for m in metrics if m in TURN_METRICS]
-            frames.append(_paired(self._turn_values(turns, chosen), chosen,
-                                  [m for m in chosen if m not in WORLD_TABLE_COLUMNS]))
+            frames.append(_paired(self._turn_values(turns, chosen), chosen))
         if not frames:
             return pd.DataFrame(columns=keys)
         out = frames[0]
@@ -190,34 +177,13 @@ class WorldConflict(WorldAnalysis):
         values["turns"] = values["last_alive"]
         return values[["game_id", "player_id", *metrics]]
 
-    def _world_values(self, ctx: AnalysisContext, metrics: list[str]) -> pd.DataFrame:
-        wanted = [m for m in metrics if m in WORLD_TABLE_COLUMNS]
-        if not wanted:
-            return pd.DataFrame(columns=["game_id"])
-        world = self.table(ctx, "world", {"game_id", *(WORLD_TABLE_COLUMNS[m] for m in wanted)})
-        missing = sorted({WORLD_TABLE_COLUMNS[m] for m in wanted} - set(world.columns))
-        if missing:
-            raise AnalysisError(
-                f"{self.module} '{self.stage_id}': world table lacks column(s) {missing}; "
-                "re-run extract to rebuild it."
-            )
-        world = world.copy()
-        world["game_id"] = world["game_id"].astype(str)
-        world = world.drop_duplicates("game_id")
-        values = world[["game_id"]].copy()
-        for metric in wanted:
-            values[metric_id(WORLD, metric)] = pd.to_numeric(world[WORLD_TABLE_COLUMNS[metric]],
-                                                              errors="coerce")
-        return values
 
-
-def _paired(per_civ: pd.DataFrame, metrics: list[str], others: list[str]) -> pd.DataFrame:
-    """Player columns for ``metrics`` and World columns (the other civs' mean) for ``others``."""
+def _paired(per_civ: pd.DataFrame, metrics: list[str]) -> pd.DataFrame:
+    """Player columns (each civ) and World columns (the other civs' mean) for ``metrics``."""
     keys = ["game_id", "player_id"]
     out = per_civ[keys].copy()
+    world = others_mean(per_civ, metrics)
     for metric in metrics:
         out[metric_id(PLAYER, metric)] = per_civ[metric]
-    world = others_mean(per_civ, others)
-    for metric in others:
         out[metric_id(WORLD, metric)] = world[metric]
     return out

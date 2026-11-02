@@ -79,8 +79,8 @@ _FAMILY_PURPOSES = {
         "hidden."
     ),
     "world": (
-        "Compare each strategist's growth with the other civs, and describe "
-        "conflict and endings across the whole game, against matched baseline games."
+        "Compare each strategist's growth and conflict with the other civs, and "
+        "describe how games ended, against matched baseline games."
     ),
     "exploratory": (
         "Explore game patterns and strategy profiles across the dataset."

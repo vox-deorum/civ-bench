@@ -38,10 +38,9 @@ GAMES = [
     ("N1", NULL_EXP, 1, 0),
 ]
 FINAL = {gid: 3 if gid == "B1b" else 4 for gid, *_ in GAMES}
-# Wars declared per seat (behavior table) and per game (world table).
+# Wars declared per seat (behavior table).
 WARS = {"B1a": [1, 0, 2], "B1b": [3, 0, 2], "B2a": [2, 2, 2], "T1": [5, 1, 2],
         "T2": [2, 2, 2], "TU": [9, 9, 9], "N1": [0, 1, 1]}
-WORLD_WARS = {"B1a": 3, "B1b": 5, "B2a": 6, "T1": 10, "T2": 6, "TU": 20, "N1": 2}
 POPULATION = {"B1a": [10, 10, 10], "B1b": [20, 20, 20], "B2a": [10, 10, 10],
               "T1": [30, 15, 15], "T2": [5, 10, 10], "TU": [50, 50, 50], "N1": [0, 15, 15]}
 # (victory type, winner seat)
@@ -69,15 +68,9 @@ def _eliminated(gid, pid, turn):
 
 
 def _tables():
-    panel, behavior, turns, world = [], [], [], []
+    panel, behavior, turns = [], [], []
     for gid, exp, _seed, _rot in GAMES:
         victory, winner = VICTORY[gid]
-        world.append({
-            "experiment": exp, "game_id": gid, "final_turn": FINAL[gid], "n_civs": 3,
-            **{m: 0 for m in S.WORLD_CONFLICT_EVENTS},
-            "wars_declared": WORLD_WARS[gid], "peak_wars": 1,
-            "civs_eliminated": 1 if gid == "T2" else 0,
-        })
         for pid in range(3):
             keys = _keys(gid, exp, pid)
             panel.append({**keys, "civilization": f"Civ{pid}", "survival_turn": FINAL[gid],
@@ -100,7 +93,6 @@ def _tables():
         "panel": pd.DataFrame(panel),
         "behavior": pd.DataFrame(behavior),
         "turns": pd.DataFrame(turns),
-        "world": pd.DataFrame(world),
     }
 
 
@@ -119,9 +111,6 @@ def world_env(tmp_path, dev_spec, write_spec):
         spec["data"]["extract"]["issues_path"] = str(tmp_path / "import_issues.csv")
         if events is not None:
             spec["data"]["extract"]["behavior"] = {"events": events}
-        outputs = spec["data"]["extract"].get("outputs")
-        if outputs is not None and "world" not in outputs:
-            outputs.append("world")
         spec["data"]["tables"] = {k: v for k, v in paths.items()
                                   if (games or k != "games") and (tables is None or k in tables)}
         spec.pop("estimators", None)
@@ -179,12 +168,22 @@ def test_conflict_pairs_the_civ_and_its_other_civs_with_their_seat(world_env):
     assert _cell(table, LLM, "p__eliminated") == pytest.approx(0.0)
     assert _cell(table, LLM, "w__eliminated") == pytest.approx(25.0)
     assert _cell(table, LLM, "w__eliminated", "cell_text") == "+25 pts"
+    # Turns the other civs survived. Seed 1: 4 against mean(4, 3) = 3.5 around
+    # seat 0 (B1b ends at turn 3); seed 2: mean(2, 4) = 3 against 4.
+    assert _cell(table, LLM, "w__turns") == pytest.approx(-0.25)
     # Vanilla rows leave (the pinned row stands for them); Null stays.
     assert set(table["player_type"]) == {"AI-only world", LLM, "Null"}
     pinned = table[table["row_kind"] == "baseline"]
     # The AI-only games' 3, 5, and 6 wars, over their 9 civs.
-    assert _cell(pinned, "AI-only world", "w__wars_declared") == pytest.approx(14 / 9)
+    assert _cell(pinned, "AI-only world", "p__wars_declared") == pytest.approx(14 / 9)
     assert _cell(pinned, "AI-only world", "p__at_war_share", "cell_text") == "0%"
+    # Over all seats of the AI-only world, the average other civ is the
+    # average civ, so the pinned row leaves World blank instead of repeating it.
+    assert not pinned["metric"].str.startswith("w__").any()
+    absolute = _table(result, "world_conflict_absolute")
+    pinned = absolute[absolute["row_kind"] == "baseline"]
+    assert _cell(pinned, "AI-only world", "p__wars_declared") == pytest.approx(14 / 9)
+    assert not pinned["metric"].str.startswith("w__").any()
 
 
 def test_conflict_heatmap_pairs_player_and_world_columns(world_env):
@@ -195,12 +194,12 @@ def test_conflict_heatmap_pairs_player_and_world_columns(world_env):
     assert spec["column_labels"]["w__wars_declared"] == "World"
     assert spec["text_column"] == "cell_text"
     assert spec["baseline_rows"] == ["AI-only world"]
-    # Only peak wars describes the whole game; wars declared is per player.
-    assert spec["game_columns"] == ["w__peak_wars"]
+    # Every World column is per player.
+    assert "game_columns" not in spec
     assert list(result.metadata["views"]) == ["relative", "absolute"]
     assert result.metadata["matched_maps"]["label"] == "World: conflict"
     assert {"world_conflict_by_seed", "world_conflict_by_seat"} <= set(result.table_paths)
-    assert "the world" in result.summary
+    assert "the other civs" in result.summary
 
 
 def test_others_mean_leaves_out_only_the_focal_civ():
@@ -233,9 +232,10 @@ def test_conflict_keeps_each_players_other_civs_in_a_shared_game(world_env):
     assert _cell(table, LLM, "w__wars_declared", "n_players") == 3
 
 
-def test_conflict_needs_a_world_table(world_env):
-    with pytest.raises(ConfigError, match="data.extract.outputs"):
-        world_env("world.conflict", tables={"games", "panel", "behavior", "turns"})
+@pytest.mark.parametrize("module, params", [("world.conflict", {}), ("world.progress", PROGRESS)])
+def test_world_modules_need_no_world_table(world_env, module, params):
+    result = world_env(module, params, tables={"games", "panel", "behavior", "turns"})
+    assert result.table_paths
 
 
 def test_uncontrolled_conflict_shows_only_absolute_values(world_env):
@@ -270,6 +270,8 @@ def test_progress_reads_percent_changes_at_each_checkpoint(world_env):
     assert _cell(t4, LLM, "w__civs_alive@4") == pytest.approx(-25.0)
     # Both games' other surviving civs know 10 techs; the LLM's 20 is excluded.
     assert _cell(t4, LLM, "w__technologies@4") == pytest.approx(0.0)
+    pinned = t4[t4["row_kind"] == "baseline"]
+    assert not pinned["metric"].str.startswith("w__").any()
 
 
 def test_progress_excludes_only_the_focal_civ_and_handles_no_other_survivors():
@@ -336,6 +338,9 @@ def test_progress_endings_compare_win_shares_in_points(world_env):
     assert _cell(table, LLM, "w__win_domination") == pytest.approx(25.0)
     assert _cell(table, LLM, "w__no_winner", "cell_text") == "-50 pts"
     assert not (table["metric"] == "p__no_winner").any()
+    # Endings describe whole games, so the pinned row keeps its World cells.
+    pinned = table[table["row_kind"] == "baseline"]
+    assert (pinned["metric"] == "w__win_domination").any()
     spec = result.metadata["heatmaps"]["world_endings_relative"]
     assert spec["column_order"][:2] == ["p__win_domination", "w__win_domination"]
 
@@ -415,12 +420,6 @@ def test_world_tables_are_byte_stable(world_env, tmp_path):
 def test_config_rejects_bad_world_params(world_env, module, params, kwargs, match):
     with pytest.raises(ConfigError, match=match):
         world_env.make(module, params, **kwargs)
-
-
-def test_progress_needs_no_world_table(world_env):
-    cfg = world_env.make("world.progress", PROGRESS,
-                         tables={"games", "panel", "behavior", "turns"})
-    assert cfg.analyses[0].raw["module"] == "world.progress"
 
 
 def test_conflict_reads_only_the_event_columns_its_metrics_need(world_env):

@@ -131,6 +131,7 @@ class BehaviorAnalysis(Analysis):
         emit: set | None = None,
         cell_text: bool = False,
         pinned_label: str = "",
+        pinned_blank=frozenset(),
     ) -> None:
         """Write ``<slug>_relative`` / ``<slug>_absolute`` and their heatmap specs.
 
@@ -160,7 +161,8 @@ class BehaviorAnalysis(Analysis):
         ``emit`` limits which of the two views this call writes (default both).
         ``cell_text`` writes each cell's text with its unit to a ``cell_text``
         column ("+6%", "+3 pts"; the pinned row in absolute units).
-        ``pinned_label`` names the pinned row instead of the baseline's label.
+        ``pinned_label`` names the pinned row instead of the baseline's label,
+        and the pinned row leaves the metrics in ``pinned_blank`` blank.
         """
         metrics = list(names)
         per_view = [(C.ABSOLUTE, views.absolute, metrics)]
@@ -200,8 +202,9 @@ class BehaviorAnalysis(Analysis):
             table, order = C.heatmap_rows(ctx, summary, self.by)
             table.insert(0, "row_kind", "group")
             if pinned:
-                table = _with_baseline_row(table, views, view_metrics, pinned, self.by, groups, fixed,
-                                           view_companions)
+                table = _with_baseline_row(table, views,
+                                           [m for m in view_metrics if m not in pinned_blank],
+                                           pinned, self.by, groups, fixed, view_companions)
                 order = [pinned] + order
             leading = ["row_kind", self.by, "strategist", "condition", "row_label"]
             table = table[leading + [c for c in table.columns if c not in leading]]

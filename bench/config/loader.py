@@ -596,24 +596,14 @@ def _validate_world_param_types(module: str, params: dict, where: str) -> None:
             )
 
 
-def _validate_world_tables(analyses: list[Stage], data: dict) -> None:
-    """``world.conflict`` needs the world table and the behavior event columns it reads."""
+def _validate_world_events(analyses: list[Stage], data: dict) -> None:
+    """``world.conflict`` needs the behavior event columns it reads."""
     stages = [s for s in analyses if s.enabled and s.raw.get("module") == "world.conflict"]
     if not stages:
         return
-    extract = data.get("extract") or {}
-    tables = data.get("tables") or {}
-    # Outputs matter only when this run extracts.
-    outputs = extract.get("outputs") if extract.get("enabled", True) else None
-    kinds = behavior_columns(extract.get("behavior"))
+    kinds = behavior_columns((data.get("extract") or {}).get("behavior"))
     for stage in stages:
         where = f"analyses (id={stage.id!r})"
-        if "world" not in tables or (outputs is not None and "world" not in outputs):
-            raise ConfigError(
-                f"{where}: world.conflict reads the world table; add \"world\" to "
-                "data.extract.outputs and set data.tables.world (for example "
-                "\"runs/world_data.csv\")."
-            )
         metrics = (stage.raw.get("params") or {}).get("metrics") or list(S.WORLD_CONFLICT_METRICS)
         needed = [m for m in S.WORLD_CONFLICT_EVENTS if m in metrics]
         if "wars_declared" in needed and "wars_on_city_states" not in needed:
@@ -1097,7 +1087,7 @@ def load_config(path: str | Path) -> RunConfig:
         for i, a in enumerate(analyses_raw)
     ]
     _validate_behavior_columns(cfg.analyses, cfg.data)
-    _validate_world_tables(cfg.analyses, cfg.data)
+    _validate_world_events(cfg.analyses, cfg.data)
     _validate_agentic_tables(cfg.analyses, cfg.data)
     _validate_intro_charts(cfg.report, cfg.analyses)
 

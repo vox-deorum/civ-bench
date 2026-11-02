@@ -4,7 +4,7 @@
 
 - **File:** `runs/world_data.csv` (set by `data.tables.world`)
 - **Built from:** the game database of each game
-- **Read by:** the `world.*` analyses (world report pages)
+- **Read by:** no analysis at present; the `world.*` analyses read the `behavior`, `turns`, and `panel` tables instead
 
 ## The ideas behind it
 

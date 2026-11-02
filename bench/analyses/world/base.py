@@ -15,9 +15,9 @@ come in two kinds:
   describe the other civs around each player (:func:`others_mean`). Like
   Player values, they are keyed by player and match the baseline pool's
   ``(seed, player_id)`` cell mean, seat by seat.
-* **Per game**, such as peak wars, game length, and endings, which describe the
-  whole game. They are keyed by game, copied onto every player of that game, and
-  match the mean over the pool's distinct games on the same seed, map by map.
+* **Per game**, such as World growth endings and game length, which describe
+  the whole game. They are keyed by game, copied onto every player of that game,
+  and match the mean over the pool's distinct games on the same seed, map by map.
   The completed-experiment pool holds only strategist seats, so a seat-level
   match would compare them with whichever games put a strategist in that seat.
 
@@ -239,6 +239,14 @@ class WorldAnalysis(BehaviorAnalysis):
         # The heatmap capitalizes the pinned row's label.
         pinned_row = pinned[:1].upper() + pinned[1:]
         world_base = self.baseline_words(views)[1]
+        # In the AI-only world every civ is a baseline civ, so over all seats
+        # the average other civ is the average civ: its per-player World cells
+        # would repeat Player (techs, averaged over survivors only, differ
+        # slightly and are left out too).
+        repeated = set()
+        if views.baseline is not None and views.baseline.in_game_ai:
+            repeated = {m for m in columns.names
+                        if m.startswith(WORLD) and m not in views.per_game}
         self.add_heatmap_views(
             ctx, views, out, slug,
             titles=titles,
@@ -264,6 +272,7 @@ class WorldAnalysis(BehaviorAnalysis):
             emit=emit,
             cell_text=True,
             pinned_label=pinned,
+            pinned_blank=repeated,
         )
 
     def add_paired_matched_maps(self, ctx: AnalysisContext, views: C.BehaviorViews,

@@ -423,9 +423,9 @@ AGENTIC_PREFIX = "agentic."
 # ── world.* (§6.2) ────────────────────────────────────────────────────────────
 # Every world metric has a Player column (the strategist's own civ, matched to
 # the baseline in the same seat on the same map) and a World column: the
-# average over the other civs of the game, matched seat by seat like Player, or
-# for peak wars, game length, and endings the whole game, matched to the
-# baseline's games on the same map. Each entry is
+# average over the other civs of the game, matched seat by seat like Player
+# (world.progress endings describe the whole game instead, matched to the
+# baseline's games on the same map). Each entry is
 # (name, short header, player tip, world tip, player unit, world unit), where a
 # unit is how the relative view compares: "diff" (a difference), "pts" (a
 # difference of percents, in percentage points), or "pct" (a percent change).
@@ -439,7 +439,8 @@ WORLD_CONFLICT_METRICS = {
                             "diff", "diff"),
     "peak_wars": ("Peak wars", "Peak wars",
                   "The most wars the civ was in at once, city-states included.",
-                  "The most wars between civs open at once.", "diff", "diff"),
+                  "The most wars a civ was in at once, averaged over the other civs.",
+                  "diff", "diff"),
     "at_war_share": ("At war", "At war",
                      "Share of the civ's turns alive spent at war with anyone.",
                      "Share of turns alive spent at war with anyone, averaged over the other civs.",
@@ -473,9 +474,9 @@ WORLD_CONFLICT_METRICS = {
                         "Nuclear weapons the civ detonated.",
                         "Nuclear weapons detonated, averaged over the other civs.",
                         "diff", "diff"),
-    "turns": ("Turns", "Turns alive / length",
+    "turns": ("Turns alive", "Turns alive",
               "Turns the civ survived (its last turn with a positive score).",
-              "Game length in turns.", "diff", "diff"),
+              "Turns survived, averaged over the other civs.", "diff", "diff"),
 }
 # Behavior event columns behind world.conflict's event metrics (Player and World).
 WORLD_CONFLICT_EVENTS = (

@@ -253,15 +253,12 @@ class WorldProgress(WorldAnalysis):
         for metric in stocks:
             values[metric] = at[metric].where(alive, 0.0).fillna(0.0)
         values["civs_alive"] = alive.astype(float) * 100.0
-        # Eliminated civs count as 0, so the mean is over all N-1 other civs.
-        world = others_mean(values, metrics)
-        averaged = [m for m in metrics if m in AVERAGED]
-        if averaged:
-            grouped = values.groupby("game_id")
-            other_alive = (grouped["civs_alive"].transform("sum") - values["civs_alive"]) / 100.0
-            for metric in averaged:
-                others = grouped[metric].transform("sum") - values[metric]
-                world[metric] = others / other_alive.where(other_alive > 0)
+        # Eliminated civs count as 0, so the mean is over all N-1 other civs;
+        # blanking them leaves them out of the AVERAGED metrics' mean.
+        world_input = values.copy()
+        for metric in AVERAGED & set(metrics):
+            world_input[metric] = values[metric].where(alive)
+        world = others_mean(world_input, metrics)
         world = world.rename(columns={m: metric_id(WORLD, m, f"@{t}") for m in metrics})
         player = values[keys].copy()
         for metric in metrics:
